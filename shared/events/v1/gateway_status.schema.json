@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/gateway_status.schema.json",
+  "title": "GatewayStatusPayload",
+  "description": "Heartbeat y cambios de estado de la pasarela. Emitido al conectar, al desconectar y periódicamente.",
+  "type": "object",
+  "required": ["status", "transport"],
+  "properties": {
+    "status": { "type": "string", "enum": ["connecting", "connected", "disconnected", "error"] },
+    "transport": { "type": "string", "enum": ["serial", "tcp", "http", "simulated"] },
+    "local_node_id": { "type": ["string", "null"], "description": "ID del nodo central al que está conectada" },
+    "detail": { "type": ["string", "null"], "description": "Mensaje de error u observación" }
+  },
+  "additionalProperties": false
+}

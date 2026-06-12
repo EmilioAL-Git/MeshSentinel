@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/node_seen.schema.json",
+  "title": "NodeSeenPayload",
+  "description": "Payload de 'node.seen': se recibió NodeInfo o cualquier paquete de un nodo.",
+  "type": "object",
+  "required": ["node_id"],
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "description": "ID canónico Meshtastic, p. ej. '!a4e1f2b0'",
+      "pattern": "^![0-9a-f]{8}$"
+    },
+    "node_num": { "type": "integer", "minimum": 0 },
+    "short_name": { "type": ["string", "null"], "maxLength": 8 },
+    "long_name": { "type": ["string", "null"], "maxLength": 64 },
+    "hw_model": { "type": ["string", "null"] },
+    "firmware_version": { "type": ["string", "null"] },
+    "role": { "type": ["string", "null"], "description": "CLIENT, ROUTER, REPEATER, etc." },
+    "snr": { "type": ["number", "null"] },
+    "rssi": { "type": ["integer", "null"] },
+    "hops_away": { "type": ["integer", "null"], "minimum": 0 },
+    "via_mqtt": { "type": "boolean", "default": false },
+    "public_key": { "type": ["string", "null"], "description": "Clave pública PKC en base64, si se conoce" }
+  },
+  "additionalProperties": false
+}

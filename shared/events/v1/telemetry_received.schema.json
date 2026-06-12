@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/telemetry_received.schema.json",
+  "title": "TelemetryReceivedPayload",
+  "type": "object",
+  "required": ["node_id", "kind"],
+  "properties": {
+    "node_id": { "type": "string", "pattern": "^![0-9a-f]{8}$" },
+    "kind": { "type": "string", "enum": ["device", "environment", "power"] },
+    "battery_level": { "type": ["integer", "null"], "minimum": 0, "maximum": 101, "description": "101 = alimentación externa" },
+    "voltage": { "type": ["number", "null"] },
+    "channel_utilization": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "air_util_tx": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "uptime_seconds": { "type": ["integer", "null"], "minimum": 0 },
+    "temperature_c": { "type": ["number", "null"] },
+    "relative_humidity": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "barometric_pressure_hpa": { "type": ["number", "null"] }
+  },
+  "additionalProperties": false
+}

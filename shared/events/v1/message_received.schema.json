@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/message_received.schema.json",
+  "title": "MessageReceivedPayload",
+  "type": "object",
+  "required": ["from_node_id", "text"],
+  "properties": {
+    "from_node_id": { "type": "string", "pattern": "^![0-9a-f]{8}$" },
+    "to_node_id": { "type": ["string", "null"], "description": "null = broadcast" },
+    "channel_index": { "type": "integer", "minimum": 0, "default": 0 },
+    "text": { "type": "string", "maxLength": 512 },
+    "snr": { "type": ["number", "null"] },
+    "hops_away": { "type": ["integer", "null"], "minimum": 0 }
+  },
+  "additionalProperties": false
+}

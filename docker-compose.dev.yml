@@ -1,0 +1,38 @@
+# Desarrollo: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./backend
+    command: ["uvicorn", "noc.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      NOC_ENVIRONMENT: development
+      NOC_LOG_LEVEL: DEBUG
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/alembic:/app/alembic
+    ports:
+      - "8000:8000"
+
+  gateway:
+    environment:
+      GATEWAY_LOG_LEVEL: DEBUG
+    volumes:
+      - ./gateway/src:/app/src
+
+  frontend:
+    image: node:22-alpine
+    build: !reset null
+    working_dir: /app
+    command: ["sh", "-c", "npm install && npm run dev"]
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "5173:5173"

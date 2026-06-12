@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/position_updated.schema.json",
+  "title": "PositionUpdatedPayload",
+  "type": "object",
+  "required": ["node_id", "latitude", "longitude"],
+  "properties": {
+    "node_id": { "type": "string", "pattern": "^![0-9a-f]{8}$" },
+    "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+    "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+    "altitude_m": { "type": ["integer", "null"] },
+    "precision_bits": {
+      "type": ["integer", "null"],
+      "description": "Precisión reducida por configuración de canal; null = desconocida"
+    },
+    "ground_speed_kmh": { "type": ["number", "null"] },
+    "sats_in_view": { "type": ["integer", "null"] },
+    "position_time": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Hora del fix GPS según el nodo; puede diferir del timestamp del sobre"
+    }
+  },
+  "additionalProperties": false
+}

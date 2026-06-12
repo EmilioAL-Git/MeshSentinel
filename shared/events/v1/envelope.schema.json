@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/envelope.schema.json",
+  "title": "EventEnvelope",
+  "description": "Sobre común de todos los eventos gateway -> backend (canal Redis pub/sub 'noc:events').",
+  "type": "object",
+  "required": ["schema_version", "event_type", "event_id", "gateway_id", "timestamp", "payload"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "gateway.status",
+        "node.seen",
+        "position.updated",
+        "telemetry.received",
+        "message.received",
+        "packet.raw"
+      ]
+    },
+    "event_id": { "type": "string", "format": "uuid" },
+    "gateway_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}

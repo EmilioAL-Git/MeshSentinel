@@ -1,0 +1,72 @@
+name: meshtastic-noc
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-noc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-noc}
+      POSTGRES_DB: ${POSTGRES_DB:-noc}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-noc} -d ${POSTGRES_DB:-noc}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      NOC_DATABASE_URL: ${NOC_DATABASE_URL:-postgresql+asyncpg://noc:noc@postgres:5432/noc}
+      NOC_REDIS_URL: redis://redis:6379/0
+      NOC_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway:
+    build: ./gateway
+    environment:
+      GATEWAY_ID: ${GATEWAY_ID:-gw-01}
+      GATEWAY_TRANSPORT: ${GATEWAY_TRANSPORT:-simulated}
+      GATEWAY_SERIAL_DEVICE: ${GATEWAY_SERIAL_DEVICE:-/dev/ttyUSB0}
+      GATEWAY_TCP_HOST: ${GATEWAY_TCP_HOST:-}
+      GATEWAY_TCP_PORT: ${GATEWAY_TCP_PORT:-4403}
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Para transporte serial, descomentar y ajustar (ver docs/operations/usb.md):
+    # devices:
+    #   - "/dev/ttyUSB0:/dev/ttyUSB0"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${NOC_HTTP_PORT:-8080}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
