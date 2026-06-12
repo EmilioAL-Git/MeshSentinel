@@ -4,10 +4,11 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from noc.adapters.api.routers import gateways, health, nodes, system
+from noc.adapters.api.routers import dashboard, gateways, health, nodes, system
 from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
+from noc.application.dashboard import DashboardService
 from noc.application.ingest import IngestService
 from noc.config import get_settings
 
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logging.basicConfig(level=settings.log_level)
 
     app.state.db = Database(settings.database_url)
+    app.state.dashboard = DashboardService(app.state.db.session_factory, settings)
     app.state.event_bus = RedisEventBus(settings.redis_url, settings.events_channel)
     ingest = IngestService(app.state.db.session_factory)
     app.state.event_bus.subscribe(ingest.handle_event)
@@ -47,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(nodes.router, prefix=settings.api_v1_prefix)
     app.include_router(gateways.router, prefix=settings.api_v1_prefix)
     app.include_router(system.router, prefix=settings.api_v1_prefix)
+    app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app
 

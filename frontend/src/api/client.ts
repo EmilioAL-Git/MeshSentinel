@@ -84,6 +84,48 @@ export const fetchNodeTelemetry = (id: string, limit = 50) =>
   get<TelemetryOut[]>(`/nodes/${encodeURIComponent(id)}/telemetry?limit=${limit}`);
 export const fetchGateways = () => get<GatewayOut[]>("/gateways");
 
+export interface ThresholdsOut {
+  low_battery_percent: number;
+  offline_minutes_warning: number;
+  offline_percent_warning: number;
+  offline_percent_critical: number;
+  snr_degraded_db: number;
+  node_offline_after_seconds: number;
+}
+
+export type CriticalReason = "low_battery" | "inactive" | "degraded_snr";
+
+export interface CriticalNodeOut {
+  node_id: string;
+  short_name: string | null;
+  long_name: string | null;
+  reasons: CriticalReason[];
+  battery_level: number | null;
+  snr: number | null;
+  last_seen_at: string | null;
+  online: boolean;
+}
+
+export interface DashboardSummaryOut {
+  status: "HEALTHY" | "WARNING" | "CRITICAL";
+  generated_at: string;
+  nodes_total: number;
+  nodes_online: number;
+  nodes_offline: number;
+  offline_percent: number;
+  gateways_total: number;
+  gateways_connected: number;
+  low_battery_count: number;
+  avg_battery_percent: number | null;
+  avg_seconds_since_last_seen: number | null;
+  events_last_hour: number;
+  critical_nodes: CriticalNodeOut[];
+  gateways: GatewayOut[];
+  thresholds: ThresholdsOut;
+}
+
+export const fetchDashboardSummary = () => get<DashboardSummaryOut>("/dashboard/summary");
+
 export interface NocEvent {
   schema_version: number;
   event_type: string;

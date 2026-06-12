@@ -129,6 +129,12 @@ class SqlPositionRepository:
         )
         return [_to_entity(r, Position) for r in rows]
 
+    async def count_since(self, since: datetime) -> int:
+        result = await self._session.scalar(
+            select(func.count()).select_from(PositionModel).where(PositionModel.received_at >= since)
+        )
+        return int(result or 0)
+
 
 class SqlTelemetryRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -146,6 +152,12 @@ class SqlTelemetryRepository:
             stmt = stmt.where(TelemetryModel.kind == kind)
         rows = await self._session.scalars(stmt.order_by(TelemetryModel.received_at.desc()).limit(limit))
         return [_to_entity(r, Telemetry) for r in rows]
+
+    async def count_since(self, since: datetime) -> int:
+        result = await self._session.scalar(
+            select(func.count()).select_from(TelemetryModel).where(TelemetryModel.received_at >= since)
+        )
+        return int(result or 0)
 
 
 class SqlGatewayRepository:

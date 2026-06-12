@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Request
@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.api.routers.health import ComponentStatus, _check
 from noc.adapters.persistence.repositories import SqlGatewayRepository
+from noc.application.dashboard import is_stale
 from noc.config import get_settings
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -38,14 +39,6 @@ class VersionResponse(BaseModel):
     events_schema_version: int = 1
 
 
-def _is_stale(updated_at: datetime | None, threshold_seconds: int) -> bool:
-    if updated_at is None:
-        return True
-    if updated_at.tzinfo is None:  # SQLite devuelve naive; se persiste siempre UTC
-        updated_at = updated_at.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - updated_at).total_seconds() > threshold_seconds
-
-
 @router.get("/health", response_model=SystemHealthResponse)
 async def system_health(request: Request, session: SessionDep) -> SystemHealthResponse:
     settings = get_settings()
@@ -55,7 +48,7 @@ async def system_health(request: Request, session: SessionDep) -> SystemHealthRe
     gateways = []
     if db.status == "ok":
         for g in await SqlGatewayRepository(session).list_all():
-            stale = _is_stale(g.updated_at, settings.gateway_stale_after_seconds)
+            stale = is_stale(g.updated_at, settings.gateway_stale_after_seconds)
             gateways.append(
                 GatewayHealth(
                     gateway_id=g.gateway_id,

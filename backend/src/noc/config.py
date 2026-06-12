@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +28,25 @@ class Settings(BaseSettings):
     # Una pasarela se considera caída sin latido en este intervalo
     # (el gateway emite gateway.status cada GATEWAY_STATUS_INTERVAL_SECONDS=30)
     gateway_stale_after_seconds: int = 90
+
+    # ── Umbrales del Dashboard NOC (Fase 3B) ─────────────────────────
+    low_battery_threshold: int = Field(
+        default=20, validation_alias=AliasChoices("LOW_BATTERY_THRESHOLD", "NOC_LOW_BATTERY_THRESHOLD")
+    )
+    offline_minutes_warning: int = Field(
+        default=30, validation_alias=AliasChoices("OFFLINE_MINUTES_WARNING", "NOC_OFFLINE_MINUTES_WARNING")
+    )
+    offline_percent_warning: float = Field(
+        default=5, validation_alias=AliasChoices("OFFLINE_PERCENT_WARNING", "NOC_OFFLINE_PERCENT_WARNING")
+    )
+    offline_percent_critical: float = Field(
+        default=20,
+        validation_alias=AliasChoices("OFFLINE_PERCENT_CRITICAL", "NOC_OFFLINE_PERCENT_CRITICAL"),
+    )
+    snr_degraded_threshold: float = Field(
+        default=-15, validation_alias=AliasChoices("SNR_DEGRADED_THRESHOLD", "NOC_SNR_DEGRADED_THRESHOLD")
+    )
+    dashboard_cache_seconds: float = 5.0
 
     api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = []
