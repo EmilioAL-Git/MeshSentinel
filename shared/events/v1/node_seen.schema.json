@@ -21,7 +21,12 @@
     "rssi": { "type": ["integer", "null"] },
     "hops_away": { "type": ["integer", "null"], "minimum": 0 },
     "via_mqtt": { "type": "boolean", "default": false },
-    "public_key": { "type": ["string", "null"], "description": "Clave pública PKC en base64, si se conoce" }
+    "public_key": { "type": ["string", "null"], "description": "Clave pública PKC en base64, si se conoce" },
+    "last_heard": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Última escucha real según la fuente (p. ej. NodeDB del dispositivo). Puede ser muy anterior al timestamp del sobre; ausente/null = el avistamiento es en vivo"
+    }
   },
   "additionalProperties": false
 }

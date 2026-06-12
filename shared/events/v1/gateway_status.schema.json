@@ -7,7 +7,7 @@
   "required": ["status", "transport"],
   "properties": {
     "status": { "type": "string", "enum": ["connecting", "connected", "disconnected", "error"] },
-    "transport": { "type": "string", "enum": ["serial", "tcp", "http", "simulated"] },
+    "transport": { "type": "string", "enum": ["usb", "serial", "tcp", "http", "simulated"] },
     "local_node_id": { "type": ["string", "null"], "description": "ID del nodo central al que está conectada" },
     "detail": { "type": ["string", "null"], "description": "Mensaje de error u observación" }
   },

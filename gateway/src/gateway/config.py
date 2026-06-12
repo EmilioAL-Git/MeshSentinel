@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,11 +11,34 @@ class Settings(BaseSettings):
     gateway_id: str = "gw-01"
     log_level: str = "INFO"
 
-    transport: Literal["serial", "tcp", "http", "simulated"] = "simulated"
-    serial_device: str = "/dev/ttyUSB0"
+    transport: Literal["usb", "tcp", "http", "simulated"] = "simulated"
     tcp_host: str = ""
     tcp_port: int = 4403
     http_url: str = ""
+
+    # USB (librería oficial; sin baudrate: lo gestiona la propia librería)
+    # Vacío = autodetección con meshtastic.util.findPorts()
+    usb_device: str = Field(
+        default="", validation_alias=AliasChoices("MESHTASTIC_USB_DEVICE", "GATEWAY_USB_DEVICE")
+    )
+    reconnect_initial_delay: float = Field(
+        default=5.0,
+        validation_alias=AliasChoices(
+            "MESHTASTIC_RECONNECT_INITIAL_DELAY", "GATEWAY_RECONNECT_INITIAL_DELAY"
+        ),
+    )
+    reconnect_max_delay: float = Field(
+        default=300.0,
+        validation_alias=AliasChoices(
+            "MESHTASTIC_RECONNECT_MAX_DELAY", "GATEWAY_RECONNECT_MAX_DELAY"
+        ),
+    )
+
+    @field_validator("transport", mode="before")
+    @classmethod
+    def _transport_aliases(cls, v: str) -> str:
+        aliases = {"simulator": "simulated", "serial": "usb"}
+        return aliases.get(str(v).lower(), str(v).lower())
 
     redis_url: str = "redis://redis:6379/0"
     events_channel: str = "noc:events"

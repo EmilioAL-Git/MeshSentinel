@@ -50,7 +50,9 @@ services:
     environment:
       GATEWAY_ID: ${GATEWAY_ID:-gw-01}
       GATEWAY_TRANSPORT: ${GATEWAY_TRANSPORT:-simulated}
-      GATEWAY_SERIAL_DEVICE: ${GATEWAY_SERIAL_DEVICE:-/dev/ttyUSB0}
+      MESHTASTIC_USB_DEVICE: ${MESHTASTIC_USB_DEVICE:-}
+      MESHTASTIC_RECONNECT_INITIAL_DELAY: ${MESHTASTIC_RECONNECT_INITIAL_DELAY:-5}
+      MESHTASTIC_RECONNECT_MAX_DELAY: ${MESHTASTIC_RECONNECT_MAX_DELAY:-300}
       GATEWAY_TCP_HOST: ${GATEWAY_TCP_HOST:-}
       GATEWAY_TCP_PORT: ${GATEWAY_TCP_PORT:-4403}
       GATEWAY_REDIS_URL: redis://redis:6379/0
@@ -58,9 +60,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    # Para transporte serial, descomentar y ajustar (ver docs/operations/usb.md):
+    # Para GATEWAY_TRANSPORT=usb, descomentar y ajustar al dispositivo real
+    # (ver docs/operations/usb.md y docs/acceptance/usb.md). No usar
+    # privileged: true — mapear el dispositivo concreto es suficiente.
     # devices:
-    #   - "/dev/ttyUSB0:/dev/ttyUSB0"
+    #   - "/dev/ttyACM0:/dev/ttyACM0"
     restart: unless-stopped
 
   frontend:
