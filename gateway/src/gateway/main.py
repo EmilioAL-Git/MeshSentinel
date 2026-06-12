@@ -25,9 +25,16 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
 
+    async def heartbeat() -> None:
+        # Permite al backend detectar pasarelas caídas por ausencia de latido
+        while True:
+            await asyncio.sleep(settings.status_interval_seconds)
+            await transport.emit_status()
+
     tasks = [
         asyncio.create_task(transport.run(), name="transport"),
         asyncio.create_task(consumer.run(), name="commands"),
+        asyncio.create_task(heartbeat(), name="heartbeat"),
     ]
     logger.info("Gateway %s started (transport=%s)", settings.gateway_id, settings.transport)
 

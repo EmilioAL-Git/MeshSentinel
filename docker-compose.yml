@@ -29,7 +29,11 @@ services:
     restart: unless-stopped
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     environment:
       NOC_DATABASE_URL: ${NOC_DATABASE_URL:-postgresql+asyncpg://noc:noc@postgres:5432/noc}
       NOC_REDIS_URL: redis://redis:6379/0

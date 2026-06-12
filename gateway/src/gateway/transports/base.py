@@ -17,6 +17,19 @@ class Transport(ABC):
 
     def __init__(self, emit: EmitFn) -> None:
         self._emit = emit
+        self.status: str = "connecting"
+        self.local_node_id: str | None = None
+
+    async def emit_status(self, detail: str | None = None) -> None:
+        await self._emit(
+            "gateway.status",
+            {
+                "status": self.status,
+                "transport": self.name,
+                "local_node_id": self.local_node_id,
+                "detail": detail,
+            },
+        )
 
     @abstractmethod
     async def run(self) -> None:

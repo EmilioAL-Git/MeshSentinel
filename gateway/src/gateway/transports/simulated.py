@@ -63,10 +63,9 @@ class SimulatedTransport(Transport):
         return nodes
 
     async def run(self) -> None:
-        await self._emit(
-            "gateway.status",
-            {"status": "connected", "transport": self.name, "local_node_id": self._nodes[0].node_id, "detail": None},
-        )
+        self.status = "connected"
+        self.local_node_id = self._nodes[0].node_id
+        await self.emit_status()
         for node in self._nodes:
             await self._announce(node)
 
@@ -133,7 +132,5 @@ class SimulatedTransport(Transport):
 
     async def close(self) -> None:
         self._closed.set()
-        await self._emit(
-            "gateway.status",
-            {"status": "disconnected", "transport": self.name, "local_node_id": None, "detail": "shutdown"},
-        )
+        self.status = "disconnected"
+        await self.emit_status(detail="shutdown")

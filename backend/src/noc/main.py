@@ -4,7 +4,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from noc.adapters.api.routers import gateways, health, nodes
+from noc.adapters.api.routers import gateways, health, nodes, system
 from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
@@ -38,7 +38,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title=settings.app_name,
-        version="0.1.0",
+        version=settings.version,
         lifespan=lifespan,
         docs_url=f"{settings.api_v1_prefix}/docs",
         openapi_url=f"{settings.api_v1_prefix}/openapi.json",
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix=settings.api_v1_prefix)
     app.include_router(nodes.router, prefix=settings.api_v1_prefix)
     app.include_router(gateways.router, prefix=settings.api_v1_prefix)
+    app.include_router(system.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app
 
