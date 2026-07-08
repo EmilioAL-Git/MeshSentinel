@@ -186,6 +186,46 @@ async def test_rate_limit_budget(session_factory):
     assert len(queue.sent) == 1
 
 
+# ── Regresiones de la API (bugs encontrados en validación M1.1) ──────────────
+
+
+async def test_capabilities_endpoint_serializes_slots_dataclass():
+    """Regresión: OperationSpec usa slots=True (sin __dict__) — debe usarse asdict."""
+    from noc.adapters.api.routers.admin import capabilities
+
+    caps = await capabilities()
+    assert {c.operation_type for c in caps} == {
+        "metadata.get", "nodeinfo.get", "config.get", "module_config.get"
+    }
+    assert "section" in next(c for c in caps if c.operation_type == "config.get").param_choices
+
+
+async def test_create_operation_endpoint_after_implicit_transaction(session_factory):
+    """Regresión: el SELECT del nodo abre transacción implícita; el
+    session.begin() posterior rompía con 'transaction already begun' (500)."""
+    from noc.adapters.api.routers.admin import OperationIn, create_operation
+
+    ingest = IngestService(session_factory)
+    await ingest.handle_event(
+        {
+            "schema_version": 1,
+            "event_type": "node.seen",
+            "event_id": str(uuid.uuid4()),
+            "gateway_id": "gw-test",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": {"node_id": NODE},
+        }
+    )
+    async with session_factory() as session:
+        out = await create_operation(
+            OperationIn(node_id=NODE, operation_type="nodeinfo.get"), session
+        )
+    assert out.status == "pending"
+    assert out.gateway_id == "gw-test"
+    # Persistida de verdad (commit efectivo)
+    assert (await get_op(session_factory, out.id)).operation_type == "nodeinfo.get"
+
+
 async def test_node_ingest_supports_pipeline(session_factory):
     """El registry conoce el gateway del nodo: base para enrutar operaciones."""
     ingest = IngestService(session_factory)

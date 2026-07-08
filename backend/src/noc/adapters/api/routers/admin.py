@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Literal
 
@@ -59,7 +60,7 @@ class OperationOut(BaseModel):
 
 @router.get("/capabilities", response_model=list[CapabilityOut])
 async def capabilities() -> list[CapabilityOut]:
-    return [CapabilityOut(**spec.__dict__) for spec in OPERATIONS.values()]
+    return [CapabilityOut(**asdict(spec)) for spec in OPERATIONS.values()]
 
 
 @router.post("/operations", response_model=OperationOut, status_code=201)
@@ -70,24 +71,26 @@ async def create_operation(body: OperationIn, session: SessionDep) -> OperationO
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # El SELECT del nodo ya abre la transacción implícita de la sesión, por lo
+    # que aquí NO puede usarse session.begin(): se cierra con commit()
     node = await SqlNodeRepository(session).get(body.node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found in registry")
     if not node.gateway_id:
         raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
 
-    async with session.begin():
-        op = await SqlAdminOperationRepository(session).create(
-            AdminOperation(
-                target_node_id=body.node_id,
-                gateway_id=node.gateway_id,
-                operation_type=body.operation_type,
-                params=params,
-                timeout_seconds=body.timeout_seconds or settings.admin_default_timeout_seconds,
-                max_attempts=body.max_attempts or settings.admin_max_attempts,
-                created_by="admin",  # RBAC futuro: el campo ya viaja (diseño §8)
-            )
+    op = await SqlAdminOperationRepository(session).create(
+        AdminOperation(
+            target_node_id=body.node_id,
+            gateway_id=node.gateway_id,
+            operation_type=body.operation_type,
+            params=params,
+            timeout_seconds=body.timeout_seconds or settings.admin_default_timeout_seconds,
+            max_attempts=body.max_attempts or settings.admin_max_attempts,
+            created_by="admin",  # RBAC futuro: el campo ya viaja (diseño §8)
         )
+    )
+    await session.commit()
     return OperationOut.from_entity(op)
 
 
