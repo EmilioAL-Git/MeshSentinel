@@ -19,7 +19,8 @@ from gateway.transports.base import EmitFn, Transport
 
 logger = logging.getLogger("gateway.usb")
 
-_DISCONNECT = object()  # centinela en la cola: el hilo lector reportó pérdida de conexión
+# Centinela de cierre forzoso (close() del transporte): termina el pump siempre
+_FORCE_DISCONNECT = object()
 
 
 class MeshtasticUsbTransport(Transport):
@@ -50,9 +51,13 @@ class MeshtasticUsbTransport(Transport):
     def _on_receive(self, packet: dict[str, Any], interface: Any) -> None:  # noqa: ARG002
         self._enqueue(("packet", packet))
 
-    def _on_connection_lost(self, interface: Any) -> None:  # noqa: ARG002
+    def _on_connection_lost(self, interface: Any) -> None:
+        # OJO: iface.close() también dispara connection.lost (el hilo lector al
+        # salir llama a _disconnected). El evento va etiquetado con SU interface
+        # para que el pump ignore desconexiones de conexiones anteriores; sin
+        # esto, cada reconexión tumbaba la conexión nueva en bucle perpetuo.
         logger.warning("usb.connection_lost device=%s", getattr(interface, "devPath", "?"))
-        self._enqueue(_DISCONNECT)
+        self._enqueue(("disconnect", interface))
 
     # ── Conexión (bloqueante, ejecutada con to_thread) ──────────────────────
 
@@ -105,6 +110,8 @@ class MeshtasticUsbTransport(Transport):
             await self._pump_events()  # hasta desconexión o cierre
 
             await asyncio.to_thread(self._close_iface)
+            self._fail_pending_admin("connection lost during operation")
+            self._drain_queue()  # descarta paquetes/eventos de la conexión muerta
             if not self._closed.is_set():
                 self.status = "disconnected"
                 await self.emit_status(detail="connection lost, reconnecting")
@@ -133,14 +140,35 @@ class MeshtasticUsbTransport(Transport):
         local_id = (my_info.get("user") or {}).get("id")
         return (local_id.lower() if isinstance(local_id, str) else None), nodes
 
+    def _fail_pending_admin(self, reason: str) -> None:
+        """Falla las operaciones admin en vuelo sin esperar su timeout completo."""
+        for key, future in list(self._admin_waiters.items()):
+            if not future.done():
+                future.set_exception(ConnectionError(reason))
+            self._admin_waiters.pop(key, None)
+
+    def _drain_queue(self) -> None:
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+
     async def _pump_events(self) -> None:
         while not self._closed.is_set():
             item = await self._queue.get()
-            if item is _DISCONNECT:
+            if item is _FORCE_DISCONNECT:
                 return
-            kind, packet = item
+            kind, payload = item
+            if kind == "disconnect":
+                if payload is self._iface:
+                    return
+                logger.debug("usb.stale_disconnect ignored (previous interface)")
+                self._counters["stale_disconnects"] += 1
+                continue
             if kind != "packet":
                 continue
+            packet = payload
             if self._resolve_admin_response(packet):
                 continue
             try:
@@ -209,6 +237,12 @@ class MeshtasticUsbTransport(Transport):
 
         if self.status != "connected" or self._iface is None or self._loop is None:
             raise ConnectionError("USB transport not connected")
+        # El enlace puede haberse caído sin que el pump lo haya procesado aún:
+        # comprobar el estado real de la librería evita bloquear 30 s en
+        # _waitConnected() y devuelve un error accionable (el backend reintenta)
+        lib_connected = getattr(self._iface, "isConnected", None)
+        if lib_connected is not None and not lib_connected.is_set():
+            raise ConnectionError("USB link not ready (device disconnected or reconnecting)")
         node_id = str(operation["target_node_id"]).lower()
         message, response_key = build_admin_request(
             operation["operation_type"], operation.get("params") or {}
@@ -232,7 +266,7 @@ class MeshtasticUsbTransport(Transport):
 
     async def close(self) -> None:
         self._closed.set()
-        self._enqueue(_DISCONNECT)  # desbloquea _pump_events si estaba esperando
+        self._enqueue(_FORCE_DISCONNECT)  # desbloquea _pump_events si estaba esperando
         await asyncio.to_thread(self._close_iface)
         self.status = "disconnected"
         await self.emit_status(detail="shutdown")
