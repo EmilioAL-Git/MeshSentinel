@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { CriticalNodeOut, CriticalReason, DashboardSummaryOut } from "../api/client";
+import type { CriticalNodeOut, CriticalReason, DashboardSummaryOut, NodeSummaryOut } from "../api/client";
 import { styles } from "../styles";
 import type { ActivityEntry } from "../activity";
 
@@ -7,6 +7,7 @@ interface Props {
   summary: DashboardSummaryOut | undefined;
   loading: boolean;
   activity: ActivityEntry[];
+  favorites: NodeSummaryOut[];
   onNavigate: (view: "nodes" | "map") => void;
   onShowDetail: (nodeId: string) => void;
 }
@@ -80,7 +81,7 @@ function CriticalRow({ node, onShowDetail }: { node: CriticalNodeOut; onShowDeta
   );
 }
 
-export function Dashboard({ summary, loading, activity, onNavigate, onShowDetail }: Props) {
+export function Dashboard({ summary, loading, activity, favorites, onNavigate, onShowDetail }: Props) {
   if (loading || !summary) {
     return <div style={styles.card}>Cargando resumen de la red…</div>;
   }
@@ -112,6 +113,31 @@ export function Dashboard({ summary, loading, activity, onNavigate, onShowDetail
           <button onClick={() => onNavigate("map")} style={quickBtn}>Mapa</button>
         </span>
       </div>
+
+      {/* Acceso rápido a favoritos (M1.2) */}
+      {favorites.length > 0 && (
+        <div style={{ ...styles.card, display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ color: "#e3b341" }}>★ Favoritos:</span>
+          {favorites.map((f) => (
+            <button
+              key={f.node.node_id}
+              onClick={() => onShowDetail(f.node.node_id)}
+              style={{
+                background: "transparent",
+                border: "1px solid #30363d",
+                color: "#e6edf3",
+                borderRadius: 12,
+                padding: "0.15rem 0.7rem",
+                cursor: "pointer",
+                fontSize: "0.85rem",
+              }}
+            >
+              <span style={f.node.online ? styles.ok : styles.bad}>●</span>{" "}
+              {f.node.short_name ?? f.node.node_id}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Tarjetas resumen */}
       <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginBottom: "1rem" }}>

@@ -13,8 +13,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from noc.adapters.persistence.models import GatewayModel, NodeModel, PositionModel, TelemetryModel
-from noc.domain.nodes.entities import GatewayInfo, Node, NodeSummary, Position, Telemetry
+from noc.adapters.persistence.models import (
+    GatewayModel,
+    GroupMemberModel,
+    NodeModel,
+    NodeTagModel,
+    PositionModel,
+    TagModel,
+    TelemetryModel,
+)
+from noc.domain.nodes.entities import GatewayInfo, Node, NodeSummary, Position, Tag, Telemetry
 
 T = TypeVar("T")
 
@@ -81,6 +89,15 @@ class SqlNodeRepository:
         model = await self._session.get(NodeModel, node_id)
         return _node_entity(model) if model else None
 
+    async def set_flag(self, node_id: str, flag: str, value: bool) -> Node | None:
+        assert flag in ("is_favorite", "is_ignored")
+        model = await self._session.get(NodeModel, node_id)
+        if model is None:
+            return None
+        setattr(model, flag, value)
+        await self._session.flush()
+        return _node_entity(model)
+
     async def list_summaries(self) -> list[NodeSummary]:
         nodes = (await self._session.scalars(select(NodeModel).order_by(NodeModel.last_seen_at.desc()))).all()
 
@@ -89,11 +106,26 @@ class SqlNodeRepository:
             t.node_id: t
             for t in await self._latest_per_node(TelemetryModel, TelemetryModel.kind == "device")
         }
+
+        tags_by_node: dict[str, list[Tag]] = {}
+        tag_rows = await self._session.execute(
+            select(NodeTagModel.node_id, TagModel).join(TagModel, TagModel.id == NodeTagModel.tag_id)
+        )
+        for node_id, tag in tag_rows:
+            tags_by_node.setdefault(node_id, []).append(Tag(id=tag.id, name=tag.name, color=tag.color))
+
+        groups_by_node: dict[str, list[int]] = {}
+        member_rows = await self._session.execute(select(GroupMemberModel.node_id, GroupMemberModel.group_id))
+        for node_id, group_id in member_rows:
+            groups_by_node.setdefault(node_id, []).append(group_id)
+
         return [
             NodeSummary(
                 node=_node_entity(n),
                 last_position=_to_entity(latest_pos[n.id], Position) if n.id in latest_pos else None,
                 last_device_telemetry=_to_entity(latest_tel[n.id], Telemetry) if n.id in latest_tel else None,
+                tags=tags_by_node.get(n.id, []),
+                group_ids=groups_by_node.get(n.id, []),
             )
             for n in nodes
         ]

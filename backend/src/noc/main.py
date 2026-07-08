@@ -7,7 +7,16 @@ from fastapi import FastAPI
 import uuid
 from datetime import datetime, timezone
 
-from noc.adapters.api.routers import admin, alerts, dashboard, gateways, health, nodes, system
+from noc.adapters.api.routers import (
+    admin,
+    alerts,
+    dashboard,
+    gateways,
+    health,
+    nodes,
+    organization,
+    system,
+)
 from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.events.redis_bus import RedisEventBus
@@ -100,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
     app.include_router(alerts.router, prefix=settings.api_v1_prefix)
     app.include_router(admin.router, prefix=settings.api_v1_prefix)
+    app.include_router(organization.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app
 

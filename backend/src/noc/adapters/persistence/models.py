@@ -47,6 +47,41 @@ class NodeModel(Base):
     gateway_id: Mapped[str | None] = mapped_column(String(64))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # Metadatos del NOC (M1.2) — nunca provienen de la malla ni la modifican
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_ignored: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class TagModel(Base):
+    __tablename__ = "tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    color: Mapped[str | None] = mapped_column(String(16))
+
+
+class NodeTagModel(Base):
+    __tablename__ = "node_tags"
+
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True)
+    tag_id: Mapped[int] = mapped_column(ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True)
+
+
+class GroupModel(Base):
+    __tablename__ = "groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    kind: Mapped[str] = mapped_column(String(16), default="static")
+    filter_expr: Mapped[str | None] = mapped_column(Text)
+    is_critical: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GroupMemberModel(Base):
+    __tablename__ = "group_members"
+
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True)
 
 
 class PositionModel(Base):

@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from noc.domain.nodes.entities import GatewayInfo, Node, NodeSummary, Position, Telemetry
+from noc.domain.nodes.entities import GatewayInfo, Node, NodeSummary, Position, Tag, Telemetry
 
 
 class PositionOut(BaseModel):
@@ -55,6 +55,8 @@ class NodeOut(BaseModel):
     gateway_id: str | None
     first_seen_at: datetime | None
     last_seen_at: datetime | None
+    is_favorite: bool
+    is_ignored: bool
     online: bool
 
     @classmethod
@@ -63,10 +65,22 @@ class NodeOut(BaseModel):
         return cls(**data, online=n.is_online(online_threshold))
 
 
+class TagOut(BaseModel):
+    id: int
+    name: str
+    color: str | None
+
+    @classmethod
+    def from_entity(cls, t: Tag) -> "TagOut":
+        return cls(id=t.id or 0, name=t.name, color=t.color)
+
+
 class NodeSummaryOut(BaseModel):
     node: NodeOut
     last_position: PositionOut | None
     last_device_telemetry: TelemetryOut | None
+    tags: list[TagOut]
+    group_ids: list[int]
 
     @classmethod
     def from_entity(cls, s: NodeSummary, online_threshold: int) -> "NodeSummaryOut":
@@ -76,6 +90,8 @@ class NodeSummaryOut(BaseModel):
             last_device_telemetry=(
                 TelemetryOut.from_entity(s.last_device_telemetry) if s.last_device_telemetry else None
             ),
+            tags=[TagOut.from_entity(t) for t in s.tags],
+            group_ids=s.group_ids,
         )
 
 

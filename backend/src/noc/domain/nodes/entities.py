@@ -1,6 +1,6 @@
 """Entidades del Node Registry. Sin dependencias de infraestructura."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 
@@ -21,6 +21,9 @@ class Node:
     gateway_id: str | None = None
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
+    # Metadatos del NOC (M1.2): solo BD propia, nunca tocan la malla
+    is_favorite: bool = False
+    is_ignored: bool = False
 
     def is_online(self, threshold_seconds: int, now: datetime | None = None) -> bool:
         if self.last_seen_at is None:
@@ -72,9 +75,27 @@ class GatewayInfo:
 
 
 @dataclass(slots=True)
+class Tag:
+    name: str
+    color: str | None = None
+    id: int | None = None
+
+
+@dataclass(slots=True)
+class Group:
+    name: str
+    kind: str = "static"
+    is_critical: bool = False
+    member_count: int = 0
+    id: int | None = None
+
+
+@dataclass(slots=True)
 class NodeSummary:
     """Vista agregada para el listado del NOC: nodo + últimos datos conocidos."""
 
     node: Node
     last_position: Position | None = None
     last_device_telemetry: Telemetry | None = None
+    tags: list[Tag] = field(default_factory=list)
+    group_ids: list[int] = field(default_factory=list)

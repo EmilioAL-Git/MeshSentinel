@@ -3,6 +3,7 @@ import { useMemo, useState, type CSSProperties } from "react";
 import {
   cancelOperation,
   createOperation,
+  displayName,
   fetchCapabilities,
   fetchOperations,
   retryOperation,
@@ -67,7 +68,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
 
   const nodeName = (id: string) => {
     const s = summaries.find((x) => x.node.node_id === id);
-    return s?.node.short_name ? `${s.node.short_name} (${id})` : id;
+    return s ? displayName(s.node) : id;
   };
 
   return (
@@ -79,7 +80,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
             <option value="">— nodo —</option>
             {summaries.map((s) => (
               <option key={s.node.node_id} value={s.node.node_id}>
-                {s.node.short_name ?? "?"} · {s.node.node_id} {s.node.online ? "· online" : "· offline"}
+                {displayName(s.node)} {s.node.online ? "· online" : "· offline"}
               </option>
             ))}
           </select>

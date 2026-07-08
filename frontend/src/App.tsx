@@ -1,20 +1,26 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
 import {
   fetchAlerts,
   fetchDashboardSummary,
   fetchGateways,
+  fetchGroups,
   fetchHealth,
   fetchNodes,
+  fetchTags,
   openEventsSocket,
+  setNodeFavorite,
+  setNodeIgnored,
+  type NodeFilterParams,
 } from "./api/client";
 import { AlertsView } from "./components/AlertsView";
 import { Dashboard } from "./components/Dashboard";
-import { OperationsView } from "./components/OperationsView";
 import { MapView } from "./components/MapView";
 import { NodeDetail } from "./components/NodeDetail";
+import { NodeFiltersBar } from "./components/NodeFiltersBar";
 import { NodesTable } from "./components/NodesTable";
+import { OperationsView } from "./components/OperationsView";
 import { styles } from "./styles";
 
 const DATA_EVENTS = new Set([
@@ -51,7 +57,17 @@ function NavTab({ active, label, onClick }: { active: boolean; label: string; on
 export default function App() {
   const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, refetchInterval: 15_000 });
-  const nodes = useQuery({ queryKey: ["nodes"], queryFn: fetchNodes, refetchInterval: 30_000 });
+  // Query base (sin ignorados): la usan Mapa, Dashboard, Operaciones y el feed
+  const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes(), refetchInterval: 30_000 });
+  const [filters, setFilters] = useState<NodeFilterParams>({});
+  // Query filtrada para la vista Nodos (búsqueda avanzada M1.2)
+  const filteredNodes = useQuery({
+    queryKey: ["nodes", filters],
+    queryFn: () => fetchNodes(filters),
+    refetchInterval: 30_000,
+  });
+  const tags = useQuery({ queryKey: ["tags"], queryFn: fetchTags });
+  const groups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
   const gateways = useQuery({ queryKey: ["gateways"], queryFn: fetchGateways, refetchInterval: 30_000 });
   const dashboard = useQuery({
     queryKey: ["dashboard"],
@@ -121,8 +137,27 @@ export default function App() {
   }, [queryClient]);
 
   const summaries = nodes.data ?? [];
-  const onlineCount = summaries.filter((s) => s.node.online).length;
+  const filteredSummaries = filteredNodes.data ?? [];
+  const onlineCount = filteredSummaries.filter((s) => s.node.online).length;
   const activeAlertCount = (alerts.data ?? []).filter((a) => a.status !== "resolved").length;
+  const favorites = summaries.filter((s) => s.node.is_favorite);
+  const hwModels = useMemo(
+    () => [...new Set(summaries.map((s) => s.node.hw_model).filter((h): h is string => h != null))].sort(),
+    [summaries],
+  );
+
+  const invalidateNodeData = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["nodes"] });
+    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  }, [queryClient]);
+  const toggleFavorite = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) => setNodeFavorite(id, value),
+    onSettled: invalidateNodeData,
+  });
+  const toggleIgnored = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) => setNodeIgnored(id, value),
+    onSettled: invalidateNodeData,
+  });
 
   const gatewayNodeIds = useMemo(
     () =>
@@ -138,6 +173,10 @@ export default function App() {
     setSelected(nodeId);
     setView("nodes");
   }, []);
+
+  const selectedSummary =
+    filteredSummaries.find((s) => s.node.node_id === selected) ??
+    summaries.find((s) => s.node.node_id === selected);
 
   return (
     <div style={styles.page}>
@@ -171,6 +210,7 @@ export default function App() {
           summary={dashboard.data}
           loading={dashboard.isLoading}
           activity={activity}
+          favorites={favorites}
           onNavigate={setView}
           onShowDetail={showDetail}
         />
@@ -188,18 +228,34 @@ export default function App() {
         <div style={selected ? styles.layout : undefined}>
           <div style={styles.card}>
             <h2 style={{ marginTop: 0 }}>
-              Nodos descubiertos <span style={styles.dim}>({onlineCount} online)</span>
+              Nodos <span style={styles.dim}>({filteredSummaries.length} · {onlineCount} online)</span>
             </h2>
-            {nodes.isLoading && <p>Cargando…</p>}
-            {nodes.isError && <p style={styles.bad}>Error consultando la API</p>}
-            {summaries.length === 0 && !nodes.isLoading && (
-              <p style={styles.dim}>Aún no se ha descubierto ningún nodo. Esperando eventos de la pasarela…</p>
+            <NodeFiltersBar
+              filters={filters}
+              onChange={setFilters}
+              tags={tags.data ?? []}
+              groups={groups.data ?? []}
+              gateways={gateways.data ?? []}
+              hwModels={hwModels}
+            />
+            {filteredNodes.isLoading && <p>Cargando…</p>}
+            {filteredNodes.isError && <p style={styles.bad}>Error consultando la API</p>}
+            {filteredSummaries.length === 0 && !filteredNodes.isLoading && (
+              <p style={styles.dim}>Ningún nodo coincide con los filtros actuales.</p>
             )}
-            {summaries.length > 0 && (
-              <NodesTable summaries={summaries} selected={selected} onSelect={setSelected} />
+            {filteredSummaries.length > 0 && (
+              <NodesTable
+                summaries={filteredSummaries}
+                selected={selected}
+                onSelect={setSelected}
+                onToggleFavorite={(id, value) => toggleFavorite.mutate({ id, value })}
+                onToggleIgnored={(id, value) => toggleIgnored.mutate({ id, value })}
+              />
             )}
           </div>
-          {selected && <NodeDetail nodeId={selected} onClose={() => setSelected(null)} />}
+          {selected && (
+            <NodeDetail nodeId={selected} summary={selectedSummary} onClose={() => setSelected(null)} />
+          )}
         </div>
       )}
     </div>

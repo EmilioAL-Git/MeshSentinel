@@ -5,6 +5,8 @@ interface Props {
   summaries: NodeSummaryOut[];
   selected: string | null;
   onSelect: (nodeId: string) => void;
+  onToggleFavorite: (nodeId: string, value: boolean) => void;
+  onToggleIgnored: (nodeId: string, value: boolean) => void;
 }
 
 function relativeTime(iso: string | null): string {
@@ -15,40 +17,71 @@ function relativeTime(iso: string | null): string {
   return `hace ${Math.round(seconds / 3600)}h`;
 }
 
-export function NodesTable({ summaries, selected, onSelect }: Props) {
+export function NodesTable({ summaries, selected, onSelect, onToggleFavorite, onToggleIgnored }: Props) {
   return (
     <table style={styles.table}>
       <thead>
         <tr>
+          <th style={styles.th}></th>
           <th style={styles.th}>Nodo</th>
           <th style={styles.th}>ID</th>
+          <th style={styles.th}>Etiquetas</th>
           <th style={styles.th}>Estado</th>
           <th style={styles.th}>Batería</th>
           <th style={styles.th}>SNR</th>
-          <th style={styles.th}>Saltos</th>
-          <th style={styles.th}>Posición</th>
           <th style={styles.th}>Visto</th>
+          <th style={styles.th}></th>
         </tr>
       </thead>
       <tbody>
-        {summaries.map(({ node, last_position, last_device_telemetry }) => (
+        {summaries.map(({ node, last_device_telemetry, tags }) => (
           <tr
             key={node.node_id}
             style={{
               ...styles.rowHover,
               background: selected === node.node_id ? "#1c2530" : undefined,
+              opacity: node.is_ignored ? 0.55 : 1,
             }}
             onClick={() => onSelect(node.node_id)}
           >
+            <td style={styles.td}>
+              <span
+                title={node.is_favorite ? "Quitar de favoritos" : "Marcar favorito"}
+                style={{ cursor: "pointer", color: node.is_favorite ? "#e3b341" : "#484f58" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleFavorite(node.node_id, !node.is_favorite);
+                }}
+              >
+                {node.is_favorite ? "★" : "☆"}
+              </span>
+            </td>
             <td style={styles.td}>
               <strong>{node.short_name ?? "?"}</strong>{" "}
               <span style={styles.dim}>{node.long_name ?? ""}</span>
             </td>
             <td style={{ ...styles.td, ...styles.mono }}>{node.node_id}</td>
             <td style={styles.td}>
+              {tags.map((t) => (
+                <span
+                  key={t.id}
+                  style={{
+                    background: t.color ?? "#30363d",
+                    borderRadius: 10,
+                    padding: "0.05rem 0.5rem",
+                    marginRight: 4,
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  {t.name}
+                </span>
+              ))}
+            </td>
+            <td style={styles.td}>
               <span style={node.online ? styles.badgeOnline : styles.badgeOffline}>
                 {node.online ? "online" : "offline"}
               </span>
+              {node.is_ignored && <span style={{ ...styles.dim, marginLeft: 6 }}>(ignorado)</span>}
             </td>
             <td style={styles.td}>
               {last_device_telemetry?.battery_level != null
@@ -58,13 +91,19 @@ export function NodesTable({ summaries, selected, onSelect }: Props) {
                 : "—"}
             </td>
             <td style={styles.td}>{node.snr != null ? `${node.snr} dB` : "—"}</td>
-            <td style={styles.td}>{node.hops_away ?? "—"}</td>
-            <td style={{ ...styles.td, ...styles.mono }}>
-              {last_position
-                ? `${last_position.latitude.toFixed(4)}, ${last_position.longitude.toFixed(4)}`
-                : "—"}
-            </td>
             <td style={styles.td}>{relativeTime(node.last_seen_at)}</td>
+            <td style={styles.td}>
+              <span
+                title={node.is_ignored ? "Dejar de ignorar" : "Ignorar nodo"}
+                style={{ cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleIgnored(node.node_id, !node.is_ignored);
+                }}
+              >
+                {node.is_ignored ? "🚫" : "👁"}
+              </span>
+            </td>
           </tr>
         ))}
       </tbody>

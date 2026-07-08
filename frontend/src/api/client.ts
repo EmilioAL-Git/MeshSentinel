@@ -24,7 +24,19 @@ export interface NodeOut {
   gateway_id: string | null;
   first_seen_at: string | null;
   last_seen_at: string | null;
+  is_favorite: boolean;
+  is_ignored: boolean;
   online: boolean;
+}
+
+/** "NOMBRE (!id)" o solo el id si el nodo no tiene nombre. */
+export function displayName(node: {
+  node_id: string;
+  short_name: string | null;
+  long_name: string | null;
+}): string {
+  const name = node.long_name || node.short_name;
+  return name ? `${name} (${node.node_id})` : node.node_id;
 }
 
 export interface PositionOut {
@@ -54,10 +66,39 @@ export interface TelemetryOut {
   gateway_id: string | null;
 }
 
+export interface TagOut {
+  id: number;
+  name: string;
+  color: string | null;
+}
+
+export interface GroupOut {
+  id: number;
+  name: string;
+  kind: string;
+  is_critical: boolean;
+  member_count: number;
+}
+
 export interface NodeSummaryOut {
   node: NodeOut;
   last_position: PositionOut | null;
   last_device_telemetry: TelemetryOut | null;
+  tags: TagOut[];
+  group_ids: number[];
+}
+
+export interface NodeFilterParams {
+  q?: string;
+  hw_model?: string;
+  tag?: string;
+  group_id?: number;
+  favorite?: boolean;
+  online?: boolean;
+  battery_below?: number;
+  gateway_id?: string;
+  include_ignored?: boolean;
+  only_ignored?: boolean;
 }
 
 export interface GatewayOut {
@@ -76,13 +117,41 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const fetchHealth = () => get<HealthResponse>("/health");
-export const fetchNodes = () => get<NodeSummaryOut[]>("/nodes");
+
+export function fetchNodes(filters: NodeFilterParams = {}): Promise<NodeSummaryOut[]> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
+  }
+  const qs = params.toString();
+  return get<NodeSummaryOut[]>(`/nodes${qs ? `?${qs}` : ""}`);
+}
 export const fetchNode = (id: string) => get<NodeOut>(`/nodes/${encodeURIComponent(id)}`);
 export const fetchNodePositions = (id: string, limit = 50) =>
   get<PositionOut[]>(`/nodes/${encodeURIComponent(id)}/positions?limit=${limit}`);
 export const fetchNodeTelemetry = (id: string, limit = 50) =>
   get<TelemetryOut[]>(`/nodes/${encodeURIComponent(id)}/telemetry?limit=${limit}`);
 export const fetchGateways = () => get<GatewayOut[]>("/gateways");
+
+// ── Organización de nodos (M1.2) ─────────────────────────────────────────────
+// Nota: estos endpoints usan `send`, definida más abajo en este módulo.
+export const setNodeFavorite = (id: string, value: boolean) =>
+  send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/favorite`, { value });
+export const setNodeIgnored = (id: string, value: boolean) =>
+  send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/ignored`, { value });
+export const setNodeTags = (id: string, tag_ids: number[]) =>
+  send<void>("PUT", `/nodes/${encodeURIComponent(id)}/tags`, { tag_ids });
+export const fetchTags = () => get<TagOut[]>("/tags");
+export const createTag = (name: string, color?: string) =>
+  send<TagOut>("POST", "/tags", { name, color });
+export const deleteTag = (id: number) => send<void>("DELETE", `/tags/${id}`);
+export const fetchGroups = () => get<GroupOut[]>("/groups");
+export const createGroup = (name: string) => send<GroupOut>("POST", "/groups", { name });
+export const deleteGroup = (id: number) => send<void>("DELETE", `/groups/${id}`);
+export const addGroupMember = (groupId: number, node_id: string) =>
+  send<void>("POST", `/groups/${groupId}/members`, { node_id });
+export const removeGroupMember = (groupId: number, nodeId: string) =>
+  send<void>("DELETE", `/groups/${groupId}/members/${encodeURIComponent(nodeId)}`);
 
 export interface ThresholdsOut {
   low_battery_percent: number;

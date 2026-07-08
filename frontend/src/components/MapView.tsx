@@ -61,6 +61,7 @@ const NodeMarker = memo(
       <Marker position={[pos.latitude, pos.longitude]} icon={nodeIcon(node.online, isGateway)}>
         <Popup>
           <div style={{ minWidth: 200, fontSize: "0.85rem" }}>
+            {node.is_favorite && <span style={{ color: "#e3b341" }}>★ </span>}
             <strong>{node.short_name ?? "?"}</strong> {node.long_name ?? ""}{" "}
             {isGateway && <em>(pasarela)</em>}
             <table style={{ width: "100%", marginTop: 4 }}>

@@ -138,6 +138,10 @@ class DashboardService:
                 + await SqlPositionRepository(session).count_since(hour_ago)
             )
 
+        # Los nodos ignorados no cuentan para los agregados del NOC (M1.2);
+        # su telemetría sigue persistiéndose con normalidad
+        summaries = [x for x in summaries if not x.node.is_ignored]
+
         nodes_total = len(summaries)
         online = [x for x in summaries if x.node.is_online(s.node_offline_after_seconds, now)]
         offline_percent = 100.0 * (nodes_total - len(online)) / nodes_total if nodes_total else 0.0

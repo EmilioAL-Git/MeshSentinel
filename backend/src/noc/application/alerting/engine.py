@@ -57,7 +57,11 @@ class AlertEngine:
         async with self._session_factory() as session:
             rules = await SqlAlertRuleRepository(session).list_enabled()
             snapshot = NetworkSnapshot(
-                summaries=await SqlNodeRepository(session).list_summaries(),
+                # Los nodos ignorados (M1.2) tampoco generan alertas: sus
+                # alertas activas se resuelven solas al desaparecer del snapshot
+                summaries=[
+                    x for x in await SqlNodeRepository(session).list_summaries() if not x.node.is_ignored
+                ],
                 gateways=await SqlGatewayRepository(session).list_all(),
             )
 
