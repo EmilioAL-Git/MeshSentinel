@@ -22,6 +22,10 @@ export function describeEvent(event: NocEvent, nodeName: (id: string) => string)
       return typeof p.from_node_id === "string" ? `Mensaje de ${nodeName(p.from_node_id)}` : null;
     case "gateway.status":
       return `Pasarela ${event.gateway_id}: ${String(p.status ?? "?")} (${String(p.transport ?? "?")})`;
+    case "alert.fired":
+      return `ALERTA [${String(p.severity)}] ${String(p.message)}`;
+    case "alert.resolved":
+      return `RESUELTA: ${String(p.message)}`;
     default:
       return null;
   }

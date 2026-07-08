@@ -1,6 +1,18 @@
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from noc.adapters.persistence.database import Base
@@ -51,6 +63,52 @@ class PositionModel(Base):
     position_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     gateway_id: Mapped[str | None] = mapped_column(String(64))
+
+
+class AlertRuleModel(Base):
+    __tablename__ = "alert_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    rule_type: Mapped[str] = mapped_column(String(32), index=True)
+    severity: Mapped[str] = mapped_column(String(16))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    threshold: Mapped[float | None] = mapped_column(Float)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AlertModel(Base):
+    __tablename__ = "alerts"
+    __table_args__ = (Index("ix_alerts_status_fired", "status", "fired_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("alert_rules.id"), nullable=False)
+    rule_name: Mapped[str] = mapped_column(String(128))
+    subject_type: Mapped[str] = mapped_column(String(16))
+    subject_id: Mapped[str] = mapped_column(String(64), index=True)
+    severity: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    correlation_key: Mapped[str | None] = mapped_column(String(128), index=True)
+    fired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_by: Mapped[str | None] = mapped_column(String(64))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationChannelModel(Base):
+    __tablename__ = "notification_channels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    channel_type: Mapped[str] = mapped_column(String(32))
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class TelemetryModel(Base):

@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     )
     dashboard_cache_seconds: float = 5.0
 
+    # Cadencia del motor de alertas (Fase 3C, ADR 0012)
+    alert_eval_interval_seconds: float = 30.0
+
     api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = []
 

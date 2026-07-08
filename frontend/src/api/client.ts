@@ -126,6 +126,66 @@ export interface DashboardSummaryOut {
 
 export const fetchDashboardSummary = () => get<DashboardSummaryOut>("/dashboard/summary");
 
+export type Severity = "INFO" | "WARNING" | "CRITICAL";
+
+export interface AlertOut {
+  id: number;
+  rule_id: number;
+  rule_name: string;
+  subject_type: "node" | "gateway" | "system";
+  subject_id: string;
+  severity: Severity;
+  status: "firing" | "acknowledged" | "resolved";
+  message: string;
+  correlation_key: string | null;
+  fired_at: string;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  resolved_at: string | null;
+}
+
+export interface AlertRuleOut {
+  id: number;
+  name: string;
+  rule_type: string;
+  severity: Severity;
+  enabled: boolean;
+  threshold: number | null;
+  duration_seconds: number | null;
+  cooldown_seconds: number;
+}
+
+export interface ChannelOut {
+  id: number;
+  name: string;
+  channel_type: "webhook" | "ntfy";
+  config: Record<string, unknown>;
+  enabled: boolean;
+}
+
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`/api/v1${path}`, {
+    method,
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status}: ${detail || path}`);
+  }
+  return res.status === 204 ? (undefined as T) : res.json();
+}
+
+export const fetchAlerts = (status?: string, limit = 100) =>
+  get<AlertOut[]>(`/alerts?limit=${limit}${status ? `&status=${status}` : ""}`);
+export const fetchAlertRules = () => get<AlertRuleOut[]>("/alert-rules");
+export const patchAlertRule = (id: number, changes: Partial<AlertRuleOut>) =>
+  send<AlertRuleOut>("PATCH", `/alert-rules/${id}`, changes);
+export const fetchChannels = () => get<ChannelOut[]>("/channels");
+export const createChannel = (body: Omit<ChannelOut, "id">) => send<ChannelOut>("POST", "/channels", body);
+export const deleteChannel = (id: number) => send<void>("DELETE", `/channels/${id}`);
+export const testChannel = (id: number) => send<{ status: string }>("POST", `/channels/${id}/test`);
+
 export interface NocEvent {
   schema_version: number;
   event_type: string;

@@ -4,10 +4,16 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from noc.adapters.api.routers import dashboard, gateways, health, nodes, system
+import uuid
+from datetime import datetime, timezone
+
+from noc.adapters.api.routers import alerts, dashboard, gateways, health, nodes, system
 from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
+from noc.application.alerting.engine import AlertEngine, AlertEngineLoop, AlertTransition
+from noc.application.alerting.notifier import AlertNotifier
+from noc.application.alerting.seed import seed_default_rules
 from noc.application.dashboard import DashboardService
 from noc.application.ingest import IngestService
 from noc.config import get_settings
@@ -27,13 +33,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.event_bus.subscribe(ingest.handle_event)
     app.state.event_bus.subscribe(hub.broadcast)
     await app.state.event_bus.start()
+
+    # Motor de alertas (ADR 0012): listeners = notificador + WebSocket
+    await seed_default_rules(app.state.db.session_factory, settings)
+    engine = AlertEngine(app.state.db.session_factory)
+    engine.add_listener(AlertNotifier(app.state.db.session_factory))
+    engine.add_listener(_ws_alert_broadcaster)
+    alert_loop = AlertEngineLoop(engine, settings.alert_eval_interval_seconds)
+    alert_loop.start()
+
     logger.info("Backend started (env=%s)", settings.environment)
     try:
         yield
     finally:
+        await alert_loop.stop()
         await app.state.event_bus.stop()
         await app.state.db.dispose()
         logger.info("Backend stopped")
+
+
+async def _ws_alert_broadcaster(transition: AlertTransition) -> None:
+    a = transition.alert
+    await hub.broadcast(
+        {
+            "schema_version": 1,
+            "event_type": f"alert.{transition.kind}",
+            "event_id": str(uuid.uuid4()),
+            "gateway_id": "noc-backend",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": {
+                "alert_id": a.id,
+                "rule_name": a.rule_name,
+                "severity": a.severity,
+                "subject_type": a.subject_type,
+                "subject_id": a.subject_id,
+                "message": a.message,
+            },
+        }
+    )
 
 
 def create_app() -> FastAPI:
@@ -50,6 +87,7 @@ def create_app() -> FastAPI:
     app.include_router(gateways.router, prefix=settings.api_v1_prefix)
     app.include_router(system.router, prefix=settings.api_v1_prefix)
     app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
+    app.include_router(alerts.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app
 

@@ -2,21 +2,30 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
 import {
+  fetchAlerts,
   fetchDashboardSummary,
   fetchGateways,
   fetchHealth,
   fetchNodes,
   openEventsSocket,
 } from "./api/client";
+import { AlertsView } from "./components/AlertsView";
 import { Dashboard } from "./components/Dashboard";
 import { MapView } from "./components/MapView";
 import { NodeDetail } from "./components/NodeDetail";
 import { NodesTable } from "./components/NodesTable";
 import { styles } from "./styles";
 
-const DATA_EVENTS = new Set(["node.seen", "position.updated", "telemetry.received", "gateway.status"]);
+const DATA_EVENTS = new Set([
+  "node.seen",
+  "position.updated",
+  "telemetry.received",
+  "gateway.status",
+  "alert.fired",
+  "alert.resolved",
+]);
 
-type View = "dashboard" | "nodes" | "map";
+type View = "dashboard" | "nodes" | "map" | "alerts";
 
 function NavTab({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
@@ -45,6 +54,11 @@ export default function App() {
   const dashboard = useQuery({
     queryKey: ["dashboard"],
     queryFn: fetchDashboardSummary,
+    refetchInterval: 30_000,
+  });
+  const alerts = useQuery({
+    queryKey: ["alerts"],
+    queryFn: () => fetchAlerts(undefined, 100),
     refetchInterval: 30_000,
   });
   const [view, setView] = useState<View>("dashboard");
@@ -81,6 +95,7 @@ export default function App() {
           queryClient.invalidateQueries({ queryKey: ["nodes"] });
           queryClient.invalidateQueries({ queryKey: ["gateways"] });
           queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+          queryClient.invalidateQueries({ queryKey: ["alerts"] });
         }, 2000);
       }
     });
@@ -104,6 +119,7 @@ export default function App() {
 
   const summaries = nodes.data ?? [];
   const onlineCount = summaries.filter((s) => s.node.online).length;
+  const activeAlertCount = (alerts.data ?? []).filter((a) => a.status !== "resolved").length;
 
   const gatewayNodeIds = useMemo(
     () =>
@@ -128,6 +144,11 @@ export default function App() {
           <NavTab active={view === "dashboard"} label="Dashboard" onClick={() => setView("dashboard")} />
           <NavTab active={view === "nodes"} label="Nodos" onClick={() => setView("nodes")} />
           <NavTab active={view === "map"} label="Mapa" onClick={() => setView("map")} />
+          <NavTab
+            active={view === "alerts"}
+            label={activeAlertCount > 0 ? `Alertas (${activeAlertCount})` : "Alertas"}
+            onClick={() => setView("alerts")}
+          />
         </nav>
         <span style={{ marginLeft: "auto" }}>
           Backend:{" "}
@@ -150,6 +171,8 @@ export default function App() {
           onShowDetail={showDetail}
         />
       )}
+
+      {view === "alerts" && <AlertsView />}
 
       {view === "map" && (
         <MapView summaries={summaries} gatewayNodeIds={gatewayNodeIds} onShowDetail={showDetail} />
