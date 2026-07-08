@@ -47,9 +47,19 @@ def test_compare_fixed_position_uses_config_flag():
 
 
 def test_set_operations_registry():
-    assert set(SET_OPERATIONS) == {"owner.set", "position.set_fixed"}
-    assert SET_OPERATIONS["owner.set"].verify_get == ("nodeinfo.get", {})
-    assert SET_OPERATIONS["position.set_fixed"].verify_get == ("config.get", {"section": "position"})
+    assert {"owner.set", "position.set_fixed", "config.set", "module_config.set"} <= set(
+        SET_OPERATIONS
+    )
+    assert SET_OPERATIONS["owner.set"].verify_get({}) == ("nodeinfo.get", {})
+    assert SET_OPERATIONS["position.set_fixed"].verify_get({}) == (
+        "config.get", {"section": "position"},
+    )
+    assert SET_OPERATIONS["config.set"].verify_get({"section": "lora"}) == (
+        "config.get", {"section": "lora"},
+    )
+    assert SET_OPERATIONS["module_config.set"].verify_get({"section": "mqtt"}) == (
+        "module_config.get", {"section": "mqtt"},
+    )
 
 
 # ── Simulador: SET + verify de extremo a extremo ─────────────────────────────

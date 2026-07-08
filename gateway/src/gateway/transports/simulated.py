@@ -29,6 +29,11 @@ class SimNode:
     has_gps: bool = True
     fixed_position: bool = False
     uptime: int = 0
+    # Estado editable por SETs genéricos (M1.4). Se aplica sobre los defaults
+    # cannedados en config.get / module_config.get para que el read-back refleje
+    # los cambios pedidos.
+    config_state: dict[str, dict[str, Any]] = field(default_factory=dict)
+    module_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     rng: random.Random = field(default_factory=random.Random)
 
 
@@ -166,15 +171,25 @@ class SimulatedTransport(Transport):
             }
         if op_type == "config.get":
             section = params.get("section", "device")
-            canned: dict[str, dict[str, Any]] = {
+            defaults: dict[str, dict[str, Any]] = {
                 "lora": {"region": "EU_868", "hopLimit": 3, "txEnabled": True, "sx126xRxBoostedGain": True},
                 "device": {"role": node.role, "nodeInfoBroadcastSecs": 10800},
                 "position": {"positionBroadcastSecs": 900, "gpsMode": "ENABLED" if node.has_gps else "NOT_PRESENT"},
+                "display": {"screenOnSecs": 60, "gpsFormat": "DEC"},
+                "power": {"waitBluetoothSecs": 60, "sdsSecs": 4294967295},
+                "bluetooth": {"enabled": True, "mode": "RANDOM_PIN"},
+                "network": {"wifiEnabled": False, "ntpServer": "0.pool.ntp.org"},
+                "security": {"isManaged": False, "serialEnabled": True},
+                "device_ui": {"screenBrightness": 128},
             }
-            return {section: canned.get(section, {"enabled": True})}
+            base = defaults.get(section, {"enabled": True})
+            override = node.config_state.get(section, {})
+            return {section: {**base, **override}}
         if op_type == "module_config.get":
             section = params.get("section", "telemetry")
-            return {section: {"enabled": section == "telemetry"}}
+            base = {"enabled": section == "telemetry"}
+            override = node.module_state.get(section, {})
+            return {section: {**base, **override}}
 
         # SETs verificables (M1.3): se aplican a la malla simulada y el verify
         # se confirma con el mismo read-back que usaría el transporte real
@@ -211,6 +226,24 @@ class SimulatedTransport(Transport):
                 "previous": previous,
                 "requested": params,
                 "verified": {"position": {"fixedPosition": True}},
+                "verify": "confirmed",
+            }
+
+        # SETs genéricos del editor de configuración (M1.4): guardan el diff en
+        # el estado local del nodo y responden a los GETs siguientes con los
+        # valores actualizados, para que el verify read-back del pipeline pase.
+        if op_type in ("config.set", "module_config.set"):
+            section = params["section"]
+            values = params["values"]
+            store = node.config_state if op_type == "config.set" else node.module_state
+            previous_section = dict(store.get(section, {}))
+            new_section = {**previous_section, **values}
+            store[section] = new_section
+            await asyncio.sleep(node.rng.uniform(0.5, 2.0))
+            return {
+                "previous": {section: previous_section},
+                "requested": params,
+                "verified": {section: new_section},
                 "verify": "confirmed",
             }
         raise ValueError(f"Unsupported admin operation: {op_type}")

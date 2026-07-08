@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from noc.adapters.api.routers import (
     admin,
+    admin_config,
     alerts,
     dashboard,
     gateways,
@@ -109,6 +110,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
     app.include_router(alerts.router, prefix=settings.api_v1_prefix)
     app.include_router(admin.router, prefix=settings.api_v1_prefix)
+    app.include_router(admin_config.router, prefix=settings.api_v1_prefix)
     app.include_router(organization.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app

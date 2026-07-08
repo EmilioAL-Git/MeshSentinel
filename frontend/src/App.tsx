@@ -15,6 +15,7 @@ import {
   type NodeFilterParams,
 } from "./api/client";
 import { AlertsView } from "./components/AlertsView";
+import { ConfigEditor } from "./components/ConfigEditor";
 import { Dashboard } from "./components/Dashboard";
 import { MapView } from "./components/MapView";
 import { NodeDetail } from "./components/NodeDetail";
@@ -33,7 +34,7 @@ const DATA_EVENTS = new Set([
   "admin.operation",
 ]);
 
-type View = "dashboard" | "nodes" | "map" | "alerts" | "operations";
+type View = "dashboard" | "nodes" | "map" | "alerts" | "operations" | "config";
 
 function NavTab({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
@@ -192,6 +193,7 @@ export default function App() {
             onClick={() => setView("alerts")}
           />
           <NavTab active={view === "operations"} label="Operaciones" onClick={() => setView("operations")} />
+          <NavTab active={view === "config"} label="Configuración" onClick={() => setView("config")} />
         </nav>
         <span style={{ marginLeft: "auto" }}>
           Backend:{" "}
@@ -219,6 +221,8 @@ export default function App() {
       {view === "alerts" && <AlertsView />}
 
       {view === "operations" && <OperationsView summaries={summaries} />}
+
+      {view === "config" && <ConfigEditor summaries={summaries} />}
 
       {view === "map" && (
         <MapView summaries={summaries} gatewayNodeIds={gatewayNodeIds} onShowDetail={showDetail} />

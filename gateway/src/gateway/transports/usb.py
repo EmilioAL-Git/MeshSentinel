@@ -286,7 +286,7 @@ class MeshtasticUsbTransport(Transport):
         from gateway.decoder.admin import SET_OPERATIONS, build_admin_request
 
         spec = SET_OPERATIONS[op_type]
-        get_type, get_params = spec.verify_get
+        get_type, get_params = spec.verify_get(params)
         # Presupuesto por lectura: margen dentro del timeout global del consumer
         read_timeout = max(10.0, float(operation.get("timeout_seconds") or 120) / 3)
 
@@ -300,7 +300,10 @@ class MeshtasticUsbTransport(Transport):
             # autenticarse — fallar aquí es más honesto que un verify dudoso
             raise TimeoutError("node did not answer pre-read (no admin session)") from None
 
-        await asyncio.to_thread(self._send_admin_blocking, node_id, spec.build_set(params))
+        # El SET genérico (M1.4) necesita `previous` para fusionar los campos
+        # no tocados y evitar que se reseteen a defaults del firmware
+        set_msg = spec.build_set(params, previous)
+        await asyncio.to_thread(self._send_admin_blocking, node_id, set_msg)
         logger.info("usb.admin_set_sent op=%s node=%s", operation.get("operation_id"), node_id)
         await asyncio.sleep(self._settings.set_settle_seconds)
 

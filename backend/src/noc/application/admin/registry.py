@@ -9,14 +9,14 @@ Añadir una operación = una entrada aquí + su soporte en el gateway.
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-CONFIG_SECTIONS = [
-    "device", "position", "power", "network", "display", "lora", "bluetooth", "security",
-]
-MODULE_CONFIG_SECTIONS = [
-    "mqtt", "serial", "external_notification", "store_forward", "range_test", "telemetry",
-    "canned_message", "audio", "remote_hardware", "neighbor_info", "ambient_lighting",
-    "detection_sensor", "paxcounter",
-]
+# Fuente única de secciones (M1.4): derivadas del esquema protobuf introspeccionado
+from noc.application.admin.config_schema import (
+    CONFIG_SECTIONS as _SCHEMA_CONFIG_SECTIONS,
+    MODULE_CONFIG_SECTIONS as _SCHEMA_MODULE_CONFIG_SECTIONS,
+)
+
+CONFIG_SECTIONS = [s.name for s in _SCHEMA_CONFIG_SECTIONS]
+MODULE_CONFIG_SECTIONS = [s.name for s in _SCHEMA_MODULE_CONFIG_SECTIONS]
 
 # Límites del firmware (mesh_pb2.User)
 OWNER_SHORT_NAME_MAX = 4
@@ -96,6 +96,21 @@ OPERATIONS: dict[str, OperationSpec] = {
                 ParamField("altitude", "number", minimum=-500, maximum=10000),
             ],
         ),
+        # Editor genérico (M1.4): un tipo por familia; el `section` va en params.
+        # Categoría de riesgo real se determina por la sección concreta (ver
+        # config_schema.SECTION_RISK) y por el propio conjunto de campos tocados.
+        OperationSpec(
+            "config.set",
+            "Escribir una sección de configuración del dispositivo (con verificación)",
+            kind="set", allow_bulk=False, destructive=False, required_role="admin",
+            param_choices={"section": CONFIG_SECTIONS},
+        ),
+        OperationSpec(
+            "module_config.set",
+            "Escribir una sección de configuración de módulos (con verificación)",
+            kind="set", allow_bulk=False, destructive=False, required_role="admin",
+            param_choices={"section": MODULE_CONFIG_SECTIONS},
+        ),
     ]
 }
 
@@ -136,9 +151,37 @@ def _validate_fixed_position(params: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _validate_generic_set(section_choices: list[str]) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Validador para config.set / module_config.set.
+
+    Espera `{section, values: {field: valor}}` y delega la validación de cada
+    par (field, valor) al esquema introspeccionado del protobuf. Así el editor
+    no necesita lógica por parámetro (M1.4).
+    """
+    from noc.application.admin.config_schema import validate_field_value
+
+    def validator(params: dict[str, Any]) -> dict[str, Any]:
+        section = params.get("section")
+        if section not in section_choices:
+            raise ValueError(
+                f"Parameter 'section' must be one of {section_choices} (got {section!r})"
+            )
+        values = params.get("values")
+        if not isinstance(values, dict) or not values:
+            raise ValueError("'values' must be a non-empty object")
+        normalized: dict[str, Any] = {}
+        for field_name, value in values.items():
+            normalized[field_name] = validate_field_value(section, field_name, value)
+        return {"section": section, "values": normalized}
+
+    return validator
+
+
 _VALIDATORS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "owner.set": _validate_owner_set,
     "position.set_fixed": _validate_fixed_position,
+    "config.set": _validate_generic_set(CONFIG_SECTIONS),
+    "module_config.set": _validate_generic_set(MODULE_CONFIG_SECTIONS),
 }
 
 
@@ -150,10 +193,15 @@ def validate_operation(operation_type: str, params: dict[str, Any]) -> dict[str,
 
     validator = _VALIDATORS.get(operation_type)
     if validator is not None:
-        allowed = {f.name for f in spec.param_fields}
-        unknown = set(params) - allowed
-        if unknown:
-            raise ValueError(f"Unknown parameters for {operation_type}: {sorted(unknown)}")
+        # Los validadores dedicados llevan su propio contrato (owner.set,
+        # position.set_fixed, config.set, module_config.set); no imponemos aquí
+        # una lista blanca de parámetros porque los editores generic usan
+        # `values` dict libre validado internamente.
+        if operation_type in ("owner.set", "position.set_fixed"):
+            allowed = {f.name for f in spec.param_fields}
+            unknown = set(params) - allowed
+            if unknown:
+                raise ValueError(f"Unknown parameters for {operation_type}: {sorted(unknown)}")
         return validator(params)
 
     normalized: dict[str, Any] = {}

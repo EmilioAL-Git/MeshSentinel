@@ -14,6 +14,10 @@ dependencies = [
     "aiosqlite>=0.20,<1",
     "redis>=5.2,<6",
     "httpx>=0.28,<1",
+    # Introspección del esquema de configuración a partir de los protobufs
+    # oficiales. Uso READ-ONLY (no se abre ninguna conexión); el gateway sigue
+    # siendo el único que habla con dispositivos (ADR 0002).
+    "meshtastic>=2.5,<3",
 ]
 
 [project.optional-dependencies]

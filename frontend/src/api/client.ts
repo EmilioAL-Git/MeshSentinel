@@ -319,6 +319,66 @@ export const createOperation = (body: {
 export const cancelOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/cancel`);
 export const retryOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/retry`);
 
+// ── Editor de configuración (M1.4) ──────────────────────────────────────────
+
+export type FieldKind = "bool" | "int" | "float" | "str" | "enum" | "message" | "bytes" | "unknown";
+
+export interface ConfigFieldSchema {
+  name: string;
+  kind: FieldKind;
+  enum_values: string[];
+  repeated: boolean;
+  submessage: string | null;
+  editable: boolean;
+  description: string;
+}
+
+export interface ConfigSectionSchema {
+  name: string;
+  display_name: string;
+  kind: "config" | "module_config" | "owner";
+  risk: "SAFE" | "WARNING" | "DANGEROUS";
+  description: string;
+  fields: ConfigFieldSchema[];
+}
+
+export interface ConfigSchemaOut {
+  ui_groups: Record<string, string[]>;
+  sections: ConfigSectionSchema[];
+}
+
+export interface SectionSnapshot {
+  section: string;
+  kind: "config" | "module_config" | "owner";
+  values: Record<string, unknown>;
+  last_read_at: string | null;
+  last_operation_id: number | null;
+}
+
+export interface ConfigStateOut {
+  node_id: string;
+  sections: SectionSnapshot[];
+}
+
+export const fetchConfigSchema = () => get<ConfigSchemaOut>("/admin/config/schema");
+export const fetchNodeConfig = (nodeId: string) =>
+  get<ConfigStateOut>(`/nodes/${encodeURIComponent(nodeId)}/config`);
+export const refreshNodeConfig = (nodeId: string, sections?: string[]) =>
+  send<{ operation_ids: number[] }>(
+    "POST",
+    `/nodes/${encodeURIComponent(nodeId)}/config/refresh`,
+    { sections: sections ?? null },
+  );
+export const applyNodeConfig = (
+  nodeId: string,
+  sections: Record<string, Record<string, unknown>>,
+) =>
+  send<{ operation_ids: number[] }>(
+    "POST",
+    `/nodes/${encodeURIComponent(nodeId)}/config/apply`,
+    { sections },
+  );
+
 export interface NocEvent {
   schema_version: number;
   event_type: string;
