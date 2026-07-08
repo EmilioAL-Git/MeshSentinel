@@ -18,9 +18,17 @@ const STATUS_COLOR: Record<OperationStatus, string> = {
   queued: "#1f4c8f",
   running: "#1f6feb",
   succeeded: "#1f6f43",
+  succeeded_unconfirmed: "#8250df",
+  verify_failed: "#cf222e",
   failed: "#b62324",
   timeout: "#9e6a03",
   cancelled: "#57606a",
+};
+
+const STATUS_LABEL: Partial<Record<OperationStatus, string>> = {
+  succeeded: "confirmada",
+  succeeded_unconfirmed: "sin confirmar",
+  verify_failed: "verificación fallida",
 };
 
 const input: CSSProperties = {
@@ -37,6 +45,26 @@ function relativeTime(iso: string | null): string {
   if (seconds < 60) return `hace ${Math.round(seconds)}s`;
   if (seconds < 3600) return `hace ${Math.round(seconds / 60)}m`;
   return `hace ${Math.round(seconds / 3600)}h`;
+}
+
+function VerifyDetail({ result }: { result: Record<string, unknown> }) {
+  const blocks: [string, unknown][] = [
+    ["Valor anterior", result.previous],
+    ["Valor solicitado", result.requested],
+    ["Valor leído en la verificación", result.verified],
+  ];
+  return (
+    <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+      {blocks.map(([label, value]) => (
+        <div key={label} style={{ flex: "1 1 200px" }}>
+          <div style={{ ...styles.dim, fontSize: "0.8rem" }}>{label}</div>
+          <pre style={{ ...styles.mono, whiteSpace: "pre-wrap", margin: 0 }}>
+            {value == null ? "— no disponible —" : JSON.stringify(value, null, 2)}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
@@ -57,6 +85,9 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
   const [nodeId, setNodeId] = useState("");
   const [opType, setOpType] = useState("metadata.get");
   const [section, setSection] = useState("");
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [confirming, setConfirming] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
 
   const spec = useMemo(
@@ -64,7 +95,39 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
     [capabilities.data, opType],
   );
   const sections = spec?.param_choices["section"] ?? [];
-  const canSubmit = nodeId !== "" && (sections.length === 0 || section !== "");
+  const paramFields = spec?.param_fields ?? [];
+
+  const buildParams = (): Record<string, unknown> => {
+    if (sections.length > 0) return { section };
+    const params: Record<string, unknown> = {};
+    for (const f of paramFields) {
+      const raw = fieldValues[f.name]?.trim();
+      if (raw === undefined || raw === "") continue;
+      params[f.name] = f.kind === "number" ? Number(raw) : raw;
+    }
+    return params;
+  };
+
+  const paramsReady =
+    sections.length > 0
+      ? section !== ""
+      : paramFields.every((f) => !f.required || (fieldValues[f.name] ?? "").trim() !== "") &&
+        (paramFields.length === 0 || Object.keys(buildParams()).length > 0);
+  const canSubmit = nodeId !== "" && paramsReady;
+
+  const submit = () => {
+    create.mutate({ node_id: nodeId, operation_type: opType, params: buildParams() });
+    setConfirming(false);
+    setConfirmText("");
+  };
+
+  const resetOp = (type: string) => {
+    setOpType(type);
+    setSection("");
+    setFieldValues({});
+    setConfirming(false);
+    setConfirmText("");
+  };
 
   const nodeName = (id: string) => {
     const s = summaries.find((x) => x.node.node_id === id);
@@ -74,9 +137,9 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
   return (
     <div>
       <div style={styles.card}>
-        <h2 style={{ marginTop: 0 }}>Nueva operación remota (solo lectura)</h2>
+        <h2 style={{ marginTop: 0 }}>Nueva operación remota</h2>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-          <select style={input} value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
+          <select style={input} value={nodeId} onChange={(e) => { setNodeId(e.target.value); setConfirming(false); }}>
             <option value="">— nodo —</option>
             {summaries.map((s) => (
               <option key={s.node.node_id} value={s.node.node_id}>
@@ -84,17 +147,10 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
               </option>
             ))}
           </select>
-          <select
-            style={input}
-            value={opType}
-            onChange={(e) => {
-              setOpType(e.target.value);
-              setSection("");
-            }}
-          >
+          <select style={input} value={opType} onChange={(e) => resetOp(e.target.value)}>
             {(capabilities.data ?? []).map((c) => (
               <option key={c.operation_type} value={c.operation_type}>
-                {c.operation_type} — {c.description}
+                {c.kind === "set" ? "✏️ " : ""}{c.operation_type} — {c.description}
               </option>
             ))}
           </select>
@@ -106,24 +162,82 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
               ))}
             </select>
           )}
-          <button
-            style={{ ...input, cursor: canSubmit ? "pointer" : "not-allowed" }}
-            disabled={!canSubmit || create.isPending}
-            onClick={() =>
-              create.mutate({
-                node_id: nodeId,
-                operation_type: opType,
-                params: sections.length > 0 ? { section } : {},
-              })
-            }
-          >
-            Encolar
-          </button>
+          {paramFields.map((f) => (
+            <input
+              key={f.name}
+              style={{ ...input, width: f.kind === "number" ? 110 : 160 }}
+              type={f.kind === "number" ? "number" : "text"}
+              placeholder={f.name + (f.required ? " *" : "")}
+              maxLength={f.max_length ?? undefined}
+              min={f.minimum ?? undefined}
+              max={f.maximum ?? undefined}
+              value={fieldValues[f.name] ?? ""}
+              onChange={(e) => {
+                setFieldValues({ ...fieldValues, [f.name]: e.target.value });
+                setConfirming(false);
+              }}
+            />
+          ))}
+          {!spec?.requires_confirmation ? (
+            <button
+              style={{ ...input, cursor: canSubmit ? "pointer" : "not-allowed" }}
+              disabled={!canSubmit || create.isPending}
+              onClick={submit}
+            >
+              Encolar
+            </button>
+          ) : (
+            <button
+              style={{ ...input, cursor: canSubmit ? "pointer" : "not-allowed" }}
+              disabled={!canSubmit || create.isPending}
+              onClick={() => setConfirming(true)}
+            >
+              Revisar y confirmar…
+            </button>
+          )}
         </div>
+
+        {/* Confirmación explícita para operaciones de escritura (M1.3) */}
+        {confirming && spec?.requires_confirmation && (
+          <div style={{ border: "1px solid #9e6a03", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
+            <p style={{ marginTop: 0 }}>
+              ⚠️ Vas a <strong>modificar</strong> el nodo <strong>{nodeName(nodeId)}</strong> con{" "}
+              <span style={styles.mono}>{opType}</span> y parámetros{" "}
+              <span style={styles.mono}>{JSON.stringify(buildParams())}</span>. Tras el envío se hará
+              una lectura de verificación automática.
+            </p>
+            <p style={styles.dim}>
+              Escribe el ID del nodo (<span style={styles.mono}>{nodeId}</span>) para confirmar:
+            </p>
+            <input
+              style={{ ...input, width: 160 }}
+              placeholder={nodeId}
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+            />
+            <button
+              style={{ ...input, marginLeft: 8, cursor: confirmText === nodeId ? "pointer" : "not-allowed" }}
+              disabled={confirmText !== nodeId || create.isPending}
+              onClick={submit}
+            >
+              Confirmar y encolar
+            </button>
+            <button
+              style={{ ...input, marginLeft: 8 }}
+              onClick={() => { setConfirming(false); setConfirmText(""); }}
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
+
         {create.isError && <p style={styles.bad}>{String(create.error)}</p>}
         <p style={{ ...styles.dim, fontSize: "0.8rem" }}>
           Las operaciones respetan el presupuesto de malla (rate limit global y 1 en vuelo por
-          pasarela): pueden tardar en despacharse aunque estén en cola.
+          pasarela). En escrituras: <strong>succeeded</strong> = cambio confirmado por lectura
+          posterior · <strong>sin confirmar</strong> = comando enviado pero la verificación no pudo
+          leerse · <strong>verificación fallida</strong> = la lectura posterior no coincide con lo
+          solicitado.
         </p>
       </div>
 
@@ -170,6 +284,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
                           padding: "0.1rem 0.6rem",
                           fontSize: "0.75rem",
                         }}
+                        title={STATUS_LABEL[op.status]}
                       >
                         {op.status}
                       </span>
@@ -196,9 +311,13 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
                     <tr key={`${op.id}-detail`}>
                       <td style={styles.td} colSpan={8}>
                         {op.error && <p style={styles.bad}>Error: {op.error}</p>}
-                        <pre style={{ ...styles.mono, whiteSpace: "pre-wrap", margin: 0 }}>
-                          {JSON.stringify(op.result ?? op.params, null, 2)}
-                        </pre>
+                        {op.result && "verify" in op.result ? (
+                          <VerifyDetail result={op.result} />
+                        ) : (
+                          <pre style={{ ...styles.mono, whiteSpace: "pre-wrap", margin: 0 }}>
+                            {JSON.stringify(op.result ?? op.params, null, 2)}
+                          </pre>
+                        )}
                       </td>
                     </tr>
                   )}

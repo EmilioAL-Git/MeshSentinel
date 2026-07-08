@@ -194,9 +194,9 @@ async def test_capabilities_endpoint_serializes_slots_dataclass():
     from noc.adapters.api.routers.admin import capabilities
 
     caps = await capabilities()
-    assert {c.operation_type for c in caps} == {
-        "metadata.get", "nodeinfo.get", "config.get", "module_config.get"
-    }
+    types = {c.operation_type for c in caps}
+    assert {"metadata.get", "nodeinfo.get", "config.get", "module_config.get"} <= types
+    assert {"owner.set", "position.set_fixed"} <= types  # M1.3
     assert "section" in next(c for c in caps if c.operation_type == "config.get").param_choices
 
 

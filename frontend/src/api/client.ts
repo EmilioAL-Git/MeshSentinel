@@ -260,9 +260,20 @@ export type OperationStatus =
   | "queued"
   | "running"
   | "succeeded"
+  | "succeeded_unconfirmed"
+  | "verify_failed"
   | "failed"
   | "timeout"
   | "cancelled";
+
+export interface ParamFieldOut {
+  name: string;
+  kind: "string" | "number";
+  required: boolean;
+  max_length: number | null;
+  minimum: number | null;
+  maximum: number | null;
+}
 
 export interface CapabilityOut {
   operation_type: string;
@@ -271,7 +282,9 @@ export interface CapabilityOut {
   allow_bulk: boolean;
   destructive: boolean;
   required_role: string;
+  requires_confirmation: boolean;
   param_choices: Record<string, string[]>;
+  param_fields: ParamFieldOut[];
 }
 
 export interface OperationOut {

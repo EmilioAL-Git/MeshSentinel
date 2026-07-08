@@ -33,6 +33,8 @@ class Settings(BaseSettings):
             "MESHTASTIC_RECONNECT_MAX_DELAY", "GATEWAY_RECONNECT_MAX_DELAY"
         ),
     )
+    # Espera entre enviar un SET y leer la verificación (M1.3)
+    set_settle_seconds: float = 3.0
 
     @field_validator("transport", mode="before")
     @classmethod

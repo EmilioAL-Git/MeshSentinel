@@ -134,18 +134,35 @@ class AdminOperationService:
             if state == "running":
                 await repo.update_fields(op_id, {"status": "running", "started_at": now})
             elif state == "succeeded":
+                result = payload.get("result")
+                status = self._map_success_status(result)
                 await repo.update_fields(
                     op_id,
                     {
-                        "status": "succeeded",
-                        "result": payload.get("result"),
+                        "status": status,
+                        "result": result,
                         "finished_at": now,
                         "duration_ms": self._duration_ms(op, now),
                     },
                 )
-                logger.info("admin.op succeeded id=%s node=%s", op_id, op.target_node_id)
+                logger.info("admin.op %s id=%s node=%s", status, op_id, op.target_node_id)
             else:
                 await self._apply_failure(repo, op, state, payload.get("error"), now)
+
+    @staticmethod
+    def _map_success_status(result: Any) -> str:
+        """SETs verificables (M1.3, ADR 0014): el gateway reporta 'succeeded'
+        por el contrato v1 y el veredicto viaja en result.verify — aquí se mapea
+        al estado final. verify_failed y succeeded_unconfirmed son terminales
+        y NO se reintentan (el SET pudo aplicarse; reintentar duplicaría
+        escrituras en la malla)."""
+        if isinstance(result, dict):
+            verify = result.get("verify")
+            if verify == "mismatch":
+                return "verify_failed"
+            if verify == "unavailable":
+                return "succeeded_unconfirmed"
+        return "succeeded"
 
     async def _apply_failure(
         self,

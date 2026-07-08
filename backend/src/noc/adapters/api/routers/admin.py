@@ -15,6 +15,15 @@ from noc.domain.admin.entities import AdminOperation
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+class ParamFieldOut(BaseModel):
+    name: str
+    kind: str
+    required: bool
+    max_length: int | None
+    minimum: float | None
+    maximum: float | None
+
+
 class CapabilityOut(BaseModel):
     operation_type: str
     description: str
@@ -22,7 +31,9 @@ class CapabilityOut(BaseModel):
     allow_bulk: bool
     destructive: bool
     required_role: str
+    requires_confirmation: bool
     param_choices: dict[str, list[str]]
+    param_fields: list[ParamFieldOut]
 
 
 class OperationIn(BaseModel):
@@ -39,7 +50,17 @@ class OperationOut(BaseModel):
     gateway_id: str
     operation_type: str
     params: dict[str, Any]
-    status: Literal["pending", "queued", "running", "succeeded", "failed", "timeout", "cancelled"]
+    status: Literal[
+        "pending",
+        "queued",
+        "running",
+        "succeeded",
+        "succeeded_unconfirmed",
+        "verify_failed",
+        "failed",
+        "timeout",
+        "cancelled",
+    ]
     priority: int
     attempts: int
     max_attempts: int
@@ -60,7 +81,10 @@ class OperationOut(BaseModel):
 
 @router.get("/capabilities", response_model=list[CapabilityOut])
 async def capabilities() -> list[CapabilityOut]:
-    return [CapabilityOut(**asdict(spec)) for spec in OPERATIONS.values()]
+    return [
+        CapabilityOut(**asdict(spec), requires_confirmation=spec.requires_confirmation)
+        for spec in OPERATIONS.values()
+    ]
 
 
 @router.post("/operations", response_model=OperationOut, status_code=201)

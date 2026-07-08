@@ -232,9 +232,7 @@ class MeshtasticUsbTransport(Transport):
         node = self._iface.getNode(node_id, requestChannels=False)
         node._sendAdmin(message, wantResponse=True)
 
-    async def execute_admin(self, operation: dict[str, Any]) -> dict[str, Any]:
-        from gateway.decoder.admin import build_admin_request
-
+    def _check_link(self) -> None:
         if self.status != "connected" or self._iface is None or self._loop is None:
             raise ConnectionError("USB transport not connected")
         # El enlace puede haberse caído sin que el pump lo haya procesado aún:
@@ -243,23 +241,86 @@ class MeshtasticUsbTransport(Transport):
         lib_connected = getattr(self._iface, "isConnected", None)
         if lib_connected is not None and not lib_connected.is_set():
             raise ConnectionError("USB link not ready (device disconnected or reconnecting)")
-        node_id = str(operation["target_node_id"]).lower()
-        message, response_key = build_admin_request(
-            operation["operation_type"], operation.get("params") or {}
-        )
+
+    async def _admin_roundtrip(self, node_id: str, message: Any, response_key: str) -> dict[str, Any]:
+        """Envía un AdminMessage y espera su respuesta correlacionada."""
+        assert self._loop is not None
         future: asyncio.Future[dict[str, Any]] = self._loop.create_future()
         self._admin_waiters[(node_id, response_key)] = future
         try:
             await asyncio.to_thread(self._send_admin_blocking, node_id, message)
-            logger.info(
-                "usb.admin_sent op=%s type=%s node=%s",
-                operation.get("operation_id"), operation["operation_type"], node_id,
-            )
-            admin = await future  # el timeout lo impone el CommandConsumer
+            admin = await future
             result = admin.get(response_key)
             return result if isinstance(result, dict) else {"value": result}
         finally:
             self._admin_waiters.pop((node_id, response_key), None)
+
+    async def execute_admin(self, operation: dict[str, Any]) -> dict[str, Any]:
+        from gateway.decoder.admin import SET_OPERATIONS, build_admin_request
+
+        self._check_link()
+        node_id = str(operation["target_node_id"]).lower()
+        op_type = operation["operation_type"]
+        params = operation.get("params") or {}
+        logger.info(
+            "usb.admin_sent op=%s type=%s node=%s", operation.get("operation_id"), op_type, node_id
+        )
+
+        if op_type in SET_OPERATIONS:
+            return await self._execute_set(node_id, op_type, params, operation)
+
+        message, response_key = build_admin_request(op_type, params)
+        return await self._admin_roundtrip(node_id, message, response_key)
+
+    async def _execute_set(
+        self, node_id: str, op_type: str, params: dict[str, Any], operation: dict[str, Any]
+    ) -> dict[str, Any]:
+        """SET verificable (M1.3): GET previo -> SET -> GET de verificación.
+
+        El GET previo cumple doble función: auditar el valor anterior y
+        establecer el session passkey PKC (la librería lo almacena de cualquier
+        respuesta ADMIN_APP recibida, _onAdminReceive). El veredicto viaja en
+        result.verify — el contrato de eventos v1 no cambia; el backend mapea
+        a succeeded / succeeded_unconfirmed / verify_failed (ADR 0014).
+        """
+        from gateway.decoder.admin import SET_OPERATIONS, build_admin_request
+
+        spec = SET_OPERATIONS[op_type]
+        get_type, get_params = spec.verify_get
+        # Presupuesto por lectura: margen dentro del timeout global del consumer
+        read_timeout = max(10.0, float(operation.get("timeout_seconds") or 120) / 3)
+
+        try:
+            message, response_key = build_admin_request(get_type, get_params)
+            previous = await asyncio.wait_for(
+                self._admin_roundtrip(node_id, message, response_key), timeout=read_timeout
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            # Sin lectura previa tampoco hay passkey de sesión: el SET no podría
+            # autenticarse — fallar aquí es más honesto que un verify dudoso
+            raise TimeoutError("node did not answer pre-read (no admin session)") from None
+
+        await asyncio.to_thread(self._send_admin_blocking, node_id, spec.build_set(params))
+        logger.info("usb.admin_set_sent op=%s node=%s", operation.get("operation_id"), node_id)
+        await asyncio.sleep(self._settings.set_settle_seconds)
+
+        verified: dict[str, Any] | None = None
+        verify = "unavailable"
+        try:
+            message, response_key = build_admin_request(get_type, get_params)
+            verified = await asyncio.wait_for(
+                self._admin_roundtrip(node_id, message, response_key), timeout=read_timeout
+            )
+            verify = "confirmed" if spec.compare(params, verified) else "mismatch"
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                "usb.verify_unavailable op=%s node=%s", operation.get("operation_id"), node_id
+            )
+
+        logger.info(
+            "usb.admin_verify op=%s node=%s verify=%s", operation.get("operation_id"), node_id, verify
+        )
+        return {"previous": previous, "requested": params, "verified": verified, "verify": verify}
 
     async def send_command(self, command: dict[str, Any]) -> None:
         logger.warning("usb.command_rejected type=%s (not supported)", command.get("command_type"))

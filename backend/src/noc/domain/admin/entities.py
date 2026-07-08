@@ -5,11 +5,25 @@ from datetime import datetime
 from typing import Any, Literal
 
 OperationStatus = Literal[
-    "pending", "queued", "running", "succeeded", "failed", "timeout", "cancelled"
+    "pending",
+    "queued",
+    "running",
+    "succeeded",              # SET: confirmado por lectura posterior / GET: respuesta recibida
+    "succeeded_unconfirmed",  # SET enviado, pero la verificación no pudo leerse (M1.3)
+    "verify_failed",          # SET enviado, pero la lectura posterior NO coincide (M1.3)
+    "failed",
+    "timeout",
+    "cancelled",
 ]
 
-# M1.1 solo lectura; con los SET (M1.4) se añadirán succeeded_unconfirmed y verify_failed
-TERMINAL_STATUSES: tuple[OperationStatus, ...] = ("succeeded", "failed", "timeout", "cancelled")
+TERMINAL_STATUSES: tuple[OperationStatus, ...] = (
+    "succeeded",
+    "succeeded_unconfirmed",
+    "verify_failed",
+    "failed",
+    "timeout",
+    "cancelled",
+)
 IN_FLIGHT_STATUSES: tuple[OperationStatus, ...] = ("queued", "running")
 
 

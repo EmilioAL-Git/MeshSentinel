@@ -27,6 +27,7 @@ class SimNode:
     lon: float
     battery: float = 100.0
     has_gps: bool = True
+    fixed_position: bool = False
     uptime: int = 0
     rng: random.Random = field(default_factory=random.Random)
 
@@ -174,6 +175,44 @@ class SimulatedTransport(Transport):
         if op_type == "module_config.get":
             section = params.get("section", "telemetry")
             return {section: {"enabled": section == "telemetry"}}
+
+        # SETs verificables (M1.3): se aplican a la malla simulada y el verify
+        # se confirma con el mismo read-back que usaría el transporte real
+        if op_type == "owner.set":
+            previous = {"id": node.node_id, "longName": node.long_name, "shortName": node.short_name}
+            if params.get("short_name") is not None:
+                node.short_name = params["short_name"]
+            if params.get("long_name") is not None:
+                node.long_name = params["long_name"]
+            await asyncio.sleep(node.rng.uniform(0.5, 2.0))
+            verified = {"id": node.node_id, "longName": node.long_name, "shortName": node.short_name}
+            confirmed = all(
+                verified[key] == value
+                for key, value in (
+                    ("shortName", params.get("short_name")),
+                    ("longName", params.get("long_name")),
+                )
+                if value is not None
+            )
+            await self._announce(node)  # el nodo difunde su nueva identidad
+            return {
+                "previous": previous,
+                "requested": params,
+                "verified": verified,
+                "verify": "confirmed" if confirmed else "mismatch",
+            }
+        if op_type == "position.set_fixed":
+            previous = {"position": {"fixedPosition": node.fixed_position}}
+            node.lat, node.lon = params["latitude"], params["longitude"]
+            node.has_gps = True
+            node.fixed_position = True
+            await asyncio.sleep(node.rng.uniform(0.5, 2.0))
+            return {
+                "previous": previous,
+                "requested": params,
+                "verified": {"position": {"fixedPosition": True}},
+                "verify": "confirmed",
+            }
         raise ValueError(f"Unsupported admin operation: {op_type}")
 
     async def close(self) -> None:
