@@ -17,7 +17,11 @@ async def main() -> None:
     publisher = EventPublisher(settings.redis_url, settings.events_channel, settings.gateway_id)
     transport = create_transport(settings, publisher.publish)
     consumer = CommandConsumer(
-        settings.redis_url, settings.commands_stream, settings.commands_consumer_group, transport
+        settings.redis_url,
+        settings.commands_stream,
+        settings.commands_consumer_group,
+        transport,
+        publisher.publish,
     )
 
     stop = asyncio.Event()

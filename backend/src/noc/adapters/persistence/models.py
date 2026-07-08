@@ -101,6 +101,34 @@ class AlertModel(Base):
     last_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AdminOperationModel(Base):
+    __tablename__ = "admin_operations"
+    __table_args__ = (
+        Index("ix_admin_ops_status_next", "status", "next_attempt_at"),
+        Index("ix_admin_ops_node_created", "target_node_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    target_node_id: Mapped[str] = mapped_column(String(16))
+    gateway_id: Mapped[str] = mapped_column(String(64))
+    operation_type: Mapped[str] = mapped_column(String(32))
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=120)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(String(64), default="admin")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+
+
 class NotificationChannelModel(Base):
     __tablename__ = "notification_channels"
 

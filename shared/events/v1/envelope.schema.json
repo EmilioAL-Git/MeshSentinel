@@ -15,7 +15,8 @@
         "position.updated",
         "telemetry.received",
         "message.received",
-        "packet.raw"
+        "packet.raw",
+        "admin.operation"
       ]
     },
     "event_id": { "type": "string", "format": "uuid" },

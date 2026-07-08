@@ -26,6 +26,8 @@ export function describeEvent(event: NocEvent, nodeName: (id: string) => string)
       return `ALERTA [${String(p.severity)}] ${String(p.message)}`;
     case "alert.resolved":
       return `RESUELTA: ${String(p.message)}`;
+    case "admin.operation":
+      return `Operación #${String(p.operation_id)} → ${String(p.state)}`;
     default:
       return null;
   }

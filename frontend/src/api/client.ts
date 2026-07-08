@@ -186,6 +186,57 @@ export const createChannel = (body: Omit<ChannelOut, "id">) => send<ChannelOut>(
 export const deleteChannel = (id: number) => send<void>("DELETE", `/channels/${id}`);
 export const testChannel = (id: number) => send<{ status: string }>("POST", `/channels/${id}/test`);
 
+export type OperationStatus =
+  | "pending"
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "timeout"
+  | "cancelled";
+
+export interface CapabilityOut {
+  operation_type: string;
+  description: string;
+  kind: string;
+  allow_bulk: boolean;
+  destructive: boolean;
+  required_role: string;
+  param_choices: Record<string, string[]>;
+}
+
+export interface OperationOut {
+  id: number;
+  target_node_id: string;
+  gateway_id: string;
+  operation_type: string;
+  params: Record<string, unknown>;
+  status: OperationStatus;
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  timeout_seconds: number;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  created_by: string;
+  created_at: string | null;
+  queued_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+}
+
+export const fetchCapabilities = () => get<CapabilityOut[]>("/admin/capabilities");
+export const fetchOperations = (status?: string, limit = 100) =>
+  get<OperationOut[]>(`/admin/operations?limit=${limit}${status ? `&status=${status}` : ""}`);
+export const createOperation = (body: {
+  node_id: string;
+  operation_type: string;
+  params?: Record<string, unknown>;
+}) => send<OperationOut>("POST", "/admin/operations", body);
+export const cancelOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/cancel`);
+export const retryOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/retry`);
+
 export interface NocEvent {
   schema_version: number;
   event_type: string;

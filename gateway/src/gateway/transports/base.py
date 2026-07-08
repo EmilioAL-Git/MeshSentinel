@@ -43,5 +43,15 @@ class Transport(ABC):
     async def send_command(self, command: dict[str, Any]) -> None:
         """Ejecuta un comando v1 (command.schema.json) sobre la malla."""
 
+    async def execute_admin(self, operation: dict[str, Any]) -> dict[str, Any]:
+        """Ejecuta una operación de administración (M1.1: solo GET) y devuelve
+        el resultado decodificado. Debe lanzar TimeoutError si el nodo no
+        responde y ConnectionError si el transporte no está operativo.
+
+        operation: {operation_id, operation_type, params, timeout_seconds,
+        target_node_id}.
+        """
+        raise NotImplementedError(f"Transport '{self.name}' does not support admin operations")
+
     @abstractmethod
     async def close(self) -> None: ...

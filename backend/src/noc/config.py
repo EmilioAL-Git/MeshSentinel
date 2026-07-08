@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     # Cadencia del motor de alertas (Fase 3C, ADR 0012)
     alert_eval_interval_seconds: float = 30.0
 
+    # ── Pipeline de administración remota (M1.1, ADR 0013) ───────────
+    # Presupuesto de malla: operaciones despachadas por minuto (global)
+    admin_rate_limit_per_minute: int = 6
+    admin_default_timeout_seconds: int = 120
+    admin_max_attempts: int = 3
+    admin_scheduler_interval_seconds: float = 2.0
+
     api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = []
 

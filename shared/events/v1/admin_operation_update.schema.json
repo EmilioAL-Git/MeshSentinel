@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/admin_operation_update.schema.json",
+  "title": "AdminOperationUpdatePayload",
+  "description": "Payload de 'admin.operation' (gateway -> backend): progreso y resultado de una operación de administración remota encolada vía command.send_admin.",
+  "type": "object",
+  "required": ["operation_id", "state"],
+  "properties": {
+    "operation_id": { "type": "integer", "minimum": 1 },
+    "state": { "type": "string", "enum": ["running", "succeeded", "failed", "timeout"] },
+    "result": {
+      "type": ["object", "null"],
+      "description": "Respuesta decodificada (solo en succeeded); estructura según operation_type"
+    },
+    "error": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

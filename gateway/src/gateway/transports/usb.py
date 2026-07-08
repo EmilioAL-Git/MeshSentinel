@@ -33,6 +33,8 @@ class MeshtasticUsbTransport(Transport):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._iface: Any = None
         self._counters: Counter[str] = Counter()
+        # Waiters de respuestas admin: (node_id, response_key) -> Future
+        self._admin_waiters: dict[tuple[str, str], asyncio.Future[dict[str, Any]]] = {}
 
     # ── Callbacks PyPubSub: corren en el hilo lector de la librería ─────────
     # Nunca tocan Redis ni asyncio directamente; solo encolan thread-safe.
@@ -139,6 +141,8 @@ class MeshtasticUsbTransport(Transport):
             kind, packet = item
             if kind != "packet":
                 continue
+            if self._resolve_admin_response(packet):
+                continue
             try:
                 decoded = decode_packet(packet)
             except Exception:
@@ -177,9 +181,54 @@ class MeshtasticUsbTransport(Transport):
                 logger.debug("usb.close_error", exc_info=True)
             self._iface = None
 
+    # ── Administración remota (M1.1: solo GET) ──────────────────────────────
+
+    def _resolve_admin_response(self, packet: dict[str, Any]) -> bool:
+        decoded = packet.get("decoded")
+        if not isinstance(decoded, dict) or decoded.get("portnum") != "ADMIN_APP":
+            return False
+        admin = decoded.get("admin")
+        from_id = str(packet.get("fromId") or "").lower()
+        if isinstance(admin, dict):
+            self._counters["admin_responses"] += 1
+            for key in admin:
+                fut = self._admin_waiters.get((from_id, key))
+                if fut is not None and not fut.done():
+                    fut.set_result(admin)
+                    logger.info("usb.admin_response node=%s key=%s", from_id, key)
+        return True  # los paquetes ADMIN_APP no van al bus de telemetría
+
+    def _send_admin_blocking(self, node_id: str, message: Any) -> None:
+        # requestChannels=False: pedir canales al crear el Node remoto costaría
+        # varios paquetes LoRa innecesarios para un GET
+        node = self._iface.getNode(node_id, requestChannels=False)
+        node._sendAdmin(message, wantResponse=True)
+
+    async def execute_admin(self, operation: dict[str, Any]) -> dict[str, Any]:
+        from gateway.decoder.admin import build_admin_request
+
+        if self.status != "connected" or self._iface is None or self._loop is None:
+            raise ConnectionError("USB transport not connected")
+        node_id = str(operation["target_node_id"]).lower()
+        message, response_key = build_admin_request(
+            operation["operation_type"], operation.get("params") or {}
+        )
+        future: asyncio.Future[dict[str, Any]] = self._loop.create_future()
+        self._admin_waiters[(node_id, response_key)] = future
+        try:
+            await asyncio.to_thread(self._send_admin_blocking, node_id, message)
+            logger.info(
+                "usb.admin_sent op=%s type=%s node=%s",
+                operation.get("operation_id"), operation["operation_type"], node_id,
+            )
+            admin = await future  # el timeout lo impone el CommandConsumer
+            result = admin.get(response_key)
+            return result if isinstance(result, dict) else {"value": result}
+        finally:
+            self._admin_waiters.pop((node_id, response_key), None)
+
     async def send_command(self, command: dict[str, Any]) -> None:
-        # Modo observador (Fase 3A): la administración remota llega en Fase 4.
-        logger.warning("usb.command_rejected type=%s (observer mode)", command.get("command_type"))
+        logger.warning("usb.command_rejected type=%s (not supported)", command.get("command_type"))
 
     async def close(self) -> None:
         self._closed.set()

@@ -130,6 +130,52 @@ class SimulatedTransport(Transport):
     async def send_command(self, command: dict[str, Any]) -> None:
         logger.info("Simulated execution of %s -> %s", command.get("command_type"), command.get("target_node_id"))
 
+    # ── Administración simulada (M1.1): permite validar el pipeline completo
+    # sin hardware, con latencias y timeouts deterministas por seed (ADR 0007).
+
+    async def execute_admin(self, operation: dict[str, Any]) -> dict[str, Any]:
+        node_id = str(operation["target_node_id"]).lower()
+        node = next((n for n in self._nodes if n.node_id == node_id), None)
+        if node is None:
+            await asyncio.sleep(2)
+            raise TimeoutError(f"node {node_id} not in simulated mesh")
+
+        await asyncio.sleep(node.rng.uniform(0.5, 2.0))  # latencia LoRa simulada
+        if node.rng.random() < 0.10:  # ~10% de peticiones se pierden: ejercita reintentos
+            raise TimeoutError("simulated packet loss")
+
+        op_type = operation["operation_type"]
+        params = operation.get("params") or {}
+        if op_type == "metadata.get":
+            return {
+                "firmwareVersion": "2.7.0",
+                "deviceStateVersion": 24,
+                "hwModel": node.hw_model,
+                "hasWifi": False,
+                "hasBluetooth": True,
+                "role": node.role,
+            }
+        if op_type == "nodeinfo.get":
+            return {
+                "id": node.node_id,
+                "longName": node.long_name,
+                "shortName": node.short_name,
+                "hwModel": node.hw_model,
+                "isLicensed": False,
+            }
+        if op_type == "config.get":
+            section = params.get("section", "device")
+            canned: dict[str, dict[str, Any]] = {
+                "lora": {"region": "EU_868", "hopLimit": 3, "txEnabled": True, "sx126xRxBoostedGain": True},
+                "device": {"role": node.role, "nodeInfoBroadcastSecs": 10800},
+                "position": {"positionBroadcastSecs": 900, "gpsMode": "ENABLED" if node.has_gps else "NOT_PRESENT"},
+            }
+            return {section: canned.get(section, {"enabled": True})}
+        if op_type == "module_config.get":
+            section = params.get("section", "telemetry")
+            return {section: {"enabled": section == "telemetry"}}
+        raise ValueError(f"Unsupported admin operation: {op_type}")
+
     async def close(self) -> None:
         self._closed.set()
         self.status = "disconnected"

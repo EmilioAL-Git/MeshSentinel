@@ -7,10 +7,12 @@ from fastapi import FastAPI
 import uuid
 from datetime import datetime, timezone
 
-from noc.adapters.api.routers import alerts, dashboard, gateways, health, nodes, system
+from noc.adapters.api.routers import admin, alerts, dashboard, gateways, health, nodes, system
 from noc.adapters.api.ws import hub, router as ws_router
+from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
+from noc.application.admin.service import AdminOperationService
 from noc.application.alerting.engine import AlertEngine, AlertEngineLoop, AlertTransition
 from noc.application.alerting.notifier import AlertNotifier
 from noc.application.alerting.seed import seed_default_rules
@@ -32,6 +34,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ingest = IngestService(app.state.db.session_factory)
     app.state.event_bus.subscribe(ingest.handle_event)
     app.state.event_bus.subscribe(hub.broadcast)
+
+    # Pipeline de administración remota (M1.1, ADR 0013)
+    command_queue = RedisCommandQueue(settings.redis_url, settings.commands_stream_prefix)
+    admin_service = AdminOperationService(app.state.db.session_factory, command_queue, settings)
+    app.state.event_bus.subscribe(admin_service.handle_event)
+    admin_service.start()
+
     await app.state.event_bus.start()
 
     # Motor de alertas (ADR 0012): listeners = notificador + WebSocket
@@ -46,8 +55,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await admin_service.stop()
         await alert_loop.stop()
         await app.state.event_bus.stop()
+        await command_queue.close()
         await app.state.db.dispose()
         logger.info("Backend stopped")
 
@@ -88,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(system.router, prefix=settings.api_v1_prefix)
     app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
     app.include_router(alerts.router, prefix=settings.api_v1_prefix)
+    app.include_router(admin.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app
 
