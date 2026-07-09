@@ -8,6 +8,7 @@
 - POST /admin/batches/{id}/pause|resume|cancel
 """
 
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Literal
 
@@ -158,8 +159,9 @@ async def preview_batch(body: PreviewIn, request: Request) -> PreviewOut:
         total_selected=preview.total_selected,
         eligible_count=len(preview.eligible),
         excluded_count=len(preview.excluded),
-        eligible=[NodePreviewOut(**n.__dict__) for n in preview.eligible],
-        excluded=[NodePreviewOut(**n.__dict__) for n in preview.excluded],
+        # OJO: NodePreview usa slots=True (sin __dict__) — siempre asdict
+        eligible=[NodePreviewOut(**asdict(n)) for n in preview.eligible],
+        excluded=[NodePreviewOut(**asdict(n)) for n in preview.excluded],
         requires_verification=preview.requires_verification,
         estimated_seconds=preview.estimated_seconds,
         scope_description=preview.scope_description,

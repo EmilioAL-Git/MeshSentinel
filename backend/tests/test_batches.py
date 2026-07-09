@@ -271,6 +271,31 @@ async def test_history_filters(session_factory):
         assert await repo.list_batches(node_id="!ffffffff") == []
 
 
+async def test_preview_endpoint_serializes_slots_dataclass(session_factory):
+    """Regresión: NodePreview usa slots=True — el router debe usar asdict
+    (mismo bug que capabilities en M1.1)."""
+    from unittest.mock import Mock
+
+    from noc.adapters.api.routers.admin_batches import PreviewIn, ScopeIn, preview_batch
+
+    await seed_nodes(session_factory)
+    _, batches, _ = make_services(session_factory)
+    request = Mock()
+    request.app.state.batches = batches
+
+    out = await preview_batch(
+        PreviewIn(
+            operation_type="metadata.get",
+            params={},
+            scope=ScopeIn(node_ids=[*NODES[:2], "!ffffffff"]),
+        ),
+        request,
+    )
+    assert out.eligible_count == 2
+    assert out.excluded_count == 1
+    assert out.excluded[0].blockers
+
+
 async def test_estimate_uses_rate_limit():
     service = BatchService(None, make_settings(admin_rate_limit_per_minute=6))  # type: ignore[arg-type]
     assert service.estimate_seconds(6) == 60
