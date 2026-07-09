@@ -65,6 +65,26 @@ class Telemetry:
 
 
 @dataclass(slots=True)
+class NodeGatewayLink:
+    """Estado actual (no histórico) de la relación N:M nodo<->pasarela (M6.1).
+
+    Una fila por par (node_id, gateway_id): lo último visto de ESA pasarela
+    para ese nodo. `nodes.gateway_id`/`rssi`/`snr`/`hops_away` siguen siendo
+    una caché derivada de estas filas (ver `gateway_link_selection`), nunca
+    la fuente de verdad.
+    """
+
+    node_id: str
+    gateway_id: str
+    rssi: int | None = None
+    snr: float | None = None
+    hops_away: int | None = None
+    via_mqtt: bool = False
+    first_heard_at: datetime | None = None
+    last_heard_at: datetime | None = None
+
+
+@dataclass(slots=True)
 class GatewayInfo:
     gateway_id: str
     status: str

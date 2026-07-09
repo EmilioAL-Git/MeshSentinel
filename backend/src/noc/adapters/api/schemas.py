@@ -2,7 +2,15 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from noc.domain.nodes.entities import GatewayInfo, Node, NodeSummary, Position, Tag, Telemetry
+from noc.domain.nodes.entities import (
+    GatewayInfo,
+    Node,
+    NodeGatewayLink,
+    NodeSummary,
+    Position,
+    Tag,
+    Telemetry,
+)
 
 
 class PositionOut(BaseModel):
@@ -122,3 +130,18 @@ class GatewayOut(BaseModel):
     @classmethod
     def from_entity(cls, g: GatewayInfo) -> "GatewayOut":
         return cls(**{f: getattr(g, f) for f in cls.model_fields})
+
+
+class NodeGatewayLinkOut(BaseModel):
+    node_id: str
+    gateway_id: str
+    rssi: int | None
+    snr: float | None
+    hops_away: int | None
+    via_mqtt: bool
+    first_heard_at: datetime | None
+    last_heard_at: datetime | None
+
+    @classmethod
+    def from_entity(cls, link: NodeGatewayLink) -> "NodeGatewayLinkOut":
+        return cls(**{f: getattr(link, f) for f in cls.model_fields})

@@ -72,6 +72,29 @@ class NodeModel(Base):
     is_ignored: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class NodeGatewayLinkModel(Base):
+    """N:M nodo<->pasarela (M6.1): estado actual, no histórico.
+
+    `gateway_id` no lleva ForeignKey a `gateways.id`, igual que `nodes.
+    gateway_id` y `admin_operations.gateway_id`: un evento del gateway puede
+    llegar antes de que exista fila en `gateways` (que solo se crea al
+    recibir el primer `gateway.status`).
+    """
+
+    __tablename__ = "node_gateway_links"
+
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True
+    )
+    gateway_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    rssi: Mapped[int | None] = mapped_column(Integer)
+    snr: Mapped[float | None] = mapped_column(Float)
+    hops_away: Mapped[int | None] = mapped_column(Integer)
+    via_mqtt: Mapped[bool] = mapped_column(Boolean, default=False)
+    first_heard_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_heard_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class TagModel(Base):
     __tablename__ = "tags"
 

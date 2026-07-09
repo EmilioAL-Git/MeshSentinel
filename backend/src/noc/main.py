@@ -54,7 +54,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.event_bus.subscribe(app.state.gateways.handle_event)
 
     ingest = IngestService(
-        app.state.db.session_factory, app.state.gateways, settings.gateway_stale_after_seconds
+        app.state.db.session_factory,
+        app.state.gateways,
+        settings.gateway_stale_after_seconds,
+        settings.node_offline_after_seconds,
     )
     app.state.event_bus.subscribe(ingest.handle_event)
     app.state.event_bus.subscribe(hub.broadcast)

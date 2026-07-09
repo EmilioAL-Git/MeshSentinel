@@ -2,9 +2,16 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from noc.adapters.api.deps import SessionDep
-from noc.adapters.api.schemas import NodeOut, NodeSummaryOut, PositionOut, TelemetryOut
+from noc.adapters.api.schemas import (
+    NodeGatewayLinkOut,
+    NodeOut,
+    NodeSummaryOut,
+    PositionOut,
+    TelemetryOut,
+)
 from noc.adapters.persistence.organization_repositories import SqlTagRepository
 from noc.adapters.persistence.repositories import (
+    SqlNodeGatewayLinkRepository,
     SqlNodeRepository,
     SqlPositionRepository,
     SqlTelemetryRepository,
@@ -100,6 +107,20 @@ async def node_positions(
         raise HTTPException(status_code=404, detail="Node not found")
     positions = await SqlPositionRepository(session).list_for_node(node_id, limit)
     return [PositionOut.from_entity(p) for p in positions]
+
+
+@router.get("/{node_id}/gateways", response_model=list[NodeGatewayLinkOut])
+async def node_gateways(node_id: str, session: SessionDep) -> list[NodeGatewayLinkOut]:
+    """Inspección de solo lectura de la relación N:M nodo<->pasarela (M6.1).
+
+    No sustituye a `nodes.gateway_id` (la caché derivada que sigue usando el
+    resto del sistema): expone TODAS las pasarelas que han oído a este nodo,
+    orden por recepción más reciente.
+    """
+    if await SqlNodeRepository(session).get(node_id) is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    links = await SqlNodeGatewayLinkRepository(session).list_for_node(node_id)
+    return [NodeGatewayLinkOut.from_entity(link) for link in links]
 
 
 @router.get("/{node_id}/telemetry", response_model=list[TelemetryOut])

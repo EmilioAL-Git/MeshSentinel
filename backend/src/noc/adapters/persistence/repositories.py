@@ -16,17 +16,27 @@ from sqlalchemy.orm import aliased
 from noc.adapters.persistence.models import (
     GatewayModel,
     GroupMemberModel,
+    NodeGatewayLinkModel,
     NodeModel,
     NodeTagModel,
     PositionModel,
     TagModel,
     TelemetryModel,
 )
-from noc.domain.nodes.entities import GatewayInfo, Node, NodeSummary, Position, Tag, Telemetry
+from noc.domain.nodes.entities import (
+    GatewayInfo,
+    Node,
+    NodeGatewayLink,
+    NodeSummary,
+    Position,
+    Tag,
+    Telemetry,
+)
 
 T = TypeVar("T")
 
-# Campos de Node actualizables desde un avistamiento (node.seen)
+# Campos de identidad de Node actualizables desde un avistamiento (node.seen):
+# propiedades del nodo en sí, no de la pasarela que lo oyó.
 _NODE_SIGHTING_FIELDS = (
     "node_num",
     "short_name",
@@ -34,13 +44,12 @@ _NODE_SIGHTING_FIELDS = (
     "hw_model",
     "firmware_version",
     "role",
-    "snr",
-    "rssi",
-    "hops_away",
-    "via_mqtt",
     "public_key",
-    "gateway_id",
 )
+# `gateway_id`/`rssi`/`snr`/`hops_away`/`via_mqtt` ya NO se copian directo del
+# avistamiento: dependen de qué pasarela oyó al nodo, se derivan de
+# `node_gateway_links` vía `SqlNodeRepository.apply_gateway_cache` (ver
+# `IngestService._on_node_seen`, M6.1).
 
 
 def _to_entity(model: Any, entity_cls: type[T], mapping: dict[str, str] | None = None) -> T:
@@ -72,6 +81,32 @@ class SqlNodeRepository:
         existing.last_seen_at = seen_at
         await self._session.flush()
         return _node_entity(existing)
+
+    async def apply_gateway_cache(
+        self,
+        node_id: str,
+        gateway_id: str,
+        rssi: int | None,
+        snr: float | None,
+        hops_away: int | None,
+        via_mqtt: bool,
+    ) -> None:
+        """Escribe en `nodes` la caché derivada de la pasarela primaria (M6.1).
+
+        Requiere que el nodo ya exista (llamar siempre después de
+        `upsert_from_sighting`/`touch_last_seen` en la misma transacción).
+        No es la fuente de verdad: solo refleja lo que `node_gateway_links` +
+        `select_primary_link` ya decidieron.
+        """
+        existing = await self._session.get(NodeModel, node_id)
+        if existing is None:
+            return
+        existing.gateway_id = gateway_id
+        existing.rssi = rssi
+        existing.snr = snr
+        existing.hops_away = hops_away
+        existing.via_mqtt = via_mqtt
+        await self._session.flush()
 
     async def touch_last_seen(self, node_id: str, gateway_id: str | None, seen_at: datetime) -> None:
         existing = await self._session.get(NodeModel, node_id)
@@ -190,6 +225,38 @@ class SqlTelemetryRepository:
             select(func.count()).select_from(TelemetryModel).where(TelemetryModel.received_at >= since)
         )
         return int(result or 0)
+
+
+class SqlNodeGatewayLinkRepository:
+    """N:M nodo<->pasarela (M6.1): estado actual por par, no histórico."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(self, link: NodeGatewayLink) -> NodeGatewayLink:
+        existing = await self._session.get(NodeGatewayLinkModel, (link.node_id, link.gateway_id))
+        if existing is None:
+            existing = NodeGatewayLinkModel(
+                node_id=link.node_id,
+                gateway_id=link.gateway_id,
+                first_heard_at=link.first_heard_at or link.last_heard_at,
+            )
+            self._session.add(existing)
+        for field in ("rssi", "snr", "hops_away", "via_mqtt"):
+            value = getattr(link, field)
+            if value is not None:
+                setattr(existing, field, value)
+        existing.last_heard_at = link.last_heard_at
+        await self._session.flush()
+        return _to_entity(existing, NodeGatewayLink)
+
+    async def list_for_node(self, node_id: str) -> list[NodeGatewayLink]:
+        rows = await self._session.scalars(
+            select(NodeGatewayLinkModel)
+            .where(NodeGatewayLinkModel.node_id == node_id)
+            .order_by(NodeGatewayLinkModel.last_heard_at.desc())
+        )
+        return [_to_entity(r, NodeGatewayLink) for r in rows]
 
 
 class SqlGatewayRepository:
