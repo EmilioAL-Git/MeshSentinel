@@ -184,7 +184,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
               disabled={!canSubmit || create.isPending}
               onClick={submit}
             >
-              Encolar
+              Añadir a la cola
             </button>
           ) : (
             <button
@@ -220,7 +220,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
               disabled={confirmText !== nodeId || create.isPending}
               onClick={submit}
             >
-              Confirmar y encolar
+              Confirmar y añadir a la cola
             </button>
             <button
               style={{ ...input, marginLeft: 8 }}

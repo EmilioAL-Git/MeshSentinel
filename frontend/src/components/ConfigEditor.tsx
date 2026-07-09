@@ -509,7 +509,7 @@ export function ConfigEditor({ summaries }: Props) {
                 disabled={confirmText !== nodeId || apply.isPending}
                 onClick={() => apply.mutate(payload)}
               >
-                Confirmar y encolar
+                Confirmar y añadir a la cola
               </button>
               <button style={{ ...btn, marginLeft: 8 }} onClick={() => { setConfirmOpen(false); setConfirmText(""); }}>
                 Cancelar
