@@ -99,3 +99,28 @@ conocer" ese nodo primero, opcional y bajo demanda del operador.
 - Limitación asumida y documentada: "Confirmado" es un techo de certeza más
   bajo que en los SET verificables (M1.3); es inherente al firmware, no una
   carencia del NOC.
+
+## Errata (2026-07-09): ACK implícito confundido con ACK confirmado
+
+Bug encontrado en validación de M4.2 por el usuario: favoritos remotos se
+aplicaban correctamente en el dispositivo, pero ignorados remotos se
+marcaban "Confirmado" sin haberse aplicado de verdad. Causa: `_ack_roundtrip`
+(`gateway/transports/usb.py`) solo miraba `routing.errorReason == "NONE"`
+para decidir `ack: true`. Pero la propia librería oficial (`Node.onAckNak`)
+distingue dos casos cuando `errorReason == "NONE"`: si `packet["from"]`
+coincide con el nodo local, es un **ACK implícito** — el radio local se rindió
+tras agotar sus reintentos y generó una respuesta sintética ("Received an
+implicit ACK. Packet will likely arrive, but cannot be guaranteed."), sin
+confirmación real de que el destino procesó el AdminMessage; si `from` es
+distinto del nodo local, es un ACK real. Nuestro código trataba ambos casos
+igual, inflando la confianza justo en el escenario ack-only donde no hay
+ninguna otra verificación posible (a diferencia de los SET de M1.3, que sí
+tienen GET de verificación como red de seguridad).
+
+**Corrección**: `_ack_roundtrip` ahora replica la distinción de la librería.
+Un ACK implícito se trata como `ack: false` (`error_reason:
+"IMPLICIT_ACK_ONLY"`), lo que fuerza el reintento normal del pipeline (ADR
+0013, backoff 10→300 s) en vez de marcar la operación como terminal
+"Confirmado". Es coherente con lo observado manualmente por el usuario con
+el CLI oficial: la operación necesitó varios reintentos (`NAK,
+MAX_RETRANSMIT` ×3) antes de recibir un ACK genuino y aplicarse.
