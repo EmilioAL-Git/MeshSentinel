@@ -339,6 +339,15 @@ class MeshtasticUsbTransport(Transport):
         `Node.setIgnored` en la librería oficial, y con el que el CLI sí
         consigue una confirmación real (tras varios NAK MAX_RETRANSMIT,
         eventualmente un ACK genuino).
+
+        Passkey PKC forzado a refrescar en cada intento (bug corregido, ADR
+        0019 errata): `ensureSessionKey()` es un no-op si el nodo YA tiene un
+        `adminSessionPassKey` cacheado (lo comprueba, no lo renueva). El
+        firmware trata ese passkey como un nonce de un solo uso — al agotar
+        `max_attempts` con reenvío redundante (errata 4) el primer intento lo
+        consume y los siguientes lo reutilizan sin saberlo, y el firmware los
+        rechaza con NAK `ADMIN_BAD_SESSION_KEY`. Se limpia la caché de la
+        librería antes de cada intento para forzar un handshake nuevo.
         """
         from gateway.decoder.admin import ACK_ONLY_OPERATIONS
 
@@ -348,6 +357,7 @@ class MeshtasticUsbTransport(Transport):
 
         def _send(on_ack: Any) -> None:
             node = self._iface.getNode(node_id, requestChannels=False)
+            self._iface._getOrCreateByNum(node.nodeNum).pop("adminSessionPassKey", None)
             node.ensureSessionKey()
             node._sendAdmin(set_msg, wantResponse=True, onResponse=on_ack)
 

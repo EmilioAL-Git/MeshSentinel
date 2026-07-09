@@ -204,3 +204,24 @@ evento de actividad `resend_scheduled` (aditivo, contrato v1 intacto) para
 no confundirlo con `retry_scheduled` (que sí implica fallo). El badge
 Pendiente/Enviado/Confirmado del panel de M4.2 refleja fielmente este ciclo:
 solo llega a "Confirmado" tras el último intento, nunca antes.
+
+## Errata 5 (2026-07-09): el reenvío redundante reutilizaba un passkey PKC
+de un solo uso → `ADMIN_BAD_SESSION_KEY`
+
+Consecuencia inmediata de la errata 4: `node.ensureSessionKey()` (librería
+oficial) es un no-op si el nodo ya tiene un `adminSessionPassKey` cacheado
+en memoria del proceso — comprueba que exista, no lo renueva. El firmware
+trata ese passkey como un nonce de un solo uso (protección anti-replay del
+canal admin): el primer intento del reenvío redundante lo consume, y los
+intentos 2 y 3 lo reenviaban sin saberlo, así que el firmware los rechazaba
+con NAK `ADMIN_BAD_SESSION_KEY` — paradójicamente convirtiendo una operación
+que probablemente ya había tenido éxito en el intento 1 en un "failed" final
+tras agotar los 3 intentos con ese error.
+
+**Corrección**: `_execute_ack_set` limpia la entrada
+`adminSessionPassKey` de la caché de la librería (`iface._getOrCreateByNum`)
+antes de cada intento (primero o reenvío), forzando que `ensureSessionKey()`
+pida un passkey nuevo cada vez en vez de reutilizar uno potencialmente ya
+consumido. Coste: un roundtrip extra de `SESSIONKEY_CONFIG` por intento;
+aceptable frente al riesgo de reportar "failed" una operación que sí se
+aplicó.
