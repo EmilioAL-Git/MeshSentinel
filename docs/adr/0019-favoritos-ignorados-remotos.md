@@ -124,3 +124,30 @@ Un ACK implícito se trata como `ack: false` (`error_reason:
 "Confirmado". Es coherente con lo observado manualmente por el usuario con
 el CLI oficial: la operación necesitó varios reintentos (`NAK,
 MAX_RETRANSMIT` ×3) antes de recibir un ACK genuino y aplicarse.
+
+## Errata 2 (2026-07-09): `wantResponse=False` privaba de confirmación real
+
+Tras la corrección anterior, `ignored.set` empezó a funcionar, pero
+`ignored.remove` seguía sin aplicarse pese a recibir un ACK **no implícito**
+(`packet["from"]` distinto del nodo local) en el primer intento. Causa raíz
+más profunda: `_execute_ack_set` llamaba a `_sendAdmin(set_msg,
+wantResponse=False, onResponse=on_ack)`, razonando que no había AdminMessage
+de respuesta que correlacionar para estas operaciones. Pero
+`want_response` en el `MeshPacket` no es solo eso: es el campo que activa el
+seguimiento fiable de `mesh_interface.sendData` (reintentos por la propia
+malla y generación de NAK/ACK reales) — con `wantResponse=False` nunca se
+solicita al destino ninguna confirmación de verdad, así que cualquier "ack"
+recibido (implícito o no) no era una señal fiable. `Node.setFavorite` /
+`Node.setIgnored` en la librería oficial usan `wantResponse=True` (su valor
+por defecto) precisamente por esto — el mismo camino con el que el CLI del
+usuario, tras varios `NAK, MAX_RETRANSMIT`, consigue una confirmación real.
+
+**Corrección**: `_execute_ack_set` pasa ahora `wantResponse=True`, igual que
+los wrappers oficiales. Sin cambios de esquema (contrato v1, `verify:
+"unavailable"` intactos) ni de la lógica de `_ack_roundtrip` de la errata
+anterior — ambas correcciones son complementarias: una decide qué cuenta
+como "ack verdadero" una vez recibido, la otra asegura que se solicita un
+ack verdadero en primer lugar. PENDIENTE validación del usuario con
+hardware para `ignored.remove` (y confirmar que no introduce regresión en
+`favorite.set/remove`, `ignored.set` ni `contact.add`, que comparten el
+mismo código).

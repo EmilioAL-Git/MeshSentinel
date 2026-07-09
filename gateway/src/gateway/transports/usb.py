@@ -321,6 +321,18 @@ class MeshtasticUsbTransport(Transport):
         wrappers (`Node.setFavorite`, etc.); usamos `_sendAdmin` directamente
         para inyectar nuestro propio callback de ACK en vez del genérico de la
         librería (que solo anota estado interno, no observable desde aquí).
+
+        `wantResponse=True` (bug corregido, ADR 0019 errata): antes se pasaba
+        `False` razonando que no hay AdminMessage de respuesta que correlacionar
+        para estas operaciones. Pero `want_response` en el MeshPacket no es solo
+        eso: es lo que activa el seguimiento fiable (reintentos por la propia
+        malla y NAK/"ACK implícito" reales) en `mesh_interface.sendData`. Con
+        `wantResponse=False` no se solicita ninguna confirmación real al
+        destino, así que cualquier "ack" observado no era fiable — exactamente
+        el mismo `wantResponse=True` (por defecto) que usan `Node.setFavorite`/
+        `Node.setIgnored` en la librería oficial, y con el que el CLI sí
+        consigue una confirmación real (tras varios NAK MAX_RETRANSMIT,
+        eventualmente un ACK genuino).
         """
         from gateway.decoder.admin import ACK_ONLY_OPERATIONS
 
@@ -331,7 +343,7 @@ class MeshtasticUsbTransport(Transport):
         def _send(on_ack: Any) -> None:
             node = self._iface.getNode(node_id, requestChannels=False)
             node.ensureSessionKey()
-            node._sendAdmin(set_msg, wantResponse=False, onResponse=on_ack)
+            node._sendAdmin(set_msg, wantResponse=True, onResponse=on_ack)
 
         ack = await self._ack_roundtrip(_send, timeout)
         logger.info(
