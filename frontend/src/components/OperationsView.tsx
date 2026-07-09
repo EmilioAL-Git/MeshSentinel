@@ -11,6 +11,7 @@ import {
   type OperationOut,
   type OperationStatus,
 } from "../api/client";
+import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
 
 const STATUS_COLOR: Record<OperationStatus, string> = {
@@ -139,14 +140,12 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
       <div style={styles.card}>
         <h2 style={{ marginTop: 0 }}>Nueva operación remota</h2>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-          <select style={input} value={nodeId} onChange={(e) => { setNodeId(e.target.value); setConfirming(false); }}>
-            <option value="">— nodo —</option>
-            {summaries.map((s) => (
-              <option key={s.node.node_id} value={s.node.node_id}>
-                {displayName(s.node)} {s.node.online ? "· online" : "· offline"}
-              </option>
-            ))}
-          </select>
+          <NodeSelect
+            value={nodeId}
+            onChange={(id) => { setNodeId(id); setConfirming(false); }}
+            options={summaries}
+            showOnlineStatus
+          />
           <select style={input} value={opType} onChange={(e) => resetOp(e.target.value)}>
             {(capabilities.data ?? []).map((c) => (
               <option key={c.operation_type} value={c.operation_type}>
@@ -164,20 +163,16 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
           )}
           {paramFields.map((f) =>
             f.name === "subject_node_id" ? (
-              <select
+              <NodeSelect
                 key={f.name}
-                style={input}
                 value={fieldValues[f.name] ?? ""}
-                onChange={(e) => {
-                  setFieldValues({ ...fieldValues, [f.name]: e.target.value });
+                onChange={(id) => {
+                  setFieldValues({ ...fieldValues, [f.name]: id });
                   setConfirming(false);
                 }}
-              >
-                <option value="">— nodo sujeto —</option>
-                {summaries.filter((s) => s.node.node_id !== nodeId).map((s) => (
-                  <option key={s.node.node_id} value={s.node.node_id}>{displayName(s.node)}</option>
-                ))}
-              </select>
+                options={summaries.filter((s) => s.node.node_id !== nodeId)}
+                placeholder="— nodo sujeto —"
+              />
             ) : (
               <input
                 key={f.name}

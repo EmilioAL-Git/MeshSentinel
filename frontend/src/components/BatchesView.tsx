@@ -17,6 +17,7 @@ import {
   type NodeSummaryOut,
   type OperationOut,
 } from "../api/client";
+import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
 
 const input: CSSProperties = {
@@ -206,17 +207,13 @@ export function BatchWizard({
         </select>
         {paramFields.map((f) =>
           f.name === "subject_node_id" ? (
-            <select
+            <NodeSelect
               key={f.name}
-              style={input}
               value={otherFieldValues[f.name] ?? ""}
-              onChange={(e) => { setOtherFieldValues({ ...otherFieldValues, [f.name]: e.target.value }); setPreview(null); }}
-            >
-              <option value="">— nodo sujeto —</option>
-              {summaries.map((s) => (
-                <option key={s.node.node_id} value={s.node.node_id}>{displayName(s.node)}</option>
-              ))}
-            </select>
+              onChange={(id) => { setOtherFieldValues({ ...otherFieldValues, [f.name]: id }); setPreview(null); }}
+              options={summaries}
+              placeholder="— nodo sujeto —"
+            />
           ) : (
             <input
               key={f.name}

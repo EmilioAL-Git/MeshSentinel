@@ -5,7 +5,8 @@ import {
   type ActivityEntry,
   type ActivitySeverity,
 } from "../activity";
-import { displayName, type GatewayOut, type NodeSummaryOut } from "../api/client";
+import { type GatewayOut, type NodeSummaryOut } from "../api/client";
+import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
 
 const input: CSSProperties = {
@@ -102,14 +103,7 @@ export function ActivityConsole({
 
       {/* Filtros */}
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", margin: "0.8rem 0" }}>
-        <select style={input} value={nodeFilter} onChange={(e) => setNodeFilter(e.target.value)}>
-          <option value="">— todos los nodos —</option>
-          {summaries.map((s) => (
-            <option key={s.node.node_id} value={s.node.node_id}>
-              {displayName(s.node)}
-            </option>
-          ))}
-        </select>
+        <NodeSelect value={nodeFilter} onChange={setNodeFilter} options={summaries} placeholder="— todos los nodos —" />
         <select style={input} value={batchFilter} onChange={(e) => setBatchFilter(e.target.value)}>
           <option value="">— todos los batches —</option>
           {batchIds.map((b) => (

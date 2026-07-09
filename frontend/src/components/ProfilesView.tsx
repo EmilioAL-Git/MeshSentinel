@@ -19,6 +19,7 @@ import {
   type ProfileSections,
   type SyncPreviewOut,
 } from "../api/client";
+import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
 import { coerceValue, displayValue, FieldControl, readCurrentValue, RISK_STYLE } from "./ConfigEditor";
 
@@ -208,14 +209,7 @@ function ProfileEditor({
           />
         )}
         <span style={{ display: "flex", gap: "0.4rem", alignItems: "center", marginLeft: "auto" }}>
-          <select style={input} value={copyNodeId} onChange={(e) => setCopyNodeId(e.target.value)}>
-            <option value="">— copiar desde nodo —</option>
-            {summaries.map((s) => (
-              <option key={s.node.node_id} value={s.node.node_id}>
-                {displayName(s.node)}
-              </option>
-            ))}
-          </select>
+          <NodeSelect value={copyNodeId} onChange={setCopyNodeId} options={summaries} placeholder="— copiar desde nodo —" />
           <button
             style={btn}
             disabled={!copyNodeId || copyFromNode.isPending}
@@ -350,14 +344,7 @@ function ComparePanel({
     <div style={{ border: "1px solid #30363d", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
         <h3 style={{ margin: 0 }}>Comparar con nodo</h3>
-        <select style={input} value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
-          <option value="">— nodo —</option>
-          {summaries.map((s) => (
-            <option key={s.node.node_id} value={s.node.node_id}>
-              {displayName(s.node)} {s.node.online ? "· online" : "· offline"}
-            </option>
-          ))}
-        </select>
+        <NodeSelect value={nodeId} onChange={setNodeId} options={summaries} showOnlineStatus />
         <select style={input} value={version} onChange={(e) => setVersion(e.target.value)}>
           <option value="">última versión</option>
           {versions.map((v) => (

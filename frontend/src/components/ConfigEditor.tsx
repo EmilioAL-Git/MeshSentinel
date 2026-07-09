@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   applyNodeConfig,
-  displayName,
   fetchConfigSchema,
   fetchNodeConfig,
   fetchOperations,
@@ -13,6 +12,7 @@ import {
   type NodeSummaryOut,
   type SectionSnapshot,
 } from "../api/client";
+import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
 
 interface Props {
@@ -342,14 +342,7 @@ export function ConfigEditor({ summaries }: Props) {
       <div style={styles.card}>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
           <h2 style={{ margin: 0 }}>Editor de configuración</h2>
-          <select style={input} value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
-            <option value="">— nodo —</option>
-            {summaries.map((s) => (
-              <option key={s.node.node_id} value={s.node.node_id}>
-                {displayName(s.node)} {s.node.online ? "· online" : "· offline"}
-              </option>
-            ))}
-          </select>
+          <NodeSelect value={nodeId} onChange={setNodeId} options={summaries} showOnlineStatus />
           <button
             style={{ ...btn, opacity: nodeId ? 1 : 0.5 }}
             disabled={!nodeId || refresh.isPending}

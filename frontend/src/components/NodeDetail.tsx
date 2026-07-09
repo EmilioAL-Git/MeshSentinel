@@ -4,7 +4,6 @@ import {
   addGroupMember,
   createGroup,
   createTag,
-  displayName,
   fetchGroups,
   fetchKnownRemoteFlags,
   fetchNode,
@@ -22,6 +21,7 @@ import {
   type RemoteFlagSyncState,
   type RemoteFlagType,
 } from "../api/client";
+import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
 
 interface Props {
@@ -165,18 +165,12 @@ function RemoteFlagPanel({
         </tbody>
       </table>
       <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center", marginTop: "0.4rem" }}>
-        <select
-          style={{ background: "#0d1117", border: "1px solid #30363d", color: "#e6edf3", borderRadius: 6, padding: "0.3rem 0.5rem" }}
+        <NodeSelect
           value={subjectNodeId}
-          onChange={(e) => setSubjectNodeId(e.target.value)}
-        >
-          <option value="">— nodo sujeto —</option>
-          {subjectOptions.map((s) => (
-            <option key={s.node.node_id} value={s.node.node_id}>
-              {displayName(s.node)}
-            </option>
-          ))}
-        </select>
+          onChange={setSubjectNodeId}
+          options={subjectOptions}
+          placeholder="— nodo sujeto —"
+        />
         <button
           style={btn}
           disabled={!subjectNodeId || queueFlag.isPending}
