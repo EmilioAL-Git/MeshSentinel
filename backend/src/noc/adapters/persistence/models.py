@@ -169,7 +169,7 @@ class AdminOperationModel(Base):
     gateway_id: Mapped[str] = mapped_column(String(64))
     operation_type: Mapped[str] = mapped_column(String(32))
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    status: Mapped[str] = mapped_column(String(16), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
     priority: Mapped[int] = mapped_column(Integer, default=100)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3)
