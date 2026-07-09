@@ -19,7 +19,7 @@ interface Props {
   summaries: NodeSummaryOut[];
 }
 
-const RISK_STYLE: Record<string, CSSProperties> = {
+export const RISK_STYLE: Record<string, CSSProperties> = {
   SAFE: { background: "#1f6f43", color: "#fff" },
   WARNING: { background: "#9e6a03", color: "#fff" },
   DANGEROUS: { background: "#b62324", color: "#fff" },
@@ -40,20 +40,20 @@ function snakeToCamel(name: string): string {
   return name.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
 
-function readCurrentValue(current: Record<string, unknown>, fieldName: string): unknown {
+export function readCurrentValue(current: Record<string, unknown>, fieldName: string): unknown {
   if (fieldName in current) return current[fieldName];
   const camel = snakeToCamel(fieldName);
   return camel in current ? current[camel] : undefined;
 }
 
-function displayValue(value: unknown): string {
+export function displayValue(value: unknown): string {
   if (value === undefined || value === null) return "—";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
 
-function coerceValue(field: ConfigFieldSchema, raw: string): unknown {
+export function coerceValue(field: ConfigFieldSchema, raw: string): unknown {
   if (field.kind === "bool") return raw === "true";
   if (field.kind === "int") return raw === "" ? 0 : Number.parseInt(raw, 10);
   if (field.kind === "float") return raw === "" ? 0 : Number.parseFloat(raw);
@@ -75,16 +75,18 @@ function equalValues(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
-function FieldControl({
+export function FieldControl({
   field,
   currentValue,
   editedRaw,
   onChange,
+  placeholder,
 }: {
   field: ConfigFieldSchema;
   currentValue: unknown;
   editedRaw: string | undefined;
   onChange: (raw: string) => void;
+  placeholder?: string;
 }) {
   if (!field.editable) {
     return (
@@ -94,10 +96,11 @@ function FieldControl({
     );
   }
   const value = editedRaw ?? "";
+  const emptyLabel = placeholder ?? "— sin cambio —";
   if (field.kind === "enum") {
     return (
       <select style={input} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">— sin cambio —</option>
+        <option value="">{emptyLabel}</option>
         {field.enum_values.map((ev) => (
           <option key={ev} value={ev}>
             {ev}
@@ -109,7 +112,7 @@ function FieldControl({
   if (field.kind === "bool") {
     return (
       <select style={input} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">— sin cambio —</option>
+        <option value="">{emptyLabel}</option>
         <option value="true">true</option>
         <option value="false">false</option>
       </select>
@@ -121,7 +124,7 @@ function FieldControl({
         style={input}
         type="number"
         step={field.kind === "float" ? "any" : 1}
-        placeholder={displayValue(currentValue)}
+        placeholder={placeholder ?? displayValue(currentValue)}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -131,7 +134,7 @@ function FieldControl({
     <input
       style={input}
       type="text"
-      placeholder={displayValue(currentValue)}
+      placeholder={placeholder ?? displayValue(currentValue)}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />

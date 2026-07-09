@@ -299,6 +299,94 @@ def validate_field_value(section: str, field_name: str, value: Any) -> Any:
     raise ValueError(f"unsupported kind '{fmeta.kind}' for '{field_name}'")
 
 
+# Orden de aplicación de SETs (M1.4): lo menos disruptivo primero; los cambios
+# que pueden reiniciar el nodo (lora, security) al final para no interrumpir el
+# resto de operaciones. El scheduler solo pone 1 en vuelo por gateway, así que
+# el orden se traduce en el orden de despacho.
+APPLY_ORDER = [
+    "owner",
+    "display", "device_ui", "position", "bluetooth", "power",
+    "network", "device",
+    # Módulos (todos SAFE)
+    "mqtt", "telemetry", "canned_message", "external_notification", "store_forward",
+    "range_test", "serial", "neighbor_info", "ambient_lighting", "detection_sensor",
+    "paxcounter", "audio", "remote_hardware", "statusmessage", "traffic_management", "tak",
+    # Riesgo mayor al final
+    "lora", "security",
+]
+
+
+def apply_order_key(section: str) -> tuple[int, str]:
+    try:
+        return (APPLY_ORDER.index(section), section)
+    except ValueError:
+        return (999, section)
+
+
+def field_meta(section: str, field_name: str) -> FieldMeta | None:
+    meta = ALL_SECTIONS.get(section)
+    if meta is None:
+        return None
+    return next((f for f in meta.fields if f.name == field_name), None)
+
+
+def _snake_to_camel(name: str) -> str:
+    head, *tail = name.split("_")
+    return head + "".join(word.title() for word in tail)
+
+
+def read_snapshot_field(values: dict[str, Any], field_name: str) -> Any:
+    """Los snapshots vienen de asDict (camelCase); aceptamos ambas variantes."""
+    if field_name in values:
+        return values[field_name]
+    return values.get(_snake_to_camel(field_name))
+
+
+def field_default(fmeta: FieldMeta) -> Any:
+    """Default proto3 del campo: asDict omite los valores default, por lo que
+    la ausencia de un campo en un snapshot significa este valor."""
+    if fmeta.kind == "bool":
+        return False
+    if fmeta.kind == "int":
+        return 0
+    if fmeta.kind == "float":
+        return 0.0
+    if fmeta.kind == "enum":
+        return fmeta.enum_values[0] if fmeta.enum_values else None
+    if fmeta.kind == "str":
+        return ""
+    if fmeta.kind == "bytes":
+        return ""
+    return None
+
+
+def values_equal(fmeta: FieldMeta, expected: Any, actual: Any) -> bool:
+    """Igualdad tolerante entre un valor de perfil (normalizado por
+    validate_field_value) y un valor de snapshot (asDict del firmware)."""
+    if actual is None:
+        return False
+    if fmeta.kind == "bool":
+        return bool(expected) == bool(actual)
+    if fmeta.kind == "int":
+        try:
+            return int(expected) == int(actual)
+        except (TypeError, ValueError):
+            return False
+    if fmeta.kind == "float":
+        try:
+            return abs(float(expected) - float(actual)) < 1e-4
+        except (TypeError, ValueError):
+            return False
+    if fmeta.kind == "enum":
+        # asDict serializa enums por nombre; si llegara numérico, se mapea por
+        # el índice de declaración (en los protos de Meshtastic number == índice)
+        if isinstance(actual, (int, float)) and fmeta.enum_values:
+            idx = int(actual)
+            actual = fmeta.enum_values[idx] if 0 <= idx < len(fmeta.enum_values) else actual
+        return str(expected) == str(actual)
+    return str(expected) == str(actual)
+
+
 def to_dict(section: SectionMeta) -> dict[str, Any]:
     return {
         "name": section.name,

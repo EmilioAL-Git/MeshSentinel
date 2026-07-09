@@ -64,6 +64,14 @@ function relativeTime(iso: string | null): string {
   return `hace ${Math.round(seconds / 86400)}d`;
 }
 
+/** Etiqueta compacta del tipo: sección para SETs/GETs, perfil para profile.sync */
+function batchTypeLabel(operationType: string, params: Record<string, unknown>): string {
+  if (typeof params.profile_name === "string") {
+    return `${operationType}:${params.profile_name} v${String(params.version ?? "?")}`;
+  }
+  return `${operationType}${typeof params.section === "string" ? `:${params.section}` : ""}`;
+}
+
 function StatusChip({ status }: { status: string }) {
   return (
     <span
@@ -353,10 +361,7 @@ function BatchMonitor({
           <button style={btn} onClick={onBack}>← Historial</button>
           <h2 style={{ margin: 0 }}>#{b.id} {b.name}</h2>
           <StatusChip status={b.status} />
-          <span style={{ ...styles.mono, ...styles.dim }}>
-            {b.operation_type}
-            {typeof b.params.section === "string" ? `:${b.params.section}` : ""}
-          </span>
+          <span style={{ ...styles.mono, ...styles.dim }}>{batchTypeLabel(b.operation_type, b.params)}</span>
           <span style={{ marginLeft: "auto", display: "flex", gap: "0.4rem" }}>
             {b.status === "running" && (
               <button style={btn} onClick={() => pause.mutate()}>⏸ Pausar</button>
@@ -523,10 +528,7 @@ export function BatchesView({
               <tr key={b.id} style={{ cursor: "pointer" }} onClick={() => onOpenBatch(b.id)}>
                 <td style={styles.td}>{b.id}</td>
                 <td style={styles.td}>{b.name}</td>
-                <td style={{ ...styles.td, ...styles.mono }}>
-                  {b.operation_type}
-                  {typeof b.params.section === "string" ? `:${b.params.section}` : ""}
-                </td>
+                <td style={{ ...styles.td, ...styles.mono }}>{batchTypeLabel(b.operation_type, b.params)}</td>
                 <td style={styles.td}>{b.node_count}</td>
                 <td style={styles.td}><StatusChip status={b.status} /></td>
                 <td style={styles.td}>{b.created_by}</td>

@@ -57,6 +57,17 @@ class BatchScope:
 
 
 @dataclass(slots=True)
+class PlannedOperation:
+    """Operación concreta de un lote heterogéneo (M3: perfiles). El motor no
+    interpreta los params: ya llegan validados por el registro."""
+
+    node_id: str
+    gateway_id: str
+    operation_type: str
+    params: dict[str, Any]
+
+
+@dataclass(slots=True)
 class NodePreview:
     node_id: str
     display_name: str
@@ -169,24 +180,49 @@ class BatchService:
             raise ValueError("Batch requires at least one node")
         normalized = validate_operation(operation_type, params)
 
-        now = datetime.now(timezone.utc)
-        async with self._session_factory() as session, session.begin():
+        async with self._session_factory() as session:
             node_repo = SqlNodeRepository(session)
-            resolved: list[tuple[str, str]] = []  # (node_id, gateway_id)
+            planned: list[PlannedOperation] = []
             for node_id in dict.fromkeys(node_ids):  # dedupe conservando orden
                 node = await node_repo.get(node_id)
                 if node is None:
                     raise ValueError(f"Node {node_id} not found in registry")
                 if not node.gateway_id:
                     raise ValueError(f"Node {node_id} has no known gateway (run preview first)")
-                resolved.append((node_id, node.gateway_id))
+                planned.append(
+                    PlannedOperation(node_id, node.gateway_id, operation_type, normalized)
+                )
 
+        return await self.create_planned(
+            name, operation_type, normalized, planned, scope_description, created_by
+        )
+
+    async def create_planned(
+        self,
+        name: str,
+        operation_type: str,
+        params: dict[str, Any],
+        planned: list[PlannedOperation],
+        scope_description: dict[str, Any] | None,
+        created_by: str = "admin",
+    ) -> AdminBatch:
+        """Crea un lote a partir de operaciones ya resueltas y validadas.
+
+        Es la única puerta de creación de lotes: `create` (M2, operación
+        uniforme) y la sincronización de perfiles (M3, operaciones por nodo)
+        pasan por aquí. El pipeline de ADR 0013 no distingue unos de otros.
+        """
+        if not planned:
+            raise ValueError("Batch requires at least one operation")
+
+        now = datetime.now(timezone.utc)
+        async with self._session_factory() as session, session.begin():
             batch = await SqlAdminBatchRepository(session).create(
                 AdminBatch(
                     name=name,
                     operation_type=operation_type,
-                    params=normalized,
-                    node_ids=[node_id for node_id, _ in resolved],
+                    params=params,
+                    node_ids=list(dict.fromkeys(p.node_id for p in planned)),
                     scope_description=scope_description,
                     status="running",
                     created_by=created_by,
@@ -195,21 +231,21 @@ class BatchService:
                 )
             )
             op_repo = SqlAdminOperationRepository(session)
-            for node_id, gateway_id in resolved:
+            for op in planned:
                 await op_repo.create(
                     AdminOperation(
                         batch_id=batch.id,
-                        target_node_id=node_id,
-                        gateway_id=gateway_id,
-                        operation_type=operation_type,
-                        params=normalized,
+                        target_node_id=op.node_id,
+                        gateway_id=op.gateway_id,
+                        operation_type=op.operation_type,
+                        params=op.params,
                         timeout_seconds=self._settings.admin_default_timeout_seconds,
                         max_attempts=self._settings.admin_max_attempts,
                         created_by=created_by,
                     )
                 )
         logger.info(
-            "batch.created id=%s name=%r ops=%d type=%s", batch.id, name, len(resolved), operation_type
+            "batch.created id=%s name=%r ops=%d type=%s", batch.id, name, len(planned), operation_type
         )
         await activity.batch(batch, "created")
         return batch

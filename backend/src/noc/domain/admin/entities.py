@@ -60,6 +60,33 @@ class AdminBatch:
 
 
 @dataclass(slots=True)
+class ConfigProfile:
+    """Perfil de configuración (M3): conjunto parcial o completo de secciones
+    de configuración que describe un «tipo de nodo». El contenido vive en
+    versiones inmutables (append-only); editar = crear versión nueva."""
+
+    name: str
+    description: str | None = None
+    id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    # Derivado por el repositorio (max(version)); 0 = sin versiones aún
+    latest_version: int = 0
+
+
+@dataclass(slots=True)
+class ConfigProfileVersion:
+    profile_id: int
+    version: int
+    # {section: {field: value}} — solo campos gestionados por el perfil
+    sections: dict[str, dict[str, Any]] = field(default_factory=dict)
+    comment: str | None = None
+    created_by: str = "admin"
+    id: int | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(slots=True)
 class AdminOperation:
     target_node_id: str
     gateway_id: str

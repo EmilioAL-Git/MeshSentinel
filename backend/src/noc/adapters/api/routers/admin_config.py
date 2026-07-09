@@ -16,11 +16,9 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
-from noc.adapters.persistence.models import AdminOperationModel
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
 from noc.application.admin.config_schema import (
@@ -29,9 +27,11 @@ from noc.application.admin.config_schema import (
     MODULE_CONFIG_SECTIONS,
     OWNER_SECTION,
     UI_GROUPS,
+    apply_order_key,
     to_dict,
     validate_field_value,
 )
+from noc.application.admin.config_state import load_section_states
 from noc.application.admin.registry import validate_operation
 from noc.config import get_settings
 from noc.domain.admin.entities import AdminOperation
@@ -90,81 +90,22 @@ async def config_schema() -> ConfigSchemaOut:
 # ── /nodes/{id}/config (valores actuales derivados del historial) ────────────
 
 
-def _extract_owner_values(result: dict[str, Any]) -> dict[str, Any]:
-    # nodeinfo.get devuelve directamente el User (asDict): {shortName, longName, ...}
-    out: dict[str, Any] = {}
-    if isinstance(result.get("shortName"), str):
-        out["short_name"] = result["shortName"]
-    if isinstance(result.get("longName"), str):
-        out["long_name"] = result["longName"]
-    return out
-
-
-def _extract_section_values(result: dict[str, Any], section: str) -> dict[str, Any]:
-    if not isinstance(result, dict):
-        return {}
-    inner = result.get(section)
-    return inner if isinstance(inner, dict) else {}
-
-
 @router.get("/nodes/{node_id}/config", response_model=ConfigStateOut)
 async def get_node_config(node_id: str, session: SessionDep) -> ConfigStateOut:
     if await SqlNodeRepository(session).get(node_id) is None:
         raise HTTPException(status_code=404, detail="Node not found")
 
-    # Última operación con éxito por tipo+sección. Se resuelve en Python
-    # sobre un pequeño conjunto: en un nodo administrado hay decenas de
-    # operaciones a lo sumo por sección.
-    rows = (
-        await session.scalars(
-            select(AdminOperationModel)
-            .where(
-                AdminOperationModel.target_node_id == node_id,
-                AdminOperationModel.status.in_(("succeeded", "succeeded_unconfirmed")),
-                AdminOperationModel.operation_type.in_(
-                    ("nodeinfo.get", "config.get", "module_config.get")
-                ),
-            )
-            .order_by(AdminOperationModel.finished_at.desc())
-            .limit(500)
+    states = await load_section_states(session, node_id)
+    snapshots = [
+        SectionSnapshotOut(
+            section=s.section,
+            kind=s.kind,
+            values=s.values,
+            last_read_at=s.last_read_at,
+            last_operation_id=s.last_operation_id,
         )
-    ).all()
-
-    latest: dict[str, AdminOperationModel] = {}
-    for r in rows:
-        if r.operation_type == "nodeinfo.get":
-            key = "owner"
-        else:
-            section = (r.params or {}).get("section")
-            if not section:
-                continue
-            key = section
-        if key not in latest:
-            latest[key] = r
-
-    snapshots: list[SectionSnapshotOut] = []
-    for name, meta in ALL_SECTIONS.items():
-        row = latest.get(name)
-        if row is None:
-            snapshots.append(
-                SectionSnapshotOut(
-                    section=name, kind=meta.kind, values={}, last_read_at=None, last_operation_id=None,
-                )
-            )
-            continue
-        result = row.result if isinstance(row.result, dict) else {}
-        values = (
-            _extract_owner_values(result)
-            if meta.kind == "owner"
-            else _extract_section_values(result, name)
-        )
-        snapshots.append(
-            SectionSnapshotOut(
-                section=name, kind=meta.kind, values=values,
-                last_read_at=row.finished_at, last_operation_id=row.id,
-            )
-        )
-
+        for s in states.values()
+    ]
     return ConfigStateOut(node_id=node_id, sections=snapshots)
 
 
@@ -224,26 +165,10 @@ async def refresh_node_config(
 
 # ── /nodes/{id}/config/apply ─────────────────────────────────────────────────
 
-# Orden de aplicación (M1.4): lo menos disruptivo primero; los cambios que
-# pueden reiniciar el nodo (lora, security) al final para no interrumpir el
-# resto de operaciones. El scheduler solo pone 1 en vuelo por gateway, así que
-# el orden se traduce en el orden de despacho.
-_APPLY_ORDER = [
-    "owner",
-    "display", "device_ui", "position", "bluetooth", "power",
-    "network", "device",
-    # Módulos (todos SAFE)
-    "mqtt", "telemetry", "canned_message", "external_notification", "store_forward",
-    "range_test", "serial", "neighbor_info", "ambient_lighting", "detection_sensor",
-    "paxcounter", "audio", "remote_hardware", "statusmessage", "traffic_management", "tak",
-    # Riesgo mayor al final
-    "lora", "security",
-]
-
-
+# Orden de aplicación (M1.4): definido junto al esquema (apply_order_key);
+# también lo usa la sincronización de perfiles (M3).
 def _sorted_apply_sections(sections: dict[str, Any]) -> list[str]:
-    order = {name: idx for idx, name in enumerate(_APPLY_ORDER)}
-    return sorted(sections.keys(), key=lambda n: (order.get(n, 999), n))
+    return sorted(sections.keys(), key=apply_order_key)
 
 
 @router.post("/nodes/{node_id}/config/apply", response_model=ApplyOut, status_code=201)

@@ -24,6 +24,7 @@ import { NodeDetail } from "./components/NodeDetail";
 import { NodeFiltersBar } from "./components/NodeFiltersBar";
 import { NodesTable } from "./components/NodesTable";
 import { OperationsView } from "./components/OperationsView";
+import { ProfilesView } from "./components/ProfilesView";
 import { styles } from "./styles";
 
 const DATA_EVENTS = new Set([
@@ -44,6 +45,7 @@ type View =
   | "alerts"
   | "operations"
   | "config"
+  | "profiles"
   | "batches"
   | "activity";
 
@@ -231,6 +233,7 @@ export default function App() {
           />
           <NavTab active={view === "operations"} label="Operaciones" onClick={() => setView("operations")} />
           <NavTab active={view === "config"} label="Configuración" onClick={() => setView("config")} />
+          <NavTab active={view === "profiles"} label="Perfiles" onClick={() => setView("profiles")} />
           <NavTab active={view === "batches"} label="Batches" onClick={() => setView("batches")} />
           <NavTab active={view === "activity"} label="Actividad" onClick={() => setView("activity")} />
         </nav>
@@ -271,6 +274,16 @@ export default function App() {
       {view === "operations" && <OperationsView summaries={summaries} />}
 
       {view === "config" && <ConfigEditor summaries={summaries} />}
+
+      {view === "profiles" && (
+        <ProfilesView
+          summaries={summaries}
+          onOpenBatch={(batchId) => {
+            setOpenBatchId(batchId);
+            setView("batches");
+          }}
+        />
+      )}
 
       {view === "batches" && (
         <BatchesView summaries={summaries} openBatchId={openBatchId} onOpenBatch={setOpenBatchId} />

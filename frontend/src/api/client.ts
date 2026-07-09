@@ -473,6 +473,111 @@ export const applyNodeConfig = (
     { sections },
   );
 
+// ── Perfiles de configuración (M3) ───────────────────────────────────────────
+
+export type ProfileSections = Record<string, Record<string, unknown>>;
+
+export interface ProfileOut {
+  id: number;
+  name: string;
+  description: string | null;
+  latest_version: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ProfileDetailOut extends ProfileOut {
+  sections: ProfileSections;
+}
+
+export interface ProfileVersionOut {
+  id: number;
+  profile_id: number;
+  version: number;
+  sections: ProfileSections;
+  comment: string | null;
+  created_by: string;
+  created_at: string | null;
+}
+
+export type DiffStatus = "equal" | "different" | "unknown";
+
+export interface FieldDiffOut {
+  field: string;
+  kind: string;
+  profile_value: unknown;
+  node_value: unknown;
+  status: DiffStatus;
+}
+
+export interface SectionDiffOut {
+  section: string;
+  risk: "SAFE" | "WARNING" | "DANGEROUS";
+  has_snapshot: boolean;
+  last_read_at: string | null;
+  fields: FieldDiffOut[];
+}
+
+export interface CompareOut {
+  profile_id: number;
+  version: number;
+  node_id: string;
+  sections: SectionDiffOut[];
+  equal_count: number;
+  different_count: number;
+  unknown_count: number;
+}
+
+export interface NodeSyncPlanOut {
+  node_id: string;
+  display_name: string;
+  eligible: boolean;
+  sections_to_apply: ProfileSections;
+  change_count: number;
+  equal_count: number;
+  unknown_sections: string[];
+  warnings: string[];
+  blockers: string[];
+}
+
+export interface SyncPreviewOut {
+  profile_id: number;
+  profile_name: string;
+  version: number;
+  include_unknown: boolean;
+  eligible: NodeSyncPlanOut[];
+  excluded: NodeSyncPlanOut[];
+  total_operations: number;
+  estimated_seconds: number;
+}
+
+export interface SyncIn {
+  node_ids: string[];
+  version?: number;
+  include_unknown?: boolean;
+  name?: string;
+}
+
+export const fetchProfiles = () => get<ProfileOut[]>("/admin/profiles");
+export const fetchProfile = (id: number) => get<ProfileDetailOut>(`/admin/profiles/${id}`);
+export const createProfile = (body: { name: string; description?: string; sections: ProfileSections }) =>
+  send<ProfileDetailOut>("POST", "/admin/profiles", body);
+export const patchProfile = (id: number, body: { name?: string; description?: string }) =>
+  send<ProfileOut>("PATCH", `/admin/profiles/${id}`, body);
+export const deleteProfile = (id: number) => send<void>("DELETE", `/admin/profiles/${id}`);
+export const fetchProfileVersions = (id: number) =>
+  get<ProfileVersionOut[]>(`/admin/profiles/${id}/versions`);
+export const createProfileVersion = (id: number, sections: ProfileSections, comment?: string) =>
+  send<ProfileVersionOut>("POST", `/admin/profiles/${id}/versions`, { sections, comment });
+export const compareProfile = (id: number, nodeId: string, version?: number) =>
+  get<CompareOut>(
+    `/admin/profiles/${id}/compare/${encodeURIComponent(nodeId)}${version ? `?version=${version}` : ""}`,
+  );
+export const previewProfileSync = (id: number, body: SyncIn) =>
+  send<SyncPreviewOut>("POST", `/admin/profiles/${id}/sync/preview`, body);
+export const syncProfile = (id: number, body: SyncIn) =>
+  send<BatchOut>("POST", `/admin/profiles/${id}/sync`, body);
+
 export interface NocEvent {
   schema_version: number;
   event_type: string;
