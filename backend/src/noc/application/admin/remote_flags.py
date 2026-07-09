@@ -1,28 +1,31 @@
-"""Estado de sincronización remota de favoritos/ignorados (M4.1, ADR 0019).
+"""Adaptador de estado de sincronización remota de favoritos/ignorados
+(M4.1/M4.2, ADR 0019/0020).
 
-Sin tabla propia: se deriva de la última `AdminOperation` relevante para el
-par (target_node_id, subject_node_id). El vocabulario de cara al operador es
-deliberadamente Pendiente/Enviado/Confirmado/Error — nunca
+Implementa el puerto `RemoteFlagStateReader` (`remote_flag_sync.py`) leyendo
+`admin_operations`: sin tabla propia, el estado se deriva del historial de
+auditoría ya existente. `remote_flag_sync.py` no conoce esta clase concreta,
+solo el Protocol — el día que haga falta una tabla materializada, una caché o
+una lectura real del firmware, se sustituye este adaptador sin tocar el
+algoritmo de planificación.
+
+Vocabulario de cara al operador: Pendiente/Enviado/Confirmado/Error — nunca
 "succeeded_unconfirmed" ni "verificado" (ADR 0019 §2): el firmware no expone
 lectura de favoritos/ignorados, así que "Confirmado" solo significa que el
 firmware aceptó el AdminMessage (ACK), no que el NOC haya podido releer su
 NodeDB.
 """
 
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Literal
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
+from noc.application.admin.remote_flag_sync import FlagAction, FlagType, RemoteFlagKnown, SyncState
 from noc.domain.admin.entities import AdminOperation
 
-FAVORITE_OPERATION_TYPES: tuple[str, ...] = ("favorite.set", "favorite.remove")
-IGNORED_OPERATION_TYPES: tuple[str, ...] = ("ignored.set", "ignored.remove")
+FLAG_OPERATION_TYPES: dict[FlagType, tuple[str, str]] = {
+    "favorite": ("favorite.set", "favorite.remove"),
+    "ignored": ("ignored.set", "ignored.remove"),
+}
 CONTACT_OPERATION_TYPE = "contact.add"
-
-SyncState = Literal["pending", "sent", "confirmed", "error"]
 
 _SYNC_STATE_BY_OP_STATUS: dict[str, SyncState] = {
     "pending": "pending",
@@ -37,39 +40,40 @@ _SYNC_STATE_BY_OP_STATUS: dict[str, SyncState] = {
 }
 
 
-@dataclass(slots=True, frozen=True)
-class RemoteFlagStatus:
-    subject_node_id: str
-    desired: bool  # True = "set" (favorito/ignorado), False = "remove"
-    sync_state: SyncState
-    operation_id: int
-    updated_at: datetime | None
+def _action_of(op: AdminOperation) -> FlagAction:
+    return "set" if op.operation_type.endswith(".set") else "remove"
 
 
-def _from_operation(op: AdminOperation) -> RemoteFlagStatus:
-    subject = op.params.get("subject_node_id", "")
-    desired = op.operation_type.endswith(".set")
-    sync_state = _SYNC_STATE_BY_OP_STATUS.get(op.status, "error")
-    updated_at = op.finished_at or op.started_at or op.queued_at or op.created_at
-    return RemoteFlagStatus(subject, desired, sync_state, op.id or 0, updated_at)
+class AdminOperationRemoteFlagStateReader:
+    """Implementación del puerto `RemoteFlagStateReader` sobre `admin_operations`."""
 
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
 
-async def _latest_status(
-    session: AsyncSession, node_id: str, operation_types: tuple[str, ...], subject_node_id: str | None
-) -> RemoteFlagStatus | None:
-    ops = await SqlAdminOperationRepository(session).list_by_node_and_types(node_id, operation_types)
-    if subject_node_id is not None:
-        ops = [o for o in ops if o.params.get("subject_node_id") == subject_node_id]
-    return _from_operation(ops[0]) if ops else None
+    async def list_known(self, target_node_id: str, flag_type: FlagType) -> list[RemoteFlagKnown]:
+        op_types = FLAG_OPERATION_TYPES[flag_type]
+        ops = await SqlAdminOperationRepository(self._session).list_by_node_and_types(target_node_id, op_types)
 
+        by_subject: dict[str, list[AdminOperation]] = {}
+        for op in ops:  # ya vienen más nuevo primero
+            subject = op.params.get("subject_node_id")
+            if subject:
+                by_subject.setdefault(subject, []).append(op)
 
-async def get_favorite_status(
-    session: AsyncSession, node_id: str, subject_node_id: str | None = None
-) -> RemoteFlagStatus | None:
-    return await _latest_status(session, node_id, FAVORITE_OPERATION_TYPES, subject_node_id)
-
-
-async def get_ignored_status(
-    session: AsyncSession, node_id: str, subject_node_id: str | None = None
-) -> RemoteFlagStatus | None:
-    return await _latest_status(session, node_id, IGNORED_OPERATION_TYPES, subject_node_id)
+        result: list[RemoteFlagKnown] = []
+        for subject, subject_ops in by_subject.items():
+            latest = subject_ops[0]
+            confirmed = next(
+                (o for o in subject_ops if _SYNC_STATE_BY_OP_STATUS.get(o.status) == "confirmed"), None
+            )
+            result.append(
+                RemoteFlagKnown(
+                    subject_node_id=subject,
+                    latest_action=_action_of(latest),
+                    sync_state=_SYNC_STATE_BY_OP_STATUS.get(latest.status, "error"),
+                    operation_id=latest.id or 0,
+                    updated_at=latest.finished_at or latest.started_at or latest.queued_at or latest.created_at,
+                    confirmed_action=_action_of(confirmed) if confirmed else None,
+                )
+            )
+        return result

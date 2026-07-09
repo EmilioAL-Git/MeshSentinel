@@ -321,37 +321,50 @@ export const createOperation = (body: {
 export const cancelOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/cancel`);
 export const retryOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/retry`);
 
-// ── Favoritos/ignorados remotos (M4.1) ──────────────────────────────────────
+// ── Favoritos/ignorados remotos (M4.1/M4.2) ─────────────────────────────────
 // "confirmado" = el firmware aceptó el AdminMessage (ACK); el NOC no puede
 // releer la NodeDB remota para verificarlo de verdad (ADR 0019).
 export type RemoteFlagSyncState = "pending" | "sent" | "confirmed" | "error";
+export type RemoteFlagType = "favorite" | "ignored";
 
-export interface RemoteFlagStatusOut {
+export interface RemoteFlagKnownOut {
   subject_node_id: string;
-  desired: boolean;
+  subject_display_name: string | null;
+  latest_action: "set" | "remove";
   sync_state: RemoteFlagSyncState;
   operation_id: number;
   updated_at: string | null;
 }
 
-export interface RemoteFlagsOut {
-  favorite: RemoteFlagStatusOut | null;
-  ignored: RemoteFlagStatusOut | null;
-}
-
-export const fetchRemoteFlags = (nodeId: string, subjectNodeId?: string) =>
-  get<RemoteFlagsOut>(
-    `/admin/remote-flags/${encodeURIComponent(nodeId)}${subjectNodeId ? `?subject_node_id=${encodeURIComponent(subjectNodeId)}` : ""}`,
+export const fetchKnownRemoteFlags = (nodeId: string, flagType: RemoteFlagType) =>
+  get<RemoteFlagKnownOut[]>(
+    `/admin/remote-flags/${encodeURIComponent(nodeId)}/known?flag_type=${flagType}`,
   );
 
 export const queueRemoteFlag = (
   nodeId: string,
-  body: { flag_type: "favorite" | "ignored"; action: "set" | "remove"; subject_node_id: string; send_contact: boolean },
+  body: { flag_type: RemoteFlagType; action: "set" | "remove"; subject_node_id: string; send_contact: boolean },
 ) => send<{ batch_id: number; operation_type: string; node_ids: string[] }>(
   "POST",
   `/admin/remote-flags/${encodeURIComponent(nodeId)}/queue`,
   body,
 );
+
+export interface RemoteFlagSyncOut {
+  batch_id: number | null;
+  operation_type: string;
+  node_ids: string[];
+  items: number;
+}
+
+export const syncRemoteFlags = (nodeId: string, body: { flag_type: RemoteFlagType; send_contact: boolean }) =>
+  send<RemoteFlagSyncOut>("POST", `/admin/remote-flags/${encodeURIComponent(nodeId)}/sync`, body);
+
+export const resendPendingRemoteFlags = (nodeId: string, flagType: RemoteFlagType) =>
+  send<RemoteFlagSyncOut>("POST", `/admin/remote-flags/${encodeURIComponent(nodeId)}/resend-pending`, {
+    flag_type: flagType,
+    send_contact: false,
+  });
 
 // ── Editor de configuración (M1.4) ──────────────────────────────────────────
 

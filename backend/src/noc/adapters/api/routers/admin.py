@@ -11,10 +11,13 @@ from noc.application.activity import activity
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.admin.batches import PlannedOperation
 from noc.application.admin.registry import OPERATIONS, validate_operation
-from noc.application.admin.remote_flags import (
-    RemoteFlagStatus,
-    get_favorite_status,
-    get_ignored_status,
+from noc.application.admin.remote_flags import AdminOperationRemoteFlagStateReader
+from noc.application.admin.remote_flag_sync import (
+    RemoteFlagKnown,
+    RemoteFlagSyncPlan,
+    compute_resend_plan,
+    compute_sync_plan,
+    to_planned_operations,
 )
 from noc.config import get_settings
 from noc.domain.admin.entities import AdminOperation
@@ -196,27 +199,24 @@ async def retry_operation(op_id: int, session: SessionDep) -> OperationOut:
 # de lo que en una fase futura serán lotes de N nodos, sin rediseño.
 
 
-class RemoteFlagStatusOut(BaseModel):
+class RemoteFlagKnownOut(BaseModel):
     subject_node_id: str
-    desired: bool
+    subject_display_name: str | None
+    latest_action: Literal["set", "remove"]
     sync_state: Literal["pending", "sent", "confirmed", "error"]
     operation_id: int
     updated_at: datetime | None
 
     @classmethod
-    def from_status(cls, s: RemoteFlagStatus) -> "RemoteFlagStatusOut":
+    def from_known(cls, k: RemoteFlagKnown, display_name: str | None) -> "RemoteFlagKnownOut":
         return cls(
-            subject_node_id=s.subject_node_id,
-            desired=s.desired,
-            sync_state=s.sync_state,
-            operation_id=s.operation_id,
-            updated_at=s.updated_at,
+            subject_node_id=k.subject_node_id,
+            subject_display_name=display_name,
+            latest_action=k.latest_action,
+            sync_state=k.sync_state,
+            operation_id=k.operation_id,
+            updated_at=k.updated_at,
         )
-
-
-class RemoteFlagsOut(BaseModel):
-    favorite: RemoteFlagStatusOut | None
-    ignored: RemoteFlagStatusOut | None
 
 
 class RemoteFlagQueueIn(BaseModel):
@@ -235,20 +235,34 @@ class RemoteFlagQueueOut(BaseModel):
     node_ids: list[str]
 
 
-@router.get("/remote-flags/{node_id}", response_model=RemoteFlagsOut)
-async def remote_flags(
-    node_id: str, session: SessionDep, subject_node_id: str | None = Query(default=None)
-) -> RemoteFlagsOut:
-    """Último estado conocido (derivado de admin_operations, sin tabla
-    propia). Si se pasa `subject_node_id`, se restringe a ese par
-    (target, subject); si no, se muestra la última operación de cada tipo
-    sea cual sea el sujeto."""
-    favorite = await get_favorite_status(session, node_id, subject_node_id)
-    ignored = await get_ignored_status(session, node_id, subject_node_id)
-    return RemoteFlagsOut(
-        favorite=RemoteFlagStatusOut.from_status(favorite) if favorite else None,
-        ignored=RemoteFlagStatusOut.from_status(ignored) if ignored else None,
-    )
+class RemoteFlagSyncIn(BaseModel):
+    flag_type: Literal["favorite", "ignored"]
+    send_contact: bool = False
+
+
+class RemoteFlagSyncOut(BaseModel):
+    batch_id: int | None
+    operation_type: str
+    node_ids: list[str]
+    items: int
+
+
+@router.get("/remote-flags/{node_id}/known", response_model=list[RemoteFlagKnownOut])
+async def remote_flags_known(
+    node_id: str, session: SessionDep, flag_type: Literal["favorite", "ignored"] = Query(...)
+) -> list[RemoteFlagKnownOut]:
+    """Lista completa de sujetos conocidos (favoritos o ignorados) para este
+    nodo destino, con su estado de sincronización derivado de admin_operations
+    (M4.2, ADR 0020)."""
+    reader = AdminOperationRemoteFlagStateReader(session)
+    known = await reader.list_known(node_id, flag_type)
+    node_repo = SqlNodeRepository(session)
+    out: list[RemoteFlagKnownOut] = []
+    for k in sorted(known, key=lambda k: k.subject_node_id):
+        subject = await node_repo.get(k.subject_node_id)
+        name = (subject.long_name or subject.short_name) if subject else None
+        out.append(RemoteFlagKnownOut.from_known(k, name))
+    return out
 
 
 @router.post("/remote-flags/{node_id}/queue", response_model=RemoteFlagQueueOut, status_code=201)
@@ -310,3 +324,86 @@ async def queue_remote_flag(
     )
     assert batch.id is not None
     return RemoteFlagQueueOut(batch_id=batch.id, operation_type=op_type, node_ids=batch.node_ids)
+
+
+async def _resolve_target(node_id: str, session: SessionDep):
+    node_repo = SqlNodeRepository(session)
+    target = await node_repo.get(node_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Node not found in registry")
+    if not target.gateway_id:
+        raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
+    return target
+
+
+async def _contact_data_for_plan(session: SessionDep, plan: RemoteFlagSyncPlan) -> dict[str, dict[str, Any]]:
+    node_repo = SqlNodeRepository(session)
+    subjects = {item.subject_node_id for item in plan.items if item.kind == "CONTACT_ADD"}
+    out: dict[str, dict[str, Any]] = {}
+    for subject_id in subjects:
+        subject = await node_repo.get(subject_id)
+        if subject is not None:
+            out[subject_id] = {
+                "long_name": subject.long_name,
+                "short_name": subject.short_name,
+                "hw_model": subject.hw_model,
+                "public_key": subject.public_key,
+            }
+    return out
+
+
+@router.post("/remote-flags/{node_id}/sync", response_model=RemoteFlagSyncOut, status_code=201)
+async def sync_remote_flags(
+    node_id: str, body: RemoteFlagSyncIn, request: Request, session: SessionDep
+) -> RemoteFlagSyncOut:
+    """Reconciliación completa (M4.2): compara el estado deseado (última
+    acción pedida por sujeto) contra el último estado CONFIRMADO conocido y
+    encola en un único lote solo las operaciones necesarias — nunca reenvía
+    lo ya confirmado."""
+    target = await _resolve_target(node_id, session)
+    reader = AdminOperationRemoteFlagStateReader(session)
+    plan = await compute_sync_plan(reader, node_id, body.flag_type, send_contact=body.send_contact)
+    if not plan.items:
+        return RemoteFlagSyncOut(batch_id=None, operation_type=f"{body.flag_type}.sync", node_ids=[], items=0)
+
+    contact_data = await _contact_data_for_plan(session, plan)
+    planned = to_planned_operations(plan, target.gateway_id, contact_data)
+    batch = await request.app.state.batches.create_planned(
+        name=f"Sincronizar {body.flag_type} remoto: {target.short_name or target.node_id}",
+        operation_type=f"{body.flag_type}.sync",
+        params={},
+        planned=planned,
+        scope_description={"remote_flag_sync": body.flag_type, "target_node_id": node_id},
+        created_by="admin",
+    )
+    assert batch.id is not None
+    return RemoteFlagSyncOut(
+        batch_id=batch.id, operation_type=f"{body.flag_type}.sync", node_ids=batch.node_ids, items=len(plan.items)
+    )
+
+
+@router.post("/remote-flags/{node_id}/resend-pending", response_model=RemoteFlagSyncOut, status_code=201)
+async def resend_pending_remote_flags(
+    node_id: str, body: RemoteFlagSyncIn, request: Request, session: SessionDep
+) -> RemoteFlagSyncOut:
+    """Reenvío mecánico (M4.2): reemite exclusivamente lo Pendiente o en Error,
+    tal cual la última acción pedida — nunca toca lo Confirmado."""
+    target = await _resolve_target(node_id, session)
+    reader = AdminOperationRemoteFlagStateReader(session)
+    plan = await compute_resend_plan(reader, node_id, body.flag_type)
+    if not plan.items:
+        return RemoteFlagSyncOut(batch_id=None, operation_type=f"{body.flag_type}.resend", node_ids=[], items=0)
+
+    planned = to_planned_operations(plan, target.gateway_id)
+    batch = await request.app.state.batches.create_planned(
+        name=f"Reenviar pendientes {body.flag_type} remoto: {target.short_name or target.node_id}",
+        operation_type=f"{body.flag_type}.resend",
+        params={},
+        planned=planned,
+        scope_description={"remote_flag_resend": body.flag_type, "target_node_id": node_id},
+        created_by="admin",
+    )
+    assert batch.id is not None
+    return RemoteFlagSyncOut(
+        batch_id=batch.id, operation_type=f"{body.flag_type}.resend", node_ids=batch.node_ids, items=len(plan.items)
+    )
