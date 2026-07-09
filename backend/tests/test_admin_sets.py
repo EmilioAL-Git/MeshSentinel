@@ -13,8 +13,13 @@ def test_set_operations_registered_and_flagged():
         spec = OPERATIONS[op_type]
         assert spec.kind == "set"
         assert spec.requires_confirmation is True
-        assert spec.allow_bulk is False
         assert spec.destructive is False
+    # M2: owner.set sigue siendo unitario (los nombres deben ser únicos);
+    # el resto de SETs admiten ejecución masiva
+    assert OPERATIONS["owner.set"].allow_bulk is False
+    assert OPERATIONS["position.set_fixed"].allow_bulk is True
+    assert OPERATIONS["config.set"].allow_bulk is True
+    assert OPERATIONS["module_config.set"].allow_bulk is True
     # Los GET no exigen confirmación
     assert OPERATIONS["metadata.get"].requires_confirmation is False
 

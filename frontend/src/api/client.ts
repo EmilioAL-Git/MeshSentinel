@@ -289,6 +289,7 @@ export interface CapabilityOut {
 
 export interface OperationOut {
   id: number;
+  batch_id: number | null;
   target_node_id: string;
   gateway_id: string;
   operation_type: string;
@@ -369,6 +370,99 @@ export const refreshNodeConfig = (nodeId: string, sections?: string[]) =>
     `/nodes/${encodeURIComponent(nodeId)}/config/refresh`,
     { sections: sections ?? null },
   );
+// ── Batch Engine (M2) ────────────────────────────────────────────────────────
+
+export type BatchStatus = "running" | "paused" | "cancelled" | "completed" | "completed_with_errors";
+
+export interface BatchScopeIn extends NodeFilterParams {
+  node_ids?: string[];
+}
+
+export interface NodePreviewOut {
+  node_id: string;
+  display_name: string;
+  eligible: boolean;
+  warnings: string[];
+  blockers: string[];
+}
+
+export interface BatchPreviewOut {
+  operation_type: string;
+  params: Record<string, unknown>;
+  total_selected: number;
+  eligible_count: number;
+  excluded_count: number;
+  eligible: NodePreviewOut[];
+  excluded: NodePreviewOut[];
+  requires_verification: boolean;
+  estimated_seconds: number;
+  scope_description: Record<string, unknown>;
+}
+
+export interface BatchOut {
+  id: number;
+  name: string;
+  operation_type: string;
+  params: Record<string, unknown>;
+  node_count: number;
+  status: BatchStatus;
+  created_by: string;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface BatchProgressOut {
+  counts: Record<string, number>;
+  total: number;
+  done: number;
+  percent: number;
+  current_node_id: string | null;
+  rate_per_minute: number | null;
+  eta_seconds: number;
+  elapsed_seconds: number;
+}
+
+export interface BatchDetailOut extends BatchOut {
+  node_ids: string[];
+  scope_description: Record<string, unknown> | null;
+  progress: BatchProgressOut;
+}
+
+export const previewBatch = (body: {
+  operation_type: string;
+  params: Record<string, unknown>;
+  scope: BatchScopeIn;
+}) => send<BatchPreviewOut>("POST", "/admin/batches/preview", body);
+export const createBatch = (body: {
+  name: string;
+  operation_type: string;
+  params: Record<string, unknown>;
+  node_ids: string[];
+  scope_description?: Record<string, unknown>;
+}) => send<BatchOut>("POST", "/admin/batches", body);
+export function fetchBatches(filters: {
+  status?: string;
+  operation_type?: string;
+  node_id?: string;
+  limit?: number;
+} = {}): Promise<BatchOut[]> {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters)) {
+    if (v !== undefined && v !== "") params.set(k, String(v));
+  }
+  const qs = params.toString();
+  return get<BatchOut[]>(`/admin/batches${qs ? `?${qs}` : ""}`);
+}
+export const fetchBatch = (id: number) => get<BatchDetailOut>(`/admin/batches/${id}`);
+export const fetchBatchOperations = (id: number, status?: string, limit = 500) =>
+  get<OperationOut[]>(
+    `/admin/batches/${id}/operations?limit=${limit}${status ? `&status=${status}` : ""}`,
+  );
+export const pauseBatch = (id: number) => send<BatchOut>("POST", `/admin/batches/${id}/pause`);
+export const resumeBatch = (id: number) => send<BatchOut>("POST", `/admin/batches/${id}/resume`);
+export const cancelBatch = (id: number) => send<BatchOut>("POST", `/admin/batches/${id}/cancel`);
+
 export const applyNodeConfig = (
   nodeId: string,
   sections: Record<string, Record<string, unknown>>,

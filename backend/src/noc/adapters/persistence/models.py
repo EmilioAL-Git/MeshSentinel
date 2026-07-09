@@ -136,6 +136,23 @@ class AlertModel(Base):
     last_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AdminBatchModel(Base):
+    __tablename__ = "admin_batches"
+    __table_args__ = (Index("ix_admin_batches_created", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128))
+    operation_type: Mapped[str] = mapped_column(String(32))
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    node_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    scope_description: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="admin")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class AdminOperationModel(Base):
     __tablename__ = "admin_operations"
     __table_args__ = (
@@ -144,6 +161,9 @@ class AdminOperationModel(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("admin_batches.id"), nullable=True, index=True
+    )
     target_node_id: Mapped[str] = mapped_column(String(16))
     gateway_id: Mapped[str] = mapped_column(String(64))
     operation_type: Mapped[str] = mapped_column(String(32))

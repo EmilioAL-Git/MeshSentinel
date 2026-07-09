@@ -15,6 +15,7 @@ import {
   type NodeFilterParams,
 } from "./api/client";
 import { AlertsView } from "./components/AlertsView";
+import { BatchesView, BatchWizard } from "./components/BatchesView";
 import { ConfigEditor } from "./components/ConfigEditor";
 import { Dashboard } from "./components/Dashboard";
 import { MapView } from "./components/MapView";
@@ -34,7 +35,17 @@ const DATA_EVENTS = new Set([
   "admin.operation",
 ]);
 
-type View = "dashboard" | "nodes" | "map" | "alerts" | "operations" | "config";
+type View = "dashboard" | "nodes" | "map" | "alerts" | "operations" | "config" | "batches";
+
+const selBtn = {
+  background: "transparent",
+  color: "#e6edf3",
+  border: "1px solid #30363d",
+  borderRadius: 6,
+  padding: "0.2rem 0.7rem",
+  cursor: "pointer",
+  fontSize: "0.85rem",
+} as const;
 
 function NavTab({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
@@ -82,6 +93,10 @@ export default function App() {
   });
   const [view, setView] = useState<View>("dashboard");
   const [selected, setSelected] = useState<string | null>(null);
+  // Selección múltiple para batches (M2)
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [openBatchId, setOpenBatchId] = useState<number | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const invalidateTimer = useRef<number | null>(null);
 
@@ -116,6 +131,9 @@ export default function App() {
           queryClient.invalidateQueries({ queryKey: ["dashboard"] });
           queryClient.invalidateQueries({ queryKey: ["alerts"] });
           queryClient.invalidateQueries({ queryKey: ["operations"] });
+          queryClient.invalidateQueries({ queryKey: ["batches"] });
+          queryClient.invalidateQueries({ queryKey: ["batch"] });
+          queryClient.invalidateQueries({ queryKey: ["batch-ops"] });
         }, 2000);
       }
     });
@@ -194,6 +212,7 @@ export default function App() {
           />
           <NavTab active={view === "operations"} label="Operaciones" onClick={() => setView("operations")} />
           <NavTab active={view === "config"} label="Configuración" onClick={() => setView("config")} />
+          <NavTab active={view === "batches"} label="Batches" onClick={() => setView("batches")} />
         </nav>
         <span style={{ marginLeft: "auto" }}>
           Backend:{" "}
@@ -224,42 +243,130 @@ export default function App() {
 
       {view === "config" && <ConfigEditor summaries={summaries} />}
 
+      {view === "batches" && (
+        <BatchesView summaries={summaries} openBatchId={openBatchId} onOpenBatch={setOpenBatchId} />
+      )}
+
       {view === "map" && (
         <MapView summaries={summaries} gatewayNodeIds={gatewayNodeIds} onShowDetail={showDetail} />
       )}
 
       {view === "nodes" && (
-        <div style={selected ? styles.layout : undefined}>
-          <div style={styles.card}>
-            <h2 style={{ marginTop: 0 }}>
-              Nodos <span style={styles.dim}>({filteredSummaries.length} · {onlineCount} online)</span>
-            </h2>
-            <NodeFiltersBar
-              filters={filters}
-              onChange={setFilters}
-              tags={tags.data ?? []}
-              groups={groups.data ?? []}
-              gateways={gateways.data ?? []}
-              hwModels={hwModels}
+        <div>
+          {wizardOpen && (
+            <BatchWizard
+              selectedIds={[...checkedIds]}
+              summaries={summaries}
+              onDone={(batchId) => {
+                setWizardOpen(false);
+                if (batchId != null) {
+                  setCheckedIds(new Set());
+                  setOpenBatchId(batchId);
+                  setView("batches");
+                }
+              }}
             />
-            {filteredNodes.isLoading && <p>Cargando…</p>}
-            {filteredNodes.isError && <p style={styles.bad}>Error consultando la API</p>}
-            {filteredSummaries.length === 0 && !filteredNodes.isLoading && (
-              <p style={styles.dim}>Ningún nodo coincide con los filtros actuales.</p>
-            )}
-            {filteredSummaries.length > 0 && (
-              <NodesTable
-                summaries={filteredSummaries}
-                selected={selected}
-                onSelect={setSelected}
-                onToggleFavorite={(id, value) => toggleFavorite.mutate({ id, value })}
-                onToggleIgnored={(id, value) => toggleIgnored.mutate({ id, value })}
+          )}
+          <div style={selected ? styles.layout : undefined}>
+            <div style={styles.card}>
+              <h2 style={{ marginTop: 0 }}>
+                Nodos <span style={styles.dim}>({filteredSummaries.length} · {onlineCount} online)</span>
+              </h2>
+              <NodeFiltersBar
+                filters={filters}
+                onChange={setFilters}
+                tags={tags.data ?? []}
+                groups={groups.data ?? []}
+                gateways={gateways.data ?? []}
+                hwModels={hwModels}
               />
+              {/* Barra de selección para batches (M2) */}
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+                <span>
+                  Seleccionados: <strong>{checkedIds.size}</strong>
+                </span>
+                <button
+                  style={selBtn}
+                  onClick={() =>
+                    setCheckedIds(new Set([...checkedIds, ...filteredSummaries.map((s) => s.node.node_id)]))
+                  }
+                >
+                  + visibles
+                </button>
+                <button
+                  style={selBtn}
+                  onClick={() => {
+                    const visible = filteredSummaries.map((s) => s.node.node_id);
+                    const next = new Set(checkedIds);
+                    for (const id of visible) {
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                    }
+                    setCheckedIds(next);
+                  }}
+                >
+                  Invertir
+                </button>
+                <button
+                  style={selBtn}
+                  onClick={() =>
+                    setCheckedIds(
+                      new Set([
+                        ...checkedIds,
+                        ...summaries.filter((s) => s.node.is_favorite).map((s) => s.node.node_id),
+                      ]),
+                    )
+                  }
+                >
+                  + favoritos
+                </button>
+                <button style={selBtn} onClick={() => setCheckedIds(new Set())} disabled={checkedIds.size === 0}>
+                  Limpiar
+                </button>
+                <button
+                  style={{ ...selBtn, background: checkedIds.size > 0 ? "#1f6feb" : "transparent" }}
+                  disabled={checkedIds.size === 0}
+                  onClick={() => setWizardOpen(true)}
+                >
+                  Crear batch ({checkedIds.size})
+                </button>
+              </div>
+              {filteredNodes.isLoading && <p>Cargando…</p>}
+              {filteredNodes.isError && <p style={styles.bad}>Error consultando la API</p>}
+              {filteredSummaries.length === 0 && !filteredNodes.isLoading && (
+                <p style={styles.dim}>Ningún nodo coincide con los filtros actuales.</p>
+              )}
+              {filteredSummaries.length > 0 && (
+                <NodesTable
+                  summaries={filteredSummaries}
+                  selected={selected}
+                  onSelect={setSelected}
+                  onToggleFavorite={(id, value) => toggleFavorite.mutate({ id, value })}
+                  onToggleIgnored={(id, value) => toggleIgnored.mutate({ id, value })}
+                  checkedIds={checkedIds}
+                  onToggleChecked={(id) => {
+                    const next = new Set(checkedIds);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                    setCheckedIds(next);
+                  }}
+                  onToggleCheckAll={() => {
+                    const visible = filteredSummaries.map((s) => s.node.node_id);
+                    const allChecked = visible.every((id) => checkedIds.has(id));
+                    const next = new Set(checkedIds);
+                    for (const id of visible) {
+                      if (allChecked) next.delete(id);
+                      else next.add(id);
+                    }
+                    setCheckedIds(next);
+                  }}
+                />
+              )}
+            </div>
+            {selected && (
+              <NodeDetail nodeId={selected} summary={selectedSummary} onClose={() => setSelected(null)} />
             )}
           </div>
-          {selected && (
-            <NodeDetail nodeId={selected} summary={selectedSummary} onClose={() => setSelected(null)} />
-          )}
         </div>
       )}
     </div>

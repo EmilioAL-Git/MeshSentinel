@@ -7,6 +7,10 @@ interface Props {
   onSelect: (nodeId: string) => void;
   onToggleFavorite: (nodeId: string, value: boolean) => void;
   onToggleIgnored: (nodeId: string, value: boolean) => void;
+  // Selección múltiple para batches (M2)
+  checkedIds: Set<string>;
+  onToggleChecked: (nodeId: string) => void;
+  onToggleCheckAll: () => void;
 }
 
 function relativeTime(iso: string | null): string {
@@ -17,11 +21,24 @@ function relativeTime(iso: string | null): string {
   return `hace ${Math.round(seconds / 3600)}h`;
 }
 
-export function NodesTable({ summaries, selected, onSelect, onToggleFavorite, onToggleIgnored }: Props) {
+export function NodesTable({
+  summaries,
+  selected,
+  onSelect,
+  onToggleFavorite,
+  onToggleIgnored,
+  checkedIds,
+  onToggleChecked,
+  onToggleCheckAll,
+}: Props) {
+  const allChecked = summaries.length > 0 && summaries.every((s) => checkedIds.has(s.node.node_id));
   return (
     <table style={styles.table}>
       <thead>
         <tr>
+          <th style={styles.th}>
+            <input type="checkbox" checked={allChecked} onChange={onToggleCheckAll} title="Seleccionar visibles" />
+          </th>
           <th style={styles.th}></th>
           <th style={styles.th}>Nodo</th>
           <th style={styles.th}>ID</th>
@@ -44,6 +61,14 @@ export function NodesTable({ summaries, selected, onSelect, onToggleFavorite, on
             }}
             onClick={() => onSelect(node.node_id)}
           >
+            <td style={styles.td}>
+              <input
+                type="checkbox"
+                checked={checkedIds.has(node.node_id)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => onToggleChecked(node.node_id)}
+              />
+            </td>
             <td style={styles.td}>
               <span
                 title={node.is_favorite ? "Quitar de favoritos" : "Marcar favorito"}

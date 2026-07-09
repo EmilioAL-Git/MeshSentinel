@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from noc.adapters.api.routers import (
     admin,
+    admin_batches,
     admin_config,
     alerts,
     dashboard,
@@ -22,6 +23,7 @@ from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
+from noc.application.admin.batches import BatchService
 from noc.application.admin.service import AdminOperationService
 from noc.application.alerting.engine import AlertEngine, AlertEngineLoop, AlertTransition
 from noc.application.alerting.notifier import AlertNotifier
@@ -48,6 +50,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Pipeline de administración remota (M1.1, ADR 0013)
     command_queue = RedisCommandQueue(settings.redis_url, settings.commands_stream_prefix)
     admin_service = AdminOperationService(app.state.db.session_factory, command_queue, settings)
+    app.state.batches = BatchService(app.state.db.session_factory, settings)
+    admin_service.attach_batch_service(app.state.batches)
     app.state.event_bus.subscribe(admin_service.handle_event)
     admin_service.start()
 
@@ -111,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(alerts.router, prefix=settings.api_v1_prefix)
     app.include_router(admin.router, prefix=settings.api_v1_prefix)
     app.include_router(admin_config.router, prefix=settings.api_v1_prefix)
+    app.include_router(admin_batches.router, prefix=settings.api_v1_prefix)
     app.include_router(organization.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app

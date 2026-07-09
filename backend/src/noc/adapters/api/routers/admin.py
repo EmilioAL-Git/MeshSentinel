@@ -46,6 +46,7 @@ class OperationIn(BaseModel):
 
 class OperationOut(BaseModel):
     id: int
+    batch_id: int | None
     target_node_id: str
     gateway_id: str
     operation_type: str

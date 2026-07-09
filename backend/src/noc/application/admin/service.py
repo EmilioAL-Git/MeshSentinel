@@ -44,6 +44,11 @@ class AdminOperationService:
         self._queue = queue
         self._settings = settings
         self._task: asyncio.Task[None] | None = None
+        # M2: inyectado tras construir (attach_batch_service) para cerrar lotes
+        self._batch_service: Any = None
+
+    def attach_batch_service(self, batch_service: Any) -> None:
+        self._batch_service = batch_service
 
     # ── Ciclo del scheduler ──────────────────────────────────────────────────
 
@@ -79,7 +84,9 @@ class AdminOperationService:
             repo = SqlAdminOperationRepository(session)
             for op in await repo.list_expired_in_flight(now, WATCHDOG_GRACE_SECONDS):
                 logger.warning("admin.op watchdog timeout id=%s node=%s", op.id, op.target_node_id)
-                await self._apply_failure(repo, op, "timeout", "watchdog: no result from gateway", now)
+                await self._apply_failure(
+                    repo, op, "timeout", "watchdog: no result from gateway", now, session
+                )
 
     async def _dispatch(self, now: datetime) -> None:
         async with self._session_factory() as session, session.begin():
@@ -146,8 +153,16 @@ class AdminOperationService:
                     },
                 )
                 logger.info("admin.op %s id=%s node=%s", status, op_id, op.target_node_id)
+                await self._notify_batch(session, op)
             else:
-                await self._apply_failure(repo, op, state, payload.get("error"), now)
+                await self._apply_failure(repo, op, state, payload.get("error"), now, session)
+
+    async def _notify_batch(self, session: Any, op: AdminOperation) -> None:
+        """M2: si la operación pertenece a un lote, comprobar su finalización
+        dentro de la misma transacción."""
+        if op.batch_id is None or self._batch_service is None or session is None:
+            return
+        await self._batch_service.maybe_complete(session, op.batch_id)
 
     @staticmethod
     def _map_success_status(result: Any) -> str:
@@ -171,6 +186,7 @@ class AdminOperationService:
         state: str,
         error: str | None,
         now: datetime,
+        session: Any = None,
     ) -> None:
         if op.attempts < op.max_attempts:
             delay = retry_delay_seconds(op.attempts)
@@ -196,6 +212,7 @@ class AdminOperationService:
                 },
             )
             logger.warning("admin.op %s (final) id=%s node=%s", state, op.id, op.target_node_id)
+            await self._notify_batch(session, op)
 
     @staticmethod
     def _duration_ms(op: AdminOperation, now: datetime) -> int | None:

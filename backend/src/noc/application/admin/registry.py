@@ -89,7 +89,7 @@ OPERATIONS: dict[str, OperationSpec] = {
         OperationSpec(
             "position.set_fixed",
             "Fijar posición del nodo (con verificación por lectura)",
-            kind="set", allow_bulk=False, destructive=False, required_role="admin",
+            kind="set", allow_bulk=True, destructive=False, required_role="admin",
             param_fields=[
                 ParamField("latitude", "number", required=True, minimum=-90, maximum=90),
                 ParamField("longitude", "number", required=True, minimum=-180, maximum=180),
@@ -102,13 +102,13 @@ OPERATIONS: dict[str, OperationSpec] = {
         OperationSpec(
             "config.set",
             "Escribir una sección de configuración del dispositivo (con verificación)",
-            kind="set", allow_bulk=False, destructive=False, required_role="admin",
+            kind="set", allow_bulk=True, destructive=False, required_role="admin",
             param_choices={"section": CONFIG_SECTIONS},
         ),
         OperationSpec(
             "module_config.set",
             "Escribir una sección de configuración de módulos (con verificación)",
-            kind="set", allow_bulk=False, destructive=False, required_role="admin",
+            kind="set", allow_bulk=True, destructive=False, required_role="admin",
             param_choices={"section": MODULE_CONFIG_SECTIONS},
         ),
     ]
