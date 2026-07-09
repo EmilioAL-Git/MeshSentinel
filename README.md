@@ -1,7 +1,33 @@
 # Meshtastic NOC
 
-Plataforma de administración y monitorización para redes Meshtastic
-(Network Operations Center).
+Plataforma profesional de administración y monitorización para redes
+Meshtastic (Network Operations Center): observa la malla en tiempo real,
+gestiona la configuración remota de los nodos y alerta ante anomalías, todo
+desde una única interfaz web.
+
+## Funcionalidades principales
+
+- **Monitorización en tiempo real** — tabla y mapa (Leaflet) de nodos con
+  estado online/offline, posición, batería, SNR y telemetría, actualizados
+  por WebSocket.
+- **Dashboard NOC** — resumen agregado de la malla, nodos críticos con motivo,
+  estado de pasarelas y feed de actividad en vivo.
+- **Motor de alertas** — reglas configurables (batería baja, nodo desconectado,
+  SNR degradado, pasarela caída) con severidad, notificaciones (webhook/ntfy) y
+  ciclo de vida firing → acknowledged → resolved.
+- **Organización de nodos** — favoritos, etiquetas, grupos e ignorados, con
+  búsqueda y filtros avanzados.
+- **Administración remota** — operaciones sobre nodos vía LoRa (lectura de
+  metadata/config, cambios seguros con verificación de lectura, favoritos e
+  ignorados remotos), con cola persistente, límite de tasa y reintentos.
+- **Editor de configuración** — edición completa de `config`/`module_config`
+  por secciones, con validación y aplicación por riesgo.
+- **Perfiles de configuración** — plantillas versionadas, comparación por
+  diferencias y sincronización masiva hacia varios nodos.
+- **Acciones masivas (batches)** — selección de nodos, previsualización
+  (dry-run) y ejecución con confirmación, seguimiento de progreso y ETA.
+- **Consola de actividad** — histórico filtrable de eventos de operaciones,
+  lotes y estado de pasarelas.
 
 ## Arquitectura
 
