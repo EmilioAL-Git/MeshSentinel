@@ -22,6 +22,7 @@ from noc.adapters.persistence.admin_repositories import (
     SqlAdminOperationRepository,
 )
 from noc.adapters.persistence.repositories import SqlNodeRepository
+from noc.application.activity import activity
 from noc.application.admin.registry import OPERATIONS, validate_operation
 from noc.application.dashboard import ensure_utc
 from noc.application.node_filters import NodeFilters, apply_filters
@@ -210,6 +211,7 @@ class BatchService:
         logger.info(
             "batch.created id=%s name=%r ops=%d type=%s", batch.id, name, len(resolved), operation_type
         )
+        await activity.batch(batch, "created")
         return batch
 
     # ── Control ──────────────────────────────────────────────────────────────
@@ -222,6 +224,8 @@ class BatchService:
                 return None
             batch = await repo.update_fields(batch_id, {"status": "paused"})
         logger.info("batch.paused id=%s", batch_id)
+        assert batch is not None
+        await activity.batch(batch, "paused")
         return batch
 
     async def resume(self, batch_id: int) -> AdminBatch | None:
@@ -232,6 +236,8 @@ class BatchService:
                 return None
             batch = await repo.update_fields(batch_id, {"status": "running"})
         logger.info("batch.resumed id=%s", batch_id)
+        assert batch is not None
+        await activity.batch(batch, "resumed")
         return batch
 
     async def cancel(self, batch_id: int) -> AdminBatch | None:
@@ -249,6 +255,8 @@ class BatchService:
                 changes["finished_at"] = now
             batch = await repo.update_fields(batch_id, changes)
         logger.info("batch.cancelled id=%s pending_cancelled=%d", batch_id, cancelled)
+        assert batch is not None
+        await activity.batch(batch, "cancelled", cancelled_pending=cancelled)
         return batch
 
     # ── Finalización y progreso ──────────────────────────────────────────────
@@ -271,10 +279,12 @@ class BatchService:
         counts = await repo.status_counts(batch_id)
         failures = sum(counts.get(s, 0) for s in FAILURE_STATUSES)
         status = "completed_with_errors" if failures else "completed"
-        await repo.update_fields(
+        updated = await repo.update_fields(
             batch_id, {"status": status, "finished_at": datetime.now(timezone.utc)}
         )
         logger.info("batch.%s id=%s counts=%s", status, batch_id, counts)
+        if updated is not None:
+            await activity.batch(updated, status, counts=counts)
 
     async def progress(self, session: AsyncSession, batch: AdminBatch) -> dict[str, Any]:
         repo = SqlAdminBatchRepository(session)

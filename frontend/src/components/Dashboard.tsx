@@ -8,7 +8,7 @@ interface Props {
   loading: boolean;
   activity: ActivityEntry[];
   favorites: NodeSummaryOut[];
-  onNavigate: (view: "nodes" | "map") => void;
+  onNavigate: (view: "nodes" | "map" | "activity") => void;
   onShowDetail: (nodeId: string) => void;
 }
 
@@ -111,6 +111,7 @@ export function Dashboard({ summary, loading, activity, favorites, onNavigate, o
         <span style={{ marginLeft: "auto", display: "flex", gap: "0.5rem" }}>
           <button onClick={() => onNavigate("nodes")} style={quickBtn}>Nodos</button>
           <button onClick={() => onNavigate("map")} style={quickBtn}>Mapa</button>
+          <button onClick={() => onNavigate("activity")} style={quickBtn}>Ver actividad</button>
         </span>
       </div>
 
@@ -194,7 +195,12 @@ export function Dashboard({ summary, loading, activity, favorites, onNavigate, o
 
         {/* Actividad reciente */}
         <div style={styles.card}>
-          <h2 style={{ marginTop: 0 }}>Actividad reciente</h2>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h2 style={{ margin: 0 }}>Actividad reciente</h2>
+            <button onClick={() => onNavigate("activity")} style={{ ...quickBtn, fontSize: "0.85rem" }}>
+              Consola →
+            </button>
+          </div>
           {activity.length === 0 ? (
             <p style={styles.dim}>Esperando eventos…</p>
           ) : (

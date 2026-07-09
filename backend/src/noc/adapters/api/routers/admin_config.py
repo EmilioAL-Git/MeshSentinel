@@ -22,6 +22,7 @@ from noc.adapters.api.deps import SessionDep
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.models import AdminOperationModel
 from noc.adapters.persistence.repositories import SqlNodeRepository
+from noc.application.activity import activity
 from noc.application.admin.config_schema import (
     ALL_SECTIONS,
     CONFIG_SECTIONS,
@@ -170,6 +171,11 @@ async def get_node_config(node_id: str, session: SessionDep) -> ConfigStateOut:
 # ── /nodes/{id}/config/refresh ───────────────────────────────────────────────
 
 
+async def _emit_created(ops: list[AdminOperation]) -> None:
+    for op in ops:
+        await activity.operation(op, "created")
+
+
 async def _create_operation(session, node, op_type: str, params: dict[str, Any]) -> AdminOperation:
     """Auxiliar compartido: crea una AdminOperation validada y persistida."""
     settings = get_settings()
@@ -199,7 +205,7 @@ async def refresh_node_config(
         raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
 
     requested = body.sections or list(ALL_SECTIONS.keys())
-    ops: list[int] = []
+    ops = []
     for name in requested:
         meta = ALL_SECTIONS.get(name)
         if meta is None:
@@ -210,10 +216,10 @@ async def refresh_node_config(
             op_type, params = "config.get", {"section": name}
         else:
             op_type, params = "module_config.get", {"section": name}
-        op = await _create_operation(session, node, op_type, params)
-        ops.append(op.id or 0)
+        ops.append(await _create_operation(session, node, op_type, params))
     await session.commit()
-    return ApplyOut(operation_ids=ops)
+    await _emit_created(ops)
+    return ApplyOut(operation_ids=[op.id or 0 for op in ops])
 
 
 # ── /nodes/{id}/config/apply ─────────────────────────────────────────────────
@@ -285,9 +291,9 @@ async def apply_node_config(
     if not resolved:
         raise HTTPException(status_code=422, detail="No changes to apply")
 
-    ops: list[int] = []
+    ops = []
     for _name, op_type, params in resolved:
-        op = await _create_operation(session, node, op_type, params)
-        ops.append(op.id or 0)
+        ops.append(await _create_operation(session, node, op_type, params))
     await session.commit()
-    return ApplyOut(operation_ids=ops)
+    await _emit_created(ops)
+    return ApplyOut(operation_ids=[op.id or 0 for op in ops])

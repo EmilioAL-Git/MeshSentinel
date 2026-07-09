@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
+from noc.application.activity import activity
 from noc.application.dashboard import ensure_utc
 from noc.config import Settings
 from noc.domain.admin.entities import AdminOperation
@@ -106,6 +107,7 @@ class AdminOperationService:
             "admin.op dispatched id=%s type=%s node=%s attempt=%d/%d",
             op.id, op.operation_type, op.target_node_id, op.attempts, op.max_attempts,
         )
+        await activity.operation(op, "dispatched")
 
     def _command_envelope(self, op: AdminOperation, now: datetime) -> dict[str, Any]:
         return {
@@ -140,6 +142,7 @@ class AdminOperationService:
                 return  # resultado tardío de una operación ya cerrada/cancelada
             if state == "running":
                 await repo.update_fields(op_id, {"status": "running", "started_at": now})
+                await activity.operation(op, "running")
             elif state == "succeeded":
                 result = payload.get("result")
                 status = self._map_success_status(result)
@@ -153,6 +156,8 @@ class AdminOperationService:
                     },
                 )
                 logger.info("admin.op %s id=%s node=%s", status, op_id, op.target_node_id)
+                verify = result.get("verify") if isinstance(result, dict) else None
+                await activity.operation(op, "finished", final_status=status, verify=verify)
                 await self._notify_batch(session, op)
             else:
                 await self._apply_failure(repo, op, state, payload.get("error"), now, session)
@@ -201,6 +206,9 @@ class AdminOperationService:
             logger.info(
                 "admin.op retry id=%s attempt=%d/%d in=%.0fs", op.id, op.attempts, op.max_attempts, delay
             )
+            await activity.operation(
+                op, "retry_scheduled", error=error, delay_seconds=int(delay)
+            )
         else:
             await repo.update_fields(
                 op.id or 0,
@@ -212,6 +220,7 @@ class AdminOperationService:
                 },
             )
             logger.warning("admin.op %s (final) id=%s node=%s", state, op.id, op.target_node_id)
+            await activity.operation(op, "finished", final_status=state, error=error)
             await self._notify_batch(session, op)
 
     @staticmethod

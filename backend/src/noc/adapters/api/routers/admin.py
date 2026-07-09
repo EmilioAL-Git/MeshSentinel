@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
+from noc.application.activity import activity
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.admin.registry import OPERATIONS, validate_operation
 from noc.config import get_settings
@@ -116,6 +117,7 @@ async def create_operation(body: OperationIn, session: SessionDep) -> OperationO
         )
     )
     await session.commit()
+    await activity.operation(op, "created")
     return OperationOut.from_entity(op)
 
 

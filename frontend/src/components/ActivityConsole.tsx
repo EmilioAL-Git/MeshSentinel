@@ -1,0 +1,198 @@
+import { useMemo, useState, type CSSProperties } from "react";
+import {
+  CATEGORY_LABEL,
+  type ActivityCategory,
+  type ActivityEntry,
+  type ActivitySeverity,
+} from "../activity";
+import { displayName, type GatewayOut, type NodeSummaryOut } from "../api/client";
+import { styles } from "../styles";
+
+const input: CSSProperties = {
+  background: "#0d1117",
+  border: "1px solid #30363d",
+  color: "#e6edf3",
+  borderRadius: 6,
+  padding: "0.3rem 0.5rem",
+};
+const btn: CSSProperties = { ...input, cursor: "pointer" };
+
+const SEVERITY_COLOR: Record<ActivitySeverity, string> = {
+  info: "#8b949e",
+  ok: "#3fb950",
+  warn: "#d29922",
+  error: "#f85149",
+};
+
+const CATEGORY_COLOR: Record<ActivityCategory, string> = {
+  operacion: "#1f6feb",
+  batch: "#8250df",
+  pasarela: "#1f6f43",
+  alerta: "#b62324",
+  malla: "#57606a",
+};
+
+const ALL_CATEGORIES = Object.keys(CATEGORY_LABEL) as ActivityCategory[];
+
+export function ActivityConsole({
+  entries,
+  summaries,
+  gateways,
+  onClear,
+}: {
+  entries: ActivityEntry[];
+  summaries: NodeSummaryOut[];
+  gateways: GatewayOut[];
+  onClear: () => void;
+}) {
+  const [nodeFilter, setNodeFilter] = useState("");
+  const [batchFilter, setBatchFilter] = useState("");
+  const [gatewayFilter, setGatewayFilter] = useState("");
+  const [categories, setCategories] = useState<Set<ActivityCategory>>(new Set(ALL_CATEGORIES));
+
+  // Batches vistos en el buffer (para el filtro)
+  const batchIds = useMemo(
+    () =>
+      [...new Set(entries.map((e) => e.batchId).filter((b): b is number => b != null))].sort(
+        (a, b) => b - a,
+      ),
+    [entries],
+  );
+  const gatewayIds = useMemo(() => {
+    const ids = new Set(gateways.map((g) => g.gateway_id));
+    for (const e of entries) if (e.gatewayId && e.gatewayId !== "noc-backend") ids.add(e.gatewayId);
+    return [...ids].sort();
+  }, [entries, gateways]);
+
+  const filtered = useMemo(
+    () =>
+      entries.filter(
+        (e) =>
+          categories.has(e.category) &&
+          (nodeFilter === "" || e.nodeId === nodeFilter) &&
+          (batchFilter === "" || e.batchId === Number(batchFilter)) &&
+          (gatewayFilter === "" || e.gatewayId === gatewayFilter),
+      ),
+    [entries, categories, nodeFilter, batchFilter, gatewayFilter],
+  );
+
+  const toggleCategory = (c: ActivityCategory) => {
+    const next = new Set(categories);
+    if (next.has(c)) next.delete(c);
+    else next.add(c);
+    setCategories(next);
+  };
+
+  const hasFilters =
+    nodeFilter !== "" || batchFilter !== "" || gatewayFilter !== "" || categories.size !== ALL_CATEGORIES.length;
+
+  return (
+    <div style={styles.card}>
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0 }}>Actividad del sistema</h2>
+        <span style={{ ...styles.ok, fontSize: "0.8rem" }}>● en vivo</span>
+        <span style={{ marginLeft: "auto", ...styles.dim, fontSize: "0.85rem" }}>
+          {filtered.length}
+          {hasFilters ? ` de ${entries.length}` : ""} eventos
+        </span>
+        <button style={btn} onClick={onClear} disabled={entries.length === 0}>
+          Limpiar vista
+        </button>
+      </div>
+
+      {/* Filtros */}
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", margin: "0.8rem 0" }}>
+        <select style={input} value={nodeFilter} onChange={(e) => setNodeFilter(e.target.value)}>
+          <option value="">— todos los nodos —</option>
+          {summaries.map((s) => (
+            <option key={s.node.node_id} value={s.node.node_id}>
+              {displayName(s.node)}
+            </option>
+          ))}
+        </select>
+        <select style={input} value={batchFilter} onChange={(e) => setBatchFilter(e.target.value)}>
+          <option value="">— todos los batches —</option>
+          {batchIds.map((b) => (
+            <option key={b} value={b}>
+              Batch #{b}
+            </option>
+          ))}
+        </select>
+        <select style={input} value={gatewayFilter} onChange={(e) => setGatewayFilter(e.target.value)}>
+          <option value="">— todas las pasarelas —</option>
+          {gatewayIds.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+        </select>
+        <span style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
+          {ALL_CATEGORIES.map((c) => (
+            <button
+              key={c}
+              style={{
+                ...btn,
+                fontSize: "0.8rem",
+                padding: "0.15rem 0.6rem",
+                borderRadius: 12,
+                background: categories.has(c) ? CATEGORY_COLOR[c] : "transparent",
+                borderColor: CATEGORY_COLOR[c],
+                opacity: categories.has(c) ? 1 : 0.5,
+              }}
+              onClick={() => toggleCategory(c)}
+              title={`Mostrar/ocultar eventos de tipo ${CATEGORY_LABEL[c]}`}
+            >
+              {CATEGORY_LABEL[c]}
+            </button>
+          ))}
+        </span>
+      </div>
+
+      {/* Lista de eventos (más recientes arriba) */}
+      {filtered.length === 0 ? (
+        <p style={styles.dim}>
+          {entries.length === 0
+            ? "Esperando eventos… La consola muestra en tiempo real la actividad del sistema."
+            : "Ningún evento coincide con los filtros actuales."}
+        </p>
+      ) : (
+        <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {filtered.map((e) => (
+              <li
+                key={e.id}
+                style={{
+                  display: "flex",
+                  gap: "0.6rem",
+                  alignItems: "baseline",
+                  padding: "0.25rem 0",
+                  borderBottom: "1px solid #21262d",
+                }}
+              >
+                <span style={{ ...styles.mono, ...styles.dim, whiteSpace: "nowrap" }}>{e.time}</span>
+                <span
+                  style={{
+                    background: CATEGORY_COLOR[e.category],
+                    color: "#fff",
+                    borderRadius: 12,
+                    padding: "0 0.5rem",
+                    fontSize: "0.7rem",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {CATEGORY_LABEL[e.category]}
+                </span>
+                <span style={{ color: SEVERITY_COLOR[e.severity], fontSize: "0.9rem" }}>{e.text}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p style={{ ...styles.dim, fontSize: "0.8rem", marginBottom: 0 }}>
+        Monitor de actividad para el operador: operaciones remotas (cola → envío → respuesta →
+        verificación), batches, pasarelas (USB), alertas y tráfico de la malla. Se conservan los
+        últimos 500 eventos de la sesión.
+      </p>
+    </div>
+  );
+}

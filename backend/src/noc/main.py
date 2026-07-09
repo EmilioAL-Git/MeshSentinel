@@ -23,6 +23,7 @@ from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
+from noc.application.activity import activity
 from noc.application.admin.batches import BatchService
 from noc.application.admin.service import AdminOperationService
 from noc.application.alerting.engine import AlertEngine, AlertEngineLoop, AlertTransition
@@ -46,6 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ingest = IngestService(app.state.db.session_factory)
     app.state.event_bus.subscribe(ingest.handle_event)
     app.state.event_bus.subscribe(hub.broadcast)
+
+    # Consola de actividad: eventos de ciclo de vida backend→UI por el hub WS
+    activity.attach(hub.broadcast)
 
     # Pipeline de administración remota (M1.1, ADR 0013)
     command_queue = RedisCommandQueue(settings.redis_url, settings.commands_stream_prefix)

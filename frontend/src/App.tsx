@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
+import { ACTIVITY_LIMIT, DASHBOARD_ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
 import {
   fetchAlerts,
   fetchDashboardSummary,
@@ -14,6 +14,7 @@ import {
   setNodeIgnored,
   type NodeFilterParams,
 } from "./api/client";
+import { ActivityConsole } from "./components/ActivityConsole";
 import { AlertsView } from "./components/AlertsView";
 import { BatchesView, BatchWizard } from "./components/BatchesView";
 import { ConfigEditor } from "./components/ConfigEditor";
@@ -33,9 +34,18 @@ const DATA_EVENTS = new Set([
   "alert.fired",
   "alert.resolved",
   "admin.operation",
+  "admin.batch",
 ]);
 
-type View = "dashboard" | "nodes" | "map" | "alerts" | "operations" | "config" | "batches";
+type View =
+  | "dashboard"
+  | "nodes"
+  | "map"
+  | "alerts"
+  | "operations"
+  | "config"
+  | "batches"
+  | "activity";
 
 const selBtn = {
   background: "transparent",
@@ -117,10 +127,19 @@ export default function App() {
     //    como máximo 1 vez por segundo (cero peticiones HTTP).
     const pending: ActivityEntry[] = [];
     const nodeName = (id: string) => nodeNamesRef.current.get(id) ?? id;
+    // gateway.status llega como heartbeat cada 30 s: solo interesa el CAMBIO
+    // de estado (conexión/desconexión/reconexión), no cada latido
+    const lastGatewayStatus = new Map<string, string>();
 
     const ws = openEventsSocket((event) => {
       if (!DATA_EVENTS.has(event.event_type)) return;
-      const entry = toEntry(event, nodeName);
+      let skipEntry = false;
+      if (event.event_type === "gateway.status") {
+        const status = String(event.payload.status ?? "");
+        skipEntry = lastGatewayStatus.get(event.gateway_id) === status;
+        lastGatewayStatus.set(event.gateway_id, status);
+      }
+      const entry = skipEntry ? null : toEntry(event, nodeName);
       if (entry) pending.unshift(entry);
 
       if (invalidateTimer.current == null) {
@@ -213,6 +232,7 @@ export default function App() {
           <NavTab active={view === "operations"} label="Operaciones" onClick={() => setView("operations")} />
           <NavTab active={view === "config"} label="Configuración" onClick={() => setView("config")} />
           <NavTab active={view === "batches"} label="Batches" onClick={() => setView("batches")} />
+          <NavTab active={view === "activity"} label="Actividad" onClick={() => setView("activity")} />
         </nav>
         <span style={{ marginLeft: "auto" }}>
           Backend:{" "}
@@ -230,10 +250,19 @@ export default function App() {
         <Dashboard
           summary={dashboard.data}
           loading={dashboard.isLoading}
-          activity={activity}
+          activity={activity.slice(0, DASHBOARD_ACTIVITY_LIMIT)}
           favorites={favorites}
           onNavigate={setView}
           onShowDetail={showDetail}
+        />
+      )}
+
+      {view === "activity" && (
+        <ActivityConsole
+          entries={activity}
+          summaries={summaries}
+          gateways={gateways.data ?? []}
+          onClear={() => setActivity([])}
         />
       )}
 
