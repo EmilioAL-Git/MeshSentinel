@@ -52,8 +52,13 @@ class Settings(BaseSettings):
     alert_eval_interval_seconds: float = 30.0
 
     # ── Pipeline de administración remota (M1.1, ADR 0013) ───────────
-    # Presupuesto de malla: operaciones despachadas por minuto (global)
-    admin_rate_limit_per_minute: int = 6
+    # Presupuesto de malla: operaciones despachadas por minuto (global). El
+    # valor de M1.1 (6) era excesivamente conservador: con presets rápidos
+    # (EU_868) el límite regulatorio de duty cycle (10%) admite muchos más
+    # intercambios cortos por minuto. Sigue siendo un techo de seguridad, no
+    # el throughput real (lo limita también "1 operación en vuelo por
+    # gateway" + la latencia real de cada roundtrip).
+    admin_rate_limit_per_minute: int = 60
     admin_default_timeout_seconds: int = 120
     admin_max_attempts: int = 3
     admin_scheduler_interval_seconds: float = 2.0
