@@ -349,15 +349,22 @@ class MeshtasticUsbTransport(Transport):
         rechaza con NAK `ADMIN_BAD_SESSION_KEY`. Se limpia la caché de la
         librería antes de cada intento para forzar un handshake nuevo.
         """
+        from meshtastic.util import to_node_num
+
         from gateway.decoder.admin import ACK_ONLY_OPERATIONS
 
         spec = ACK_ONLY_OPERATIONS[op_type]
         set_msg = spec.build_set(params)
         timeout = max(10.0, float(operation.get("timeout_seconds") or 120) / 3)
+        # node.nodeNum puede ser str (p.ej. "!e7ef4fb4") según cómo la
+        # librería haya cacheado el Node — _getOrCreateByNum exige int
+        # (formatea con :08x internamente). Se deriva del propio node_id, que
+        # sabemos canónico, en vez de confiar en el tipo de node.nodeNum.
+        node_num = to_node_num(node_id)
 
         def _send(on_ack: Any) -> None:
             node = self._iface.getNode(node_id, requestChannels=False)
-            self._iface._getOrCreateByNum(node.nodeNum).pop("adminSessionPassKey", None)
+            self._iface._getOrCreateByNum(node_num).pop("adminSessionPassKey", None)
             node.ensureSessionKey()
             node._sendAdmin(set_msg, wantResponse=True, onResponse=on_ack)
 

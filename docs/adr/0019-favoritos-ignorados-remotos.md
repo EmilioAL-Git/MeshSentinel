@@ -225,3 +225,23 @@ pida un passkey nuevo cada vez en vez de reutilizar uno potencialmente ya
 consumido. Coste: un roundtrip extra de `SESSIONKEY_CONFIG` por intento;
 aceptable frente al riesgo de reportar "failed" una operación que sí se
 aplicó.
+
+## Errata 6 (2026-07-09): la propia corrección de la errata 5 pasaba un tipo
+incorrecto a `_getOrCreateByNum`
+
+La limpieza de passkey de la errata 5 usaba `node.nodeNum` como clave de
+caché — pero `Node.nodeNum` puede ser `str` (p.ej. `"!e7ef4fb4"`) según cómo
+la librería haya cacheado ese `Node` (la propia librería lo maneja con un
+`isinstance(self.nodeNum, int)` dentro de `_sendAdmin`, precisamente por
+esto). `iface._getOrCreateByNum` exige `int` (formatea con `:08x`
+internamente) y revienta con `TypeError: Unknown format code 'x' for
+object of type 'str'` si se le pasa una cadena — visible en el NOC como
+`Error: Unknown format code 'x' for object of type 'str'` en `ignored.set`.
+
+**Corrección**: se deriva el node_num numérico del propio `node_id`
+(parámetro ya canónico de `_execute_ack_set`, p.ej. `"!e7ef4fb4"`) con
+`meshtastic.util.to_node_num`, en vez de confiar en el tipo de
+`node.nodeNum`. Test de regresión en
+`gateway/tests/test_usb_execute_ack_set.py` con un `Node` fake cuyo
+`nodeNum` es `str` (reproduce el bug real) y una `_getOrCreateByNum` fake
+que revienta igual que la real si recibe algo que no sea `int`.
