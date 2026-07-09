@@ -322,11 +322,20 @@ function GatewayCard({ gateway }: { gateway: GatewayOut }) {
 // ── Vista principal ──────────────────────────────────────────────────────────
 
 export function GatewaysView() {
-  const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways(), refetchInterval: 15_000 });
+  // include_deleted: una pasarela eliminada (borrado lógico) sigue siendo un
+  // candidato válido para "+ Añadir gateway" — el proceso puede seguir vivo,
+  // solo se retiró de la gestión activa (ver ADR 0021 §6).
+  const gateways = useQuery({
+    queryKey: ["gateways", "all"],
+    queryFn: () => fetchGateways(true),
+    refetchInterval: 15_000,
+  });
   const [wizardFor, setWizardFor] = useState<string | null>(null);
 
-  const list = gateways.data ?? [];
-  const unmanagedCandidate = list.find((g) => !g.managed)?.gateway_id ?? null;
+  const all = gateways.data ?? [];
+  const list = all.filter((g) => g.deleted_at == null);
+  const deleted = all.filter((g) => g.deleted_at != null);
+  const unmanagedCandidate = all.find((g) => !g.managed || g.deleted_at != null)?.gateway_id ?? null;
 
   if (wizardFor) {
     return (
@@ -363,6 +372,13 @@ export function GatewaysView() {
       {list.map((g) => (
         <GatewayCard key={g.gateway_id} gateway={g} />
       ))}
+
+      {deleted.length > 0 && (
+        <p style={{ ...styles.dim, fontSize: "0.85rem" }}>
+          Eliminados: {deleted.map((g) => g.name ?? g.gateway_id).join(", ")} — usa «+ Añadir gateway» para
+          volver a configurar el mismo proceso.
+        </p>
+      )}
     </div>
   );
 }
