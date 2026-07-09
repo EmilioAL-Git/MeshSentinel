@@ -147,7 +147,34 @@ los wrappers oficiales. Sin cambios de esquema (contrato v1, `verify:
 "unavailable"` intactos) ni de la lógica de `_ack_roundtrip` de la errata
 anterior — ambas correcciones son complementarias: una decide qué cuenta
 como "ack verdadero" una vez recibido, la otra asegura que se solicita un
-ack verdadero en primer lugar. PENDIENTE validación del usuario con
-hardware para `ignored.remove` (y confirmar que no introduce regresión en
-`favorite.set/remove`, `ignored.set` ni `contact.add`, que comparten el
-mismo código).
+ack verdadero en primer lugar.
+
+## Errata 3 (2026-07-09): el ACK implícito no predice el resultado — se
+revierte su tratamiento como fallo
+
+Con la errata 2 ya aplicada, `ignored.remove` recibió un ACK **implícito**
+(`from` == nodo local) en el primer intento; la errata 1 lo trataba como
+`ack: false`, forzando reintentos hasta agotar `max_attempts` y terminar en
+`failed` — pero el usuario confirmó en la app que el nodo **sí** se había
+quitado de ignorados. El mismo patrón (ACK implícito → aplicación real) ya
+lo había mostrado el propio CLI oficial del usuario al reproducir el
+problema (varios `NAK, MAX_RETRANSMIT` y luego "Received an implicit ACK...
+[...]" tras el cual la operación sí se aplicó). Conclusión: el ACK implícito
+no es una señal de fallo — es, literalmente, lo que dice el mensaje de la
+librería: "probablemente llegue, pero no hay garantía". La errata 1 fue un
+diagnóstico incompleto porque en ese momento seguía activo el bug de la
+errata 2 (`wantResponse=False`), que sí garantizaba ausencia de confirmación
+real; con `wantResponse=True` corregido, el implícito deja de ser un
+indicador fiable de fallo y solo genera falsos negativos si se trata como
+tal (retries innecesarios sobre la malla y operaciones marcadas "Error"
+pese a haber funcionado).
+
+**Corrección**: `_ack_roundtrip` ya no distingue implícito/real para decidir
+`ack` — solo un NAK explícito (`errorReason != "NONE"`) cuenta como fallo.
+El carácter implícito se sigue registrando (`error_reason: "IMPLICIT_ACK"`)
+en logs y en el resultado para diagnóstico, pero ya no bloquea el estado
+"Confirmado"/`succeeded_unconfirmed`. Techo de certeza asumido explícitamente
+(§Consecuencias): en este mecanismo ack-only, sin verify de lectura posible,
+no existe ninguna heurística de ACK/NAK que prediga con certeza el resultado
+real en el firmware — es inherente a la ausencia de un GET, no algo que se
+pueda seguir puliendo a base de heurísticas más finas sobre el ACK.

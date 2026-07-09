@@ -1,11 +1,13 @@
-"""Regresión: `_ack_roundtrip` confundía un ACK implícito (generado
-localmente cuando se agota el límite de reintentos del radio, sin
-confirmación real del destino) con un ACK confirmado, porque solo miraba
-`errorReason == "NONE"`. La propia librería oficial distingue ambos casos
-comparando `packet["from"]` contra el nodo local (`Node.onAckNak`). Bug
-detectado en producción: favoritos remotos se aplicaban correctamente,
-ignorados remotos se marcaban "Confirmado" sin aplicarse de verdad en el
-firmware."""
+"""Regresión de `_ack_roundtrip` (ver ADR 0019, ambas erratas):
+
+1. Un ACK implícito (`packet["from"]` == nodo local: el radio se rindió tras
+   agotar reintentos y generó una respuesta sintética) NO es lo mismo que un
+   ACK real del destino — pero comprobado en campo, tampoco implica fallo:
+   con `wantResponse=True` ya corregido, un implícito se ha correspondido
+   con una aplicación real en el dispositivo. Solo un NAK explícito
+   (errorReason != "NONE") cuenta como fallo; el implícito se registra en
+   `error_reason` para diagnóstico sin forzar reintento.
+"""
 
 import asyncio
 
@@ -48,10 +50,11 @@ async def test_ack_from_remote_node_is_confirmed():
     assert result == {"ack": True, "error_reason": "NONE"}
 
 
-async def test_implicit_ack_from_local_node_is_not_confirmed():
-    """El paquete de respuesta viene "from" el propio nodo local (radio local
-    dándose por vencido tras agotar reintentos) — errorReason es "NONE" pero
-    no hay confirmación real del destino; no debe marcarse como Confirmado."""
+async def test_implicit_ack_from_local_node_still_counts_as_confirmed():
+    """No hay forma fiable de distinguir un implícito que sí se aplicó de uno
+    que no (observado en campo en ambos sentidos) — se registra para
+    diagnóstico pero no se fuerza reintento sobre una operación que, con
+    wantResponse=True, probablemente sí se aplicó."""
     t = make_transport()
     t._loop = asyncio.get_running_loop()
 
@@ -59,7 +62,7 @@ async def test_implicit_ack_from_local_node_is_not_confirmed():
         on_ack(routing_packet(LOCAL_NODE_NUM))
 
     result = await t._ack_roundtrip(send, timeout=1)
-    assert result == {"ack": False, "error_reason": "IMPLICIT_ACK_ONLY"}
+    assert result == {"ack": True, "error_reason": "IMPLICIT_ACK"}
 
 
 async def test_explicit_nak_is_not_confirmed():

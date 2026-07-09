@@ -283,17 +283,24 @@ class MeshtasticUsbTransport(Transport):
         (ver mesh_interface.sendData: "if the onResponse callback is called
         'onAckNak' this will implicitly be true").
 
-        Bug encontrado en producción (favoritos funcionaban, ignorados no se
-        aplicaban pese a marcar "Confirmado"): `errorReason == "NONE"` NO
-        basta para distinguir un ACK real del destino de un "ACK implícito"
-        (generado localmente cuando se agota el límite de reintentos del
-        radio, sin confirmación de que el destino procesó el AdminMessage —
-        la propia librería lo distingue en `Node.onAckNak` comparando
-        `packet["from"]` contra el nodo local, imprimiendo literalmente
-        "Received an implicit ACK. Packet will likely arrive, but cannot be
-        guaranteed."). Replicamos esa distinción: un ACK implícito se trata
-        como NO confirmado (fuerza reintento del pipeline, ADR 0013), nunca
-        como "Confirmado".
+        Errata (ADR 0019 §"ACK implícito"): en un primer intento distinguimos
+        un ACK real del destino (`packet["from"]` != nodo local) de un "ACK
+        implícito" (`from` == nodo local: el radio se rindió tras agotar
+        reintentos y generó una respuesta sintética — la propia librería lo
+        marca así en `Node.onAckNak`, imprimiendo literalmente "Received an
+        implicit ACK. Packet will likely arrive, but cannot be guaranteed.")
+        y tratamos el implícito como fallo (forzando reintento). Comprobado
+        en campo que fue un diagnóstico incompleto: con `wantResponse=True`
+        ya corregido (errata "wantResponse=False privaba de confirmación
+        real"), un ACK implícito SÍ se ha correspondido con una aplicación
+        real en el dispositivo (`ignored.remove` confirmado como aplicado
+        por el usuario pese a ACK implícito) — la propia librería ya avisa
+        de que es "probablemente, no garantizado", no "ha fallado". Forzar
+        reintentos ante un implícito solo generaba falsos negativos
+        (operación "failed" tras 3 intentos pese a haber funcionado en el
+        primero). Se mantiene el registro de la distinción en logs con fines
+        de diagnóstico, pero ya NO determina el resultado: solo un NAK
+        explícito (`errorReason != "NONE"`) cuenta como fallo.
         """
         assert self._loop is not None
         future: asyncio.Future[dict[str, Any]] = self._loop.create_future()
@@ -308,9 +315,8 @@ class MeshtasticUsbTransport(Transport):
         error_reason = routing.get("errorReason") or "NONE"
         if error_reason != "NONE":
             return {"ack": False, "error_reason": error_reason}
-        if packet.get("from") == self._iface.localNode.nodeNum:
-            return {"ack": False, "error_reason": "IMPLICIT_ACK_ONLY"}
-        return {"ack": True, "error_reason": "NONE"}
+        implicit = packet.get("from") == self._iface.localNode.nodeNum
+        return {"ack": True, "error_reason": "IMPLICIT_ACK" if implicit else "NONE"}
 
     async def _execute_ack_set(
         self, node_id: str, op_type: str, params: dict[str, Any], operation: dict[str, Any]
