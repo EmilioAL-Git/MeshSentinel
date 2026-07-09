@@ -32,6 +32,24 @@ const STATUS_LABEL: Partial<Record<OperationStatus, string>> = {
   verify_failed: "verificación fallida",
 };
 
+// ADR 0019: el firmware no expone ninguna forma de leer de vuelta favoritos/
+// ignorados/ficha de contacto — estas operaciones NUNCA pueden alcanzar
+// "succeeded" (reservado a operaciones verificables por lectura), su techo
+// máximo es "succeeded_unconfirmed". No es un fallo ni algo pendiente de
+// arreglar en el NOC: es una limitación del firmware.
+const ACK_ONLY_NO_VERIFY = new Set([
+  "favorite.set",
+  "favorite.remove",
+  "ignored.set",
+  "ignored.remove",
+  "contact.add",
+]);
+
+const ACK_ONLY_NOTE =
+  "El firmware no expone ninguna forma de leer de vuelta favoritos/ignorados/ficha de contacto: " +
+  "esta operación solo puede confirmarse por ACK del dispositivo, nunca por lectura posterior. " +
+  "\"sin confirmar\" es su techo máximo posible, no un problema — nunca llegará a \"succeeded\".";
+
 const input: CSSProperties = {
   background: "#0d1117",
   border: "1px solid #30363d",
@@ -298,7 +316,11 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
                           padding: "0.1rem 0.6rem",
                           fontSize: "0.75rem",
                         }}
-                        title={STATUS_LABEL[op.status]}
+                        title={
+                          op.status === "succeeded_unconfirmed" && ACK_ONLY_NO_VERIFY.has(op.operation_type)
+                            ? ACK_ONLY_NOTE
+                            : STATUS_LABEL[op.status]
+                        }
                       >
                         {op.status}
                       </span>
@@ -325,6 +347,9 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
                     <tr key={`${op.id}-detail`}>
                       <td style={styles.td} colSpan={8}>
                         {op.error && <p style={styles.bad}>Error: {op.error}</p>}
+                        {op.status === "succeeded_unconfirmed" && ACK_ONLY_NO_VERIFY.has(op.operation_type) && (
+                          <p style={{ ...styles.dim, fontSize: "0.85rem" }}>{ACK_ONLY_NOTE}</p>
+                        )}
                         {op.result && "verify" in op.result ? (
                           <VerifyDetail result={op.result} />
                         ) : (
