@@ -19,6 +19,7 @@ import { AlertsView } from "./components/AlertsView";
 import { BatchesView, BatchWizard } from "./components/BatchesView";
 import { ConfigEditor } from "./components/ConfigEditor";
 import { Dashboard } from "./components/Dashboard";
+import { GatewaysView } from "./components/GatewaysView";
 import { MapView } from "./components/MapView";
 import { NodeDetail } from "./components/NodeDetail";
 import { NodeFiltersBar } from "./components/NodeFiltersBar";
@@ -47,7 +48,8 @@ type View =
   | "config"
   | "profiles"
   | "batches"
-  | "activity";
+  | "activity"
+  | "gateways";
 
 const selBtn = {
   background: "transparent",
@@ -92,7 +94,7 @@ export default function App() {
   });
   const tags = useQuery({ queryKey: ["tags"], queryFn: fetchTags });
   const groups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
-  const gateways = useQuery({ queryKey: ["gateways"], queryFn: fetchGateways, refetchInterval: 30_000 });
+  const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways(), refetchInterval: 30_000 });
   const dashboard = useQuery({
     queryKey: ["dashboard"],
     queryFn: fetchDashboardSummary,
@@ -236,6 +238,7 @@ export default function App() {
           <NavTab active={view === "profiles"} label="Perfiles" onClick={() => setView("profiles")} />
           <NavTab active={view === "batches"} label="Batches" onClick={() => setView("batches")} />
           <NavTab active={view === "activity"} label="Actividad" onClick={() => setView("activity")} />
+          <NavTab active={view === "gateways"} label="Gateways" onClick={() => setView("gateways")} />
         </nav>
         <span style={{ marginLeft: "auto" }}>
           Backend:{" "}
@@ -268,6 +271,8 @@ export default function App() {
           onClear={() => setActivity([])}
         />
       )}
+
+      {view === "gateways" && <GatewaysView />}
 
       {view === "alerts" && <AlertsView />}
 

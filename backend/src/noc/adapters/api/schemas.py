@@ -102,6 +102,22 @@ class GatewayOut(BaseModel):
     local_node_id: str | None
     detail: str | None
     updated_at: datetime | None
+    local_short_name: str | None
+    local_long_name: str | None
+    local_hw_model: str | None
+    local_firmware_version: str | None
+    name: str | None
+    managed: bool
+    transport_type: str | None
+    connection_params: dict
+    enabled: bool
+    priority: int
+    desired_status: str
+    deleted_at: datetime | None
+    last_connected_at: datetime | None
+    last_disconnected_at: datetime | None
+    last_error: str | None
+    last_error_at: datetime | None
 
     @classmethod
     def from_entity(cls, g: GatewayInfo) -> "GatewayOut":

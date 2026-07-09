@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/gateway_test_connection_result.schema.json",
+  "title": "GatewayTestConnectionResultPayload",
+  "description": "Resultado de un intento de conexión de prueba (M5, command.gateway_test_connection). Si ok=true la conexión queda activa (ver ADR 0021 §3).",
+  "type": "object",
+  "required": ["request_id", "ok"],
+  "properties": {
+    "request_id": { "type": "string", "format": "uuid" },
+    "ok": { "type": "boolean" },
+    "error": { "type": ["string", "null"] },
+    "local_node_id": { "type": ["string", "null"] },
+    "local_short_name": { "type": ["string", "null"] },
+    "local_long_name": { "type": ["string", "null"] },
+    "local_hw_model": { "type": ["string", "null"] },
+    "local_firmware_version": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

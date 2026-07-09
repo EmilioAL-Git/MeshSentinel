@@ -36,6 +36,41 @@ class MeshtasticUsbTransport(Transport):
         self._counters: Counter[str] = Counter()
         # Waiters de respuestas admin: (node_id, response_key) -> Future
         self._admin_waiters: dict[tuple[str, str], asyncio.Future[dict[str, Any]]] = {}
+        # True tras la primera conexión con éxito: distingue "conectando" de
+        # "reconectando" en el estado emitido (M5, ADR 0021 §4)
+        self._ever_connected = False
+
+    @staticmethod
+    def discover_devices() -> list[dict[str, Any]]:
+        """Escaneo de puertos serie locales (M5): no requiere conexión activa.
+
+        `findPorts` filtra por VID/PID conocidos de Meshtastic; se complementa
+        con `serial.tools.list_ports` para descripción/VID/PID/serie, que la
+        librería oficial no expone en su resultado (solo la lista de puertos).
+        """
+        from meshtastic.util import findPorts
+        from serial.tools import list_ports
+
+        candidates = set(findPorts(eliminate_duplicates=True))
+        devices: list[dict[str, Any]] = []
+        for info in list_ports.comports():
+            if info.device not in candidates:
+                continue
+            devices.append(
+                {
+                    "port": info.device,
+                    "description": info.description or None,
+                    "vid": f"{info.vid:04x}" if info.vid is not None else None,
+                    "pid": f"{info.pid:04x}" if info.pid is not None else None,
+                    "serial_number": info.serial_number or None,
+                }
+            )
+        # Puertos detectados por findPorts pero no listados por comports (raro,
+        # p. ej. permisos): se incluyen igualmente con datos mínimos.
+        known_ports = {d["port"] for d in devices}
+        for port in candidates - known_ports:
+            devices.append({"port": port, "description": None, "vid": None, "pid": None, "serial_number": None})
+        return devices
 
     # ── Callbacks PyPubSub: corren en el hilo lector de la librería ─────────
     # Nunca tocan Redis ni asyncio directamente; solo encolan thread-safe.
@@ -93,7 +128,7 @@ class MeshtasticUsbTransport(Transport):
 
         delay = self._settings.reconnect_initial_delay
         while not self._closed.is_set():
-            self.status = "connecting"
+            self.status = "reconnecting" if self._ever_connected else "connecting"
             await self.emit_status()
             try:
                 self._iface = await asyncio.to_thread(self._connect_blocking)
@@ -119,8 +154,10 @@ class MeshtasticUsbTransport(Transport):
 
     async def _on_connected(self) -> None:
         info = await asyncio.to_thread(self._local_node_info)
-        self.local_node_id, nodes = info
+        self.local_node_id, self.local_short_name, self.local_long_name, \
+            self.local_hw_model, self.local_firmware_version, nodes = info
         self.status = "connected"
+        self._ever_connected = True
         await self.emit_status()
         logger.info(
             "usb.connected device=%s local_node=%s nodedb_size=%d",
@@ -134,11 +171,23 @@ class MeshtasticUsbTransport(Transport):
             if decoded:
                 await self._publish(*decoded)
 
-    def _local_node_info(self) -> tuple[str | None, dict[str, Any]]:
+    def _local_node_info(
+        self,
+    ) -> tuple[str | None, str | None, str | None, str | None, str | None, dict[str, Any]]:
         nodes = dict(getattr(self._iface, "nodes", None) or {})
         my_info = self._iface.getMyNodeInfo() or {}
-        local_id = (my_info.get("user") or {}).get("id")
-        return (local_id.lower() if isinstance(local_id, str) else None), nodes
+        user = my_info.get("user") or {}
+        local_id = user.get("id")
+        metadata = getattr(self._iface, "metadata", None)
+        firmware = getattr(metadata, "firmware_version", None) if metadata is not None else None
+        return (
+            local_id.lower() if isinstance(local_id, str) else None,
+            user.get("shortName"),
+            user.get("longName"),
+            user.get("hwModel"),
+            firmware,
+            nodes,
+        )
 
     def _fail_pending_admin(self, reason: str) -> None:
         """Falla las operaciones admin en vuelo sin esperar su timeout completo."""

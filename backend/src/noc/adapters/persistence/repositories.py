@@ -6,7 +6,7 @@ SQLite >= 3.25 (ADR 0004).
 """
 
 from dataclasses import fields
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from sqlalchemy import func, select
@@ -193,21 +193,129 @@ class SqlTelemetryRepository:
 
 
 class SqlGatewayRepository:
+    """Runtime (heartbeat) y configuración (M5, ADR 0021) conviven en la misma
+    fila pero se escriben por caminos distintos: `upsert()` (heartbeat) nunca
+    toca las columnas de configuración; `configure()`/`update_config()`/
+    `soft_delete()`/`set_desired_status()` (API de gestión) nunca tocan las de
+    estado runtime salvo `managed`/`desired_status`/`deleted_at`."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def upsert(self, info: GatewayInfo) -> None:
+    async def upsert(self, info: GatewayInfo) -> GatewayInfo:
         existing = await self._session.get(GatewayModel, info.gateway_id)
         if existing is None:
             existing = GatewayModel(id=info.gateway_id)
             self._session.add(existing)
+        previous_status = existing.status if existing.status else None
         existing.status = info.status
         existing.transport = info.transport
         existing.local_node_id = info.local_node_id
         existing.detail = info.detail
         existing.updated_at = info.updated_at
+        existing.local_short_name = info.local_short_name
+        existing.local_long_name = info.local_long_name
+        existing.local_hw_model = info.local_hw_model
+        existing.local_firmware_version = info.local_firmware_version
+        # Historial mínimo derivado de la transición (ADR 0021 §2): no una
+        # tabla de eventos, solo el último dato de cada tipo.
+        if info.status == "connected" and previous_status != "connected":
+            existing.last_connected_at = info.updated_at
+        if info.status in ("disconnected", "unassigned") and previous_status not in (
+            "disconnected",
+            "unassigned",
+            None,
+        ):
+            existing.last_disconnected_at = info.updated_at
+        if info.status == "error":
+            existing.last_error = info.detail
+            existing.last_error_at = info.updated_at
         await self._session.flush()
+        return _to_entity(existing, GatewayInfo, {"gateway_id": "id"})
 
-    async def list_all(self) -> list[GatewayInfo]:
-        rows = await self._session.scalars(select(GatewayModel))
+    async def list_all(self, include_deleted: bool = False) -> list[GatewayInfo]:
+        stmt = select(GatewayModel)
+        if not include_deleted:
+            stmt = stmt.where(GatewayModel.deleted_at.is_(None))
+        rows = await self._session.scalars(stmt)
         return [_to_entity(r, GatewayInfo, {"gateway_id": "id"}) for r in rows]
+
+    async def get(self, gateway_id: str) -> GatewayInfo | None:
+        row = await self._session.get(GatewayModel, gateway_id)
+        return _to_entity(row, GatewayInfo, {"gateway_id": "id"}) if row else None
+
+    async def configure(
+        self,
+        gateway_id: str,
+        name: str,
+        transport_type: str,
+        connection_params: dict[str, Any],
+        enabled: bool,
+        priority: int,
+        desired_status: str,
+    ) -> GatewayInfo:
+        row = await self._session.get(GatewayModel, gateway_id)
+        if row is None:
+            row = GatewayModel(
+                id=gateway_id,
+                status="unassigned",
+                transport=transport_type,
+                updated_at=datetime.now(timezone.utc),
+            )
+            self._session.add(row)
+        row.name = name
+        row.managed = True
+        row.transport_type = transport_type
+        row.connection_params = connection_params
+        row.enabled = enabled
+        row.priority = priority
+        row.desired_status = desired_status
+        row.deleted_at = None
+        await self._session.flush()
+        return _to_entity(row, GatewayInfo, {"gateway_id": "id"})
+
+    async def update_config(
+        self,
+        gateway_id: str,
+        name: str | None = None,
+        transport_type: str | None = None,
+        connection_params: dict[str, Any] | None = None,
+        enabled: bool | None = None,
+        priority: int | None = None,
+        desired_status: str | None = None,
+    ) -> GatewayInfo | None:
+        row = await self._session.get(GatewayModel, gateway_id)
+        if row is None or not row.managed:
+            return None
+        if name is not None:
+            row.name = name
+        if transport_type is not None:
+            row.transport_type = transport_type
+        if connection_params is not None:
+            row.connection_params = connection_params
+        if enabled is not None:
+            row.enabled = enabled
+        if priority is not None:
+            row.priority = priority
+        if desired_status is not None:
+            row.desired_status = desired_status
+        await self._session.flush()
+        return _to_entity(row, GatewayInfo, {"gateway_id": "id"})
+
+    async def set_desired_status(self, gateway_id: str, desired_status: str) -> GatewayInfo | None:
+        row = await self._session.get(GatewayModel, gateway_id)
+        if row is None or not row.managed:
+            return None
+        row.desired_status = desired_status
+        await self._session.flush()
+        return _to_entity(row, GatewayInfo, {"gateway_id": "id"})
+
+    async def soft_delete(self, gateway_id: str, deleted_at: datetime) -> bool:
+        row = await self._session.get(GatewayModel, gateway_id)
+        if row is None or not row.managed:
+            return False
+        row.enabled = False
+        row.desired_status = "disconnected"
+        row.deleted_at = deleted_at
+        await self._session.flush()
+        return True

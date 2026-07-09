@@ -5,7 +5,7 @@ import signal
 from gateway.command_queue.consumer import CommandConsumer
 from gateway.config import get_settings
 from gateway.events import EventPublisher
-from gateway.transports.factory import create_transport
+from gateway.transport_manager import TransportManager
 
 logger = logging.getLogger("gateway")
 
@@ -15,12 +15,12 @@ async def main() -> None:
     logging.basicConfig(level=settings.log_level)
 
     publisher = EventPublisher(settings.redis_url, settings.events_channel, settings.gateway_id)
-    transport = create_transport(settings, publisher.publish)
+    manager = TransportManager(settings, publisher.publish)
     consumer = CommandConsumer(
         settings.redis_url,
         settings.commands_stream,
         settings.commands_consumer_group,
-        transport,
+        manager,
         publisher.publish,
     )
 
@@ -33,10 +33,11 @@ async def main() -> None:
         # Permite al backend detectar pasarelas caídas por ausencia de latido
         while True:
             await asyncio.sleep(settings.status_interval_seconds)
-            await transport.emit_status()
+            if manager.transport is not None:
+                await manager.transport.emit_status()
 
     tasks = [
-        asyncio.create_task(transport.run(), name="transport"),
+        asyncio.create_task(manager.start_from_env(), name="transport-bootstrap"),
         asyncio.create_task(consumer.run(), name="commands"),
         asyncio.create_task(heartbeat(), name="heartbeat"),
     ]
@@ -47,7 +48,7 @@ async def main() -> None:
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
-    await transport.close()
+    await manager.teardown()
     await consumer.close()
     await publisher.close()
 

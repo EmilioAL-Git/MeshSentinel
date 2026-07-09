@@ -6,10 +6,17 @@
   "type": "object",
   "required": ["status", "transport"],
   "properties": {
-    "status": { "type": "string", "enum": ["connecting", "connected", "disconnected", "error"] },
+    "status": {
+      "type": "string",
+      "enum": ["unassigned", "connecting", "reconnecting", "connected", "disconnected", "error"]
+    },
     "transport": { "type": "string", "enum": ["usb", "serial", "tcp", "http", "simulated"] },
     "local_node_id": { "type": ["string", "null"], "description": "ID del nodo central al que está conectada" },
-    "detail": { "type": ["string", "null"], "description": "Mensaje de error u observación" }
+    "detail": { "type": ["string", "null"], "description": "Mensaje de error u observación" },
+    "local_short_name": { "type": ["string", "null"], "description": "Nombre corto del nodo local (M5, refrescado al conectar)" },
+    "local_long_name": { "type": ["string", "null"], "description": "Nombre largo del nodo local (M5, refrescado al conectar)" },
+    "local_hw_model": { "type": ["string", "null"], "description": "Hardware del nodo local (M5, refrescado al conectar)" },
+    "local_firmware_version": { "type": ["string", "null"], "description": "Firmware del nodo local (M5, refrescado al conectar)" }
   },
   "additionalProperties": false
 }

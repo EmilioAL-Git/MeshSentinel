@@ -9,7 +9,16 @@
     "schema_version": { "const": 1 },
     "command_type": {
       "type": "string",
-      "enum": ["command.send_admin", "command.request_position", "command.traceroute", "command.send_text"]
+      "enum": [
+        "command.send_admin",
+        "command.request_position",
+        "command.traceroute",
+        "command.send_text",
+        "command.gateway_discover",
+        "command.gateway_test_connection",
+        "command.gateway_connect",
+        "command.gateway_disconnect"
+      ]
     },
     "command_id": { "type": "string", "format": "uuid" },
     "issued_by": { "type": "string", "description": "Usuario que originó el comando (para auditoría)" },

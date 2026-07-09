@@ -101,13 +101,31 @@ export interface NodeFilterParams {
   only_ignored?: boolean;
 }
 
+export type GatewayStatus = "unassigned" | "connecting" | "reconnecting" | "connected" | "disconnected" | "error";
+
 export interface GatewayOut {
   gateway_id: string;
-  status: string;
+  status: GatewayStatus | string;
   transport: string;
   local_node_id: string | null;
   detail: string | null;
   updated_at: string | null;
+  local_short_name: string | null;
+  local_long_name: string | null;
+  local_hw_model: string | null;
+  local_firmware_version: string | null;
+  name: string | null;
+  managed: boolean;
+  transport_type: string | null;
+  connection_params: Record<string, unknown>;
+  enabled: boolean;
+  priority: number;
+  desired_status: "connected" | "disconnected";
+  deleted_at: string | null;
+  last_connected_at: string | null;
+  last_disconnected_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -131,7 +149,63 @@ export const fetchNodePositions = (id: string, limit = 50) =>
   get<PositionOut[]>(`/nodes/${encodeURIComponent(id)}/positions?limit=${limit}`);
 export const fetchNodeTelemetry = (id: string, limit = 50) =>
   get<TelemetryOut[]>(`/nodes/${encodeURIComponent(id)}/telemetry?limit=${limit}`);
-export const fetchGateways = () => get<GatewayOut[]>("/gateways");
+export const fetchGateways = (includeDeleted = false) =>
+  get<GatewayOut[]>(`/gateways${includeDeleted ? "?include_deleted=true" : ""}`);
+
+// ── Gestión de gateways (M5) ─────────────────────────────────────────────────
+
+export interface DeviceOut {
+  port: string;
+  description: string | null;
+  vid: string | null;
+  pid: string | null;
+  serial_number: string | null;
+}
+
+export interface TestConnectionResultOut {
+  ok: boolean;
+  error: string | null;
+  local_node_id: string | null;
+  local_short_name: string | null;
+  local_long_name: string | null;
+  local_hw_model: string | null;
+  local_firmware_version: string | null;
+}
+
+export const discoverDevices = (gatewayId: string) =>
+  send<DeviceOut[]>("POST", `/gateways/${encodeURIComponent(gatewayId)}/discover`);
+export const testGatewayConnection = (
+  gatewayId: string,
+  body: { transport_type: string; connection_params: Record<string, unknown> },
+) => send<TestConnectionResultOut>("POST", `/gateways/${encodeURIComponent(gatewayId)}/test-connection`, body);
+export const configureGateway = (
+  gatewayId: string,
+  body: {
+    name: string;
+    transport_type: string;
+    connection_params: Record<string, unknown>;
+    enabled?: boolean;
+    priority?: number;
+  },
+) => send<GatewayOut>("POST", `/gateways/${encodeURIComponent(gatewayId)}/configure`, body);
+export const importGateway = (gatewayId: string) =>
+  send<GatewayOut>("POST", `/gateways/${encodeURIComponent(gatewayId)}/import`);
+export const updateGateway = (
+  gatewayId: string,
+  body: Partial<{
+    name: string;
+    transport_type: string;
+    connection_params: Record<string, unknown>;
+    enabled: boolean;
+    priority: number;
+  }>,
+) => send<GatewayOut>("PUT", `/gateways/${encodeURIComponent(gatewayId)}`, body);
+export const connectGateway = (gatewayId: string) =>
+  send<GatewayOut>("POST", `/gateways/${encodeURIComponent(gatewayId)}/connect`);
+export const disconnectGateway = (gatewayId: string) =>
+  send<GatewayOut>("POST", `/gateways/${encodeURIComponent(gatewayId)}/disconnect`);
+export const deleteGateway = (gatewayId: string) =>
+  send<void>("DELETE", `/gateways/${encodeURIComponent(gatewayId)}`);
 
 // ── Organización de nodos (M1.2) ─────────────────────────────────────────────
 // Nota: estos endpoints usan `send`, definida más abajo en este módulo.

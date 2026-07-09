@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/gateway_devices_found.schema.json",
+  "title": "GatewayDevicesFoundPayload",
+  "description": "Resultado de un escaneo de dispositivos locales (M5, command.gateway_discover).",
+  "type": "object",
+  "required": ["request_id", "devices"],
+  "properties": {
+    "request_id": { "type": "string", "format": "uuid" },
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["port"],
+        "properties": {
+          "port": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "vid": { "type": ["string", "null"] },
+          "pid": { "type": ["string", "null"] },
+          "serial_number": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

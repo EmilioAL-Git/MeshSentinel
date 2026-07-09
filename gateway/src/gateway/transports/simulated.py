@@ -76,7 +76,12 @@ class SimulatedTransport(Transport):
 
     async def run(self) -> None:
         self.status = "connected"
-        self.local_node_id = self._nodes[0].node_id
+        local = self._nodes[0]
+        self.local_node_id = local.node_id
+        self.local_short_name = local.short_name
+        self.local_long_name = local.long_name
+        self.local_hw_model = local.hw_model
+        self.local_firmware_version = "2.7.0"
         await self.emit_status()
         for node in self._nodes:
             await self._announce(node)

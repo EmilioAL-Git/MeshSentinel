@@ -32,6 +32,7 @@ from noc.application.alerting.engine import AlertEngine, AlertEngineLoop, AlertT
 from noc.application.alerting.notifier import AlertNotifier
 from noc.application.alerting.seed import seed_default_rules
 from noc.application.dashboard import DashboardService
+from noc.application.gateways.service import GatewayService
 from noc.application.ingest import IngestService
 from noc.config import get_settings
 
@@ -46,7 +47,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db = Database(settings.database_url)
     app.state.dashboard = DashboardService(app.state.db.session_factory, settings)
     app.state.event_bus = RedisEventBus(settings.redis_url, settings.events_channel)
-    ingest = IngestService(app.state.db.session_factory)
+
+    command_queue = RedisCommandQueue(settings.redis_url, settings.commands_stream_prefix)
+    # Gestión de gateways (M5, ADR 0021): CRUD + comandos command.gateway_*,
+    # reutiliza el mismo stream de comandos que el pipeline de administración
+    app.state.gateways = GatewayService(app.state.db.session_factory, command_queue)
+    app.state.event_bus.subscribe(app.state.gateways.handle_event)
+
+    ingest = IngestService(
+        app.state.db.session_factory, app.state.gateways, settings.gateway_stale_after_seconds
+    )
     app.state.event_bus.subscribe(ingest.handle_event)
     app.state.event_bus.subscribe(hub.broadcast)
 
@@ -54,7 +64,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     activity.attach(hub.broadcast)
 
     # Pipeline de administración remota (M1.1, ADR 0013)
-    command_queue = RedisCommandQueue(settings.redis_url, settings.commands_stream_prefix)
     admin_service = AdminOperationService(app.state.db.session_factory, command_queue, settings)
     app.state.batches = BatchService(app.state.db.session_factory, settings)
     admin_service.attach_batch_service(app.state.batches)

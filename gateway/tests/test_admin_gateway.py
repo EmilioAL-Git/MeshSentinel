@@ -123,13 +123,21 @@ class FakeTransport(Transport):
         raise RuntimeError("boom")
 
 
+class FakeManager:
+    """Sustituye a TransportManager en el test: solo expone `.transport`."""
+
+    def __init__(self, transport: Transport) -> None:
+        self.transport = transport
+
+
 def make_consumer(behavior: str):
     published: list[dict] = []
 
     async def publish(event_type: str, payload: dict) -> None:
         published.append(make_envelope(event_type, "gw-test", payload))
 
-    consumer = CommandConsumer("redis://localhost:6399/0", "s", "g", FakeTransport(behavior), publish)
+    manager = FakeManager(FakeTransport(behavior))
+    consumer = CommandConsumer("redis://localhost:6399/0", "s", "g", manager, publish)
     return consumer, published
 
 

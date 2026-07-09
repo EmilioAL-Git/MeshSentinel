@@ -72,6 +72,24 @@ class GatewayInfo:
     local_node_id: str | None = None
     detail: str | None = None
     updated_at: datetime | None = None
+    # Caché no durable del nodo local (M5), refrescada en cada conexión
+    local_short_name: str | None = None
+    local_long_name: str | None = None
+    local_hw_model: str | None = None
+    local_firmware_version: str | None = None
+    # Configuración gestionada desde la aplicación (M5, ADR 0021)
+    name: str | None = None
+    managed: bool = False
+    transport_type: str | None = None
+    connection_params: dict = field(default_factory=dict)
+    enabled: bool = True
+    priority: int = 0
+    desired_status: str = "disconnected"
+    deleted_at: datetime | None = None
+    last_connected_at: datetime | None = None
+    last_disconnected_at: datetime | None = None
+    last_error: str | None = None
+    last_error_at: datetime | None = None
 
 
 @dataclass(slots=True)

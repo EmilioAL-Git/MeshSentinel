@@ -16,7 +16,9 @@
         "telemetry.received",
         "message.received",
         "packet.raw",
-        "admin.operation"
+        "admin.operation",
+        "gateway.devices_found",
+        "gateway.test_connection_result"
       ]
     },
     "event_id": { "type": "string", "format": "uuid" },

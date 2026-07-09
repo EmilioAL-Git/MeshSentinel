@@ -19,6 +19,12 @@ class Transport(ABC):
         self._emit = emit
         self.status: str = "connecting"
         self.local_node_id: str | None = None
+        # Caché no durable del nodo local (M5): refrescada al conectar, expuesta
+        # en gateway.status para que la UI la muestre sin persistirla aparte.
+        self.local_short_name: str | None = None
+        self.local_long_name: str | None = None
+        self.local_hw_model: str | None = None
+        self.local_firmware_version: str | None = None
 
     async def emit_status(self, detail: str | None = None) -> None:
         await self._emit(
@@ -28,6 +34,10 @@ class Transport(ABC):
                 "transport": self.name,
                 "local_node_id": self.local_node_id,
                 "detail": detail,
+                "local_short_name": self.local_short_name,
+                "local_long_name": self.local_long_name,
+                "local_hw_model": self.local_hw_model,
+                "local_firmware_version": self.local_firmware_version,
             },
         )
 

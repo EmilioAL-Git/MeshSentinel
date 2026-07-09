@@ -23,11 +23,30 @@ class GatewayModel(Base):
     __tablename__ = "gateways"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # ── Estado runtime (heartbeat gateway.status) ──────────────────────────
     status: Mapped[str] = mapped_column(String(16))
     transport: Mapped[str] = mapped_column(String(16))
     local_node_id: Mapped[str | None] = mapped_column(String(16))
     detail: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Caché no durable del nodo local, refrescada en cada conexión (M5)
+    local_short_name: Mapped[str | None] = mapped_column(String(8))
+    local_long_name: Mapped[str | None] = mapped_column(String(64))
+    local_hw_model: Mapped[str | None] = mapped_column(String(32))
+    local_firmware_version: Mapped[str | None] = mapped_column(String(32))
+    # ── Configuración gestionada desde la aplicación (M5, ADR 0021) ────────
+    name: Mapped[str | None] = mapped_column(String(128))
+    managed: Mapped[bool] = mapped_column(Boolean, default=False)
+    transport_type: Mapped[str | None] = mapped_column(String(16))
+    connection_params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    desired_status: Mapped[str] = mapped_column(String(16), default="disconnected")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class NodeModel(Base):

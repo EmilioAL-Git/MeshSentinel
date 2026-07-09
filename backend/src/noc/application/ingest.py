@@ -17,6 +17,7 @@ from noc.adapters.persistence.repositories import (
     SqlPositionRepository,
     SqlTelemetryRepository,
 )
+from noc.application.dashboard import is_stale
 from noc.domain.nodes.entities import GatewayInfo, Node, Position, Telemetry
 
 logger = logging.getLogger("noc.ingest")
@@ -34,8 +35,18 @@ def _parse_ts(value: str | None) -> datetime:
 
 
 class IngestService:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        gateway_service: Any = None,
+        gateway_stale_after_seconds: int = 90,
+    ) -> None:
         self._session_factory = session_factory
+        # M5 (ADR 0021 §5): reconciliación mínima si el proceso se reinicia con
+        # una configuración gestionada pendiente. Opcional para no romper los
+        # muchos tests que instancian IngestService sin estas dependencias.
+        self._gateway_service = gateway_service
+        self._gateway_stale_after_seconds = gateway_stale_after_seconds
 
     async def handle_event(self, event: dict[str, Any]) -> None:
         if event.get("schema_version") != SUPPORTED_SCHEMA_VERSION:
@@ -131,7 +142,10 @@ class IngestService:
     ) -> None:
         if not gateway_id:
             return
-        await SqlGatewayRepository(session).upsert(
+        repo = SqlGatewayRepository(session)
+        previous = await repo.get(gateway_id)
+        was_stale = previous is None or is_stale(previous.updated_at, self._gateway_stale_after_seconds, now=ts)
+        info = await repo.upsert(
             GatewayInfo(
                 gateway_id=gateway_id,
                 status=p.get("status", "unknown"),
@@ -139,5 +153,14 @@ class IngestService:
                 local_node_id=p.get("local_node_id"),
                 detail=p.get("detail"),
                 updated_at=ts,
+                local_short_name=p.get("local_short_name"),
+                local_long_name=p.get("local_long_name"),
+                local_hw_model=p.get("local_hw_model"),
+                local_firmware_version=p.get("local_firmware_version"),
             )
         )
+        # Reconciliación (ADR 0021 §5): el proceso probablemente acaba de
+        # (re)arrancar con la config de .env, perdiendo la gestionada — se
+        # reenvía el comando de conexión (Redis, no toca esta transacción).
+        if was_stale and self._gateway_service is not None:
+            await self._gateway_service.reconcile_after_heartbeat(info)
