@@ -162,22 +162,39 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
               ))}
             </select>
           )}
-          {paramFields.map((f) => (
-            <input
-              key={f.name}
-              style={{ ...input, width: f.kind === "number" ? 110 : 160 }}
-              type={f.kind === "number" ? "number" : "text"}
-              placeholder={f.name + (f.required ? " *" : "")}
-              maxLength={f.max_length ?? undefined}
-              min={f.minimum ?? undefined}
-              max={f.maximum ?? undefined}
-              value={fieldValues[f.name] ?? ""}
-              onChange={(e) => {
-                setFieldValues({ ...fieldValues, [f.name]: e.target.value });
-                setConfirming(false);
-              }}
-            />
-          ))}
+          {paramFields.map((f) =>
+            f.name === "subject_node_id" ? (
+              <select
+                key={f.name}
+                style={input}
+                value={fieldValues[f.name] ?? ""}
+                onChange={(e) => {
+                  setFieldValues({ ...fieldValues, [f.name]: e.target.value });
+                  setConfirming(false);
+                }}
+              >
+                <option value="">— nodo sujeto —</option>
+                {summaries.filter((s) => s.node.node_id !== nodeId).map((s) => (
+                  <option key={s.node.node_id} value={s.node.node_id}>{displayName(s.node)}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                key={f.name}
+                style={{ ...input, width: f.kind === "number" ? 110 : 160 }}
+                type={f.kind === "number" ? "number" : "text"}
+                placeholder={f.name + (f.required ? " *" : "")}
+                maxLength={f.max_length ?? undefined}
+                min={f.minimum ?? undefined}
+                max={f.maximum ?? undefined}
+                value={fieldValues[f.name] ?? ""}
+                onChange={(e) => {
+                  setFieldValues({ ...fieldValues, [f.name]: e.target.value });
+                  setConfirming(false);
+                }}
+              />
+            ),
+          )}
           {!spec?.requires_confirmation ? (
             <button
               style={{ ...input, cursor: canSubmit ? "pointer" : "not-allowed" }}

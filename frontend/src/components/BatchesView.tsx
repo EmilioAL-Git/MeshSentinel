@@ -108,6 +108,7 @@ export function BatchWizard({
   const [section, setSection] = useState("");
   const [fieldName, setFieldName] = useState("");
   const [fieldValue, setFieldValue] = useState("");
+  const [otherFieldValues, setOtherFieldValues] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<BatchPreviewOut | null>(null);
   const [confirmText, setConfirmText] = useState("");
 
@@ -122,6 +123,7 @@ export function BatchWizard({
     ? (schema.data?.sections ?? []).find((s) => s.name === section)?.fields.filter((f) => f.editable) ?? []
     : [];
   const currentField = sectionFields.find((f) => f.name === fieldName);
+  const paramFields = !isConfigSet && sectionChoices.length === 0 ? spec?.param_fields ?? [] : [];
 
   const buildParams = (): Record<string, unknown> => {
     if (isConfigSet) {
@@ -132,12 +134,20 @@ export function BatchWizard({
       return { section, values: { [fieldName]: value } };
     }
     if (sectionChoices.length > 0) return { section };
-    return {};
+    const params: Record<string, unknown> = {};
+    for (const f of paramFields) {
+      const raw = otherFieldValues[f.name]?.trim();
+      if (raw === undefined || raw === "") continue;
+      params[f.name] = f.kind === "number" ? Number(raw) : raw;
+    }
+    return params;
   };
 
   const paramsReady = isConfigSet
     ? section !== "" && fieldName !== "" && fieldValue !== ""
-    : sectionChoices.length === 0 || section !== "";
+    : sectionChoices.length > 0
+      ? section !== ""
+      : paramFields.every((f) => !f.required || (otherFieldValues[f.name] ?? "").trim() !== "");
 
   const doPreview = useMutation({
     mutationFn: () =>
@@ -184,6 +194,7 @@ export function BatchWizard({
             setSection("");
             setFieldName("");
             setFieldValue("");
+            setOtherFieldValues({});
             setPreview(null);
           }}
         >
@@ -193,6 +204,30 @@ export function BatchWizard({
             </option>
           ))}
         </select>
+        {paramFields.map((f) =>
+          f.name === "subject_node_id" ? (
+            <select
+              key={f.name}
+              style={input}
+              value={otherFieldValues[f.name] ?? ""}
+              onChange={(e) => { setOtherFieldValues({ ...otherFieldValues, [f.name]: e.target.value }); setPreview(null); }}
+            >
+              <option value="">— nodo sujeto —</option>
+              {summaries.map((s) => (
+                <option key={s.node.node_id} value={s.node.node_id}>{displayName(s.node)}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              key={f.name}
+              style={input}
+              type={f.kind === "number" ? "number" : "text"}
+              placeholder={f.name + (f.required ? " *" : "")}
+              value={otherFieldValues[f.name] ?? ""}
+              onChange={(e) => { setOtherFieldValues({ ...otherFieldValues, [f.name]: e.target.value }); setPreview(null); }}
+            />
+          ),
+        )}
         {sectionChoices.length > 0 && (
           <select
             style={input}
