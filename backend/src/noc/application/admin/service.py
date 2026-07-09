@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.application.activity import activity
+from noc.application.admin.registry import OPERATIONS
 from noc.application.dashboard import ensure_utc
 from noc.config import Settings
 from noc.domain.admin.entities import AdminOperation
@@ -28,6 +29,9 @@ logger = logging.getLogger("noc.admin")
 WATCHDOG_GRACE_SECONDS = 30
 RETRY_BASE_SECONDS = 10
 RETRY_MAX_SECONDS = 300
+# ADR 0019 errata 4: pausa fija (no exponencial: no es un reintento por
+# error) antes de un reenvío redundante de favorito/ignorado ya "confirmado".
+REDUNDANT_RESEND_SECONDS = 5
 
 
 def retry_delay_seconds(attempts: int) -> float:
@@ -146,21 +150,45 @@ class AdminOperationService:
             elif state == "succeeded":
                 result = payload.get("result")
                 status = self._map_success_status(result)
-                await repo.update_fields(
-                    op_id,
-                    {
-                        "status": status,
-                        "result": result,
-                        "finished_at": now,
-                        "duration_ms": self._duration_ms(op, now),
-                    },
-                )
-                logger.info("admin.op %s id=%s node=%s", status, op_id, op.target_node_id)
-                verify = result.get("verify") if isinstance(result, dict) else None
-                await activity.operation(op, "finished", final_status=status, verify=verify)
-                await self._notify_batch(session, op)
+                if self._should_redundant_resend(op, status):
+                    delay = REDUNDANT_RESEND_SECONDS
+                    await repo.update_fields(
+                        op_id,
+                        {"status": "pending", "result": result, "next_attempt_at": now + timedelta(seconds=delay)},
+                    )
+                    logger.info(
+                        "admin.op redundant_resend id=%s node=%s attempt=%d/%d in=%.0fs",
+                        op_id, op.target_node_id, op.attempts, op.max_attempts, delay,
+                    )
+                    await activity.operation(op, "resend_scheduled", delay_seconds=delay)
+                else:
+                    await repo.update_fields(
+                        op_id,
+                        {
+                            "status": status,
+                            "result": result,
+                            "finished_at": now,
+                            "duration_ms": self._duration_ms(op, now),
+                        },
+                    )
+                    logger.info("admin.op %s id=%s node=%s", status, op_id, op.target_node_id)
+                    verify = result.get("verify") if isinstance(result, dict) else None
+                    await activity.operation(op, "finished", final_status=status, verify=verify)
+                    await self._notify_batch(session, op)
             else:
                 await self._apply_failure(repo, op, state, payload.get("error"), now, session)
+
+    @staticmethod
+    def _should_redundant_resend(op: AdminOperation, status: str) -> bool:
+        """ADR 0019 errata 4: sin GET posible, un ACK aislado no garantiza que
+        el firmware aplicó el cambio (visto en producción en ambos sentidos).
+        Para favorito/ignorado remotos (`always_resend`), reenviar hasta
+        agotar `max_attempts` aunque ya haya un ACK aumenta la confianza sin
+        riesgo real — set/remove son idempotentes en el firmware."""
+        if status != "succeeded_unconfirmed":
+            return False
+        spec = OPERATIONS.get(op.operation_type)
+        return spec is not None and spec.always_resend and op.attempts < op.max_attempts
 
     async def _notify_batch(self, session: Any, op: AdminOperation) -> None:
         """M2: si la operación pertenece a un lote, comprobar su finalización

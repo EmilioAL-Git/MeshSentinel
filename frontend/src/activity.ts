@@ -82,6 +82,12 @@ function describeOperation(event: NocEvent, nodeName: (id: string) => string): D
         severity: "warn",
         text: `Operación #${id} sin éxito (${str(p.error) ?? "sin detalle"}); reintento en ${num(p.delay_seconds) ?? "?"}s (intento ${attempts})`,
       };
+    case "resend_scheduled":
+      return {
+        ...base,
+        severity: "info",
+        text: `Operación #${id} recibió ACK en ${node}, pero se reenvía por redundancia (sin GET de verificación posible) en ${num(p.delay_seconds) ?? "?"}s (intento ${attempts})`,
+      };
     case "finished":
       switch (str(p.final_status)) {
         case "succeeded":

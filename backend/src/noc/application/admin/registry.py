@@ -52,6 +52,12 @@ class OperationSpec:
     # ficha de contacto). El gateway solo puede reportar ACK/NAK del
     # firmware, nunca "confirmed"/"mismatch" por lectura posterior.
     ack_only: bool = False
+    # ADR 0019 errata 4: sin GET posible, ningún ACK garantiza que el
+    # firmware aplicó el cambio de verdad (visto en producción en ambos
+    # sentidos). Para favorito/ignorado remotos, reenviar redundantemente
+    # hasta max_attempts aunque ya haya llegado un ACK aumenta la confianza
+    # sin coste real (set/remove son idempotentes en el firmware).
+    always_resend: bool = False
 
     @property
     def requires_confirmation(self) -> bool:
@@ -126,6 +132,7 @@ OPERATIONS: dict[str, OperationSpec] = {
             kind="set", allow_bulk=True, destructive=False, required_role="admin",
             param_fields=[ParamField("subject_node_id", "string", required=True)],
             ack_only=True,
+            always_resend=True,
         ),
         OperationSpec(
             "favorite.remove",
@@ -133,6 +140,7 @@ OPERATIONS: dict[str, OperationSpec] = {
             kind="set", allow_bulk=True, destructive=False, required_role="admin",
             param_fields=[ParamField("subject_node_id", "string", required=True)],
             ack_only=True,
+            always_resend=True,
         ),
         OperationSpec(
             "ignored.set",
@@ -140,6 +148,7 @@ OPERATIONS: dict[str, OperationSpec] = {
             kind="set", allow_bulk=True, destructive=False, required_role="admin",
             param_fields=[ParamField("subject_node_id", "string", required=True)],
             ack_only=True,
+            always_resend=True,
         ),
         OperationSpec(
             "ignored.remove",
@@ -147,6 +156,7 @@ OPERATIONS: dict[str, OperationSpec] = {
             kind="set", allow_bulk=True, destructive=False, required_role="admin",
             param_fields=[ParamField("subject_node_id", "string", required=True)],
             ack_only=True,
+            always_resend=True,
         ),
         OperationSpec(
             "contact.add",

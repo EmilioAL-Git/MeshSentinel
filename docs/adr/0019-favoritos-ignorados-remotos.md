@@ -178,3 +178,29 @@ en logs y en el resultado para diagnóstico, pero ya no bloquea el estado
 no existe ninguna heurística de ACK/NAK que prediga con certeza el resultado
 real en el firmware — es inherente a la ausencia de un GET, no algo que se
 pueda seguir puliendo a base de heurísticas más finas sobre el ACK.
+
+## Errata 4 (2026-07-09): reenvío redundante hasta agotar `max_attempts`
+
+Dado el techo de certeza de la errata 3 (ningún ACK aislado garantiza
+aplicación real), el usuario pidió mitigarlo por el lado práctico: que
+favorito/ignorado remotos agoten siempre sus `max_attempts` (por defecto 3)
+en vez de darse por terminados en el primer ACK. Es seguro porque
+`favorite.set/remove` e `ignored.set/remove` son idempotentes en el
+firmware (reenviar el mismo SET no tiene efectos secundarios) y el
+pipeline ya tiene presupuesto de malla (rate limit) y 1-en-vuelo-por-gateway
+que evitan saturarla.
+
+**Cambio**: `OperationSpec` gana `always_resend: bool = False`, activado
+solo en las cuatro operaciones de favorito/ignorado (no en `contact.add`,
+fuera del pedido explícito del usuario). En
+`AdminOperationService.handle_event`, cuando el resultado mapea a
+`succeeded_unconfirmed` y la operación tiene `always_resend` y
+`attempts < max_attempts`, NO se marca terminal: se reprograma como un
+reenvío (mismo mecanismo de `pending` + `next_attempt_at` que ya usan los
+reintentos por fallo, pero con una pausa fija de 5 s — no exponencial,
+porque no es un reintento por error) hasta que se agoten los intentos, momento
+en el que el último resultado se convierte en el estado terminal. Nuevo
+evento de actividad `resend_scheduled` (aditivo, contrato v1 intacto) para
+no confundirlo con `retry_scheduled` (que sí implica fallo). El badge
+Pendiente/Enviado/Confirmado del panel de M4.2 refleja fielmente este ciclo:
+solo llega a "Confirmado" tras el último intento, nunca antes.

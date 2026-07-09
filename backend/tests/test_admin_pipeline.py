@@ -146,6 +146,61 @@ async def test_failure_retries_then_final(session_factory):
     assert final.error == "still nothing"
 
 
+async def test_ack_only_favorite_ignored_resend_redundantly_until_max_attempts(session_factory):
+    """ADR 0019 errata 4: sin GET posible, un ACK aislado no garantiza que se
+    aplicó de verdad (visto en producción en ambos sentidos) — favorito/
+    ignorado remotos reenvían hasta max_attempts aunque ya haya un ACK."""
+    queue = FakeQueue()
+    service = AdminOperationService(session_factory, queue, make_settings())
+    op = await create_op(session_factory, operation_type="favorite.set", max_attempts=3)
+    unavailable = {"ack": {"ack": True, "error_reason": "NONE"}, "verify": "unavailable"}
+
+    await service.tick()  # intento 1
+    await service.handle_event(result_event(op.id, "succeeded", result=unavailable))
+    after1 = await get_op(session_factory, op.id)
+    assert after1.status == "pending"  # reenvío redundante, NO terminal todavía
+    assert after1.attempts == 1
+    assert after1.next_attempt_at is not None
+
+    async with session_factory() as session, session.begin():
+        await SqlAdminOperationRepository(session).update_fields(
+            op.id, {"next_attempt_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+        )
+    await service.tick()  # intento 2
+    await service.handle_event(result_event(op.id, "succeeded", result=unavailable))
+    after2 = await get_op(session_factory, op.id)
+    assert after2.status == "pending"
+    assert after2.attempts == 2
+
+    async with session_factory() as session, session.begin():
+        await SqlAdminOperationRepository(session).update_fields(
+            op.id, {"next_attempt_at": datetime.now(timezone.utc) - timedelta(seconds=1)}
+        )
+    await service.tick()  # intento 3 (último)
+    await service.handle_event(result_event(op.id, "succeeded", result=unavailable))
+    final = await get_op(session_factory, op.id)
+    assert final.status == "succeeded_unconfirmed"  # ahora sí terminal
+    assert final.attempts == 3
+    assert final.finished_at is not None
+    assert len(queue.sent) == 3
+
+
+async def test_ack_only_op_without_verify_unavailable_does_not_resend(session_factory):
+    """Solo se reenvía redundantemente cuando el resultado es
+    succeeded_unconfirmed; un ACK ya "succeeded" de verdad no necesita
+    reenvíos (y metadata.get, sin always_resend, tampoco)."""
+    queue = FakeQueue()
+    service = AdminOperationService(session_factory, queue, make_settings())
+    op = await create_op(session_factory, operation_type="favorite.set", max_attempts=3)
+
+    await service.tick()
+    await service.handle_event(result_event(op.id, "succeeded", result={"ack": {"ack": True}}))
+    final = await get_op(session_factory, op.id)
+    assert final.status == "succeeded"  # sin "verify" en el resultado -> no unconfirmed
+    assert final.finished_at is not None
+    assert len(queue.sent) == 1
+
+
 async def test_watchdog_expires_stuck_operations(session_factory):
     queue = FakeQueue()
     service = AdminOperationService(session_factory, queue, make_settings())
