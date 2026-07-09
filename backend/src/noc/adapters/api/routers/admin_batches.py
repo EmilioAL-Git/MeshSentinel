@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import SessionDep
-from noc.adapters.api.routers.admin import OperationOut
+from noc.adapters.api.routers.admin_operations import OperationOut
 from noc.adapters.persistence.admin_repositories import (
     SqlAdminBatchRepository,
     SqlAdminOperationRepository,

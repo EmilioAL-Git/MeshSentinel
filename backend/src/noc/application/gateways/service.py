@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.persistence.repositories import SqlGatewayRepository
+from noc.application.envelopes import make_command_envelope
 from noc.domain.nodes.entities import GatewayInfo
 
 logger = logging.getLogger("noc.gateways")
@@ -202,13 +203,4 @@ class GatewayService:
             )
 
     async def _send_command(self, gateway_id: str, command_type: str, payload: dict[str, Any]) -> None:
-        envelope = {
-            "schema_version": 1,
-            "command_type": command_type,
-            "command_id": str(uuid.uuid4()),
-            "issued_by": "admin",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "target_node_id": None,
-            "payload": payload,
-        }
-        await self._queue.enqueue(gateway_id, envelope)
+        await self._queue.enqueue(gateway_id, make_command_envelope(command_type, payload))

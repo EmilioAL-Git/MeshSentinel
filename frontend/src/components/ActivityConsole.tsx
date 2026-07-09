@@ -61,7 +61,9 @@ export function ActivityConsole({
   );
   const gatewayIds = useMemo(() => {
     const ids = new Set(gateways.map((g) => g.gateway_id));
-    for (const e of entries) if (e.gatewayId && e.gatewayId !== "noc-backend") ids.add(e.gatewayId);
+    // "system": origen de eventos internos del backend (alertas, actividad),
+    // no una pasarela real — debe coincidir con SYSTEM_SOURCE en envelopes.py
+    for (const e of entries) if (e.gatewayId && e.gatewayId !== "system") ids.add(e.gatewayId);
     return [...ids].sort();
   }, [entries, gateways]);
 

@@ -10,7 +10,6 @@ transporta el comando al gateway.
 
 import asyncio
 import logging
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -21,6 +20,7 @@ from noc.adapters.persistence.admin_repositories import SqlAdminOperationReposit
 from noc.application.activity import activity
 from noc.application.admin.registry import OPERATIONS
 from noc.application.dashboard import ensure_utc
+from noc.application.envelopes import make_command_envelope
 from noc.config import Settings
 from noc.domain.admin.entities import AdminOperation
 
@@ -106,28 +106,23 @@ class AdminOperationService:
                 op.id or 0, {"status": "queued", "queued_at": now, "attempts": op.attempts + 1}
             )
         assert op is not None
-        await self._queue.enqueue(op.gateway_id, self._command_envelope(op, now))
-        logger.info(
-            "admin.op dispatched id=%s type=%s node=%s attempt=%d/%d",
-            op.id, op.operation_type, op.target_node_id, op.attempts, op.max_attempts,
-        )
-        await activity.operation(op, "dispatched")
-
-    def _command_envelope(self, op: AdminOperation, now: datetime) -> dict[str, Any]:
-        return {
-            "schema_version": 1,
-            "command_type": "command.send_admin",
-            "command_id": str(uuid.uuid4()),
-            "issued_by": op.created_by,
-            "timestamp": now.isoformat(),
-            "target_node_id": op.target_node_id,
-            "payload": {
+        envelope = make_command_envelope(
+            "command.send_admin",
+            {
                 "operation_id": op.id,
                 "operation_type": op.operation_type,
                 "params": op.params,
                 "timeout_seconds": op.timeout_seconds,
             },
-        }
+            issued_by=op.created_by,
+            target_node_id=op.target_node_id,
+        )
+        await self._queue.enqueue(op.gateway_id, envelope)
+        logger.info(
+            "admin.op dispatched id=%s type=%s node=%s attempt=%d/%d",
+            op.id, op.operation_type, op.target_node_id, op.attempts, op.max_attempts,
+        )
+        await activity.operation(op, "dispatched")
 
     # ── Tracker: resultados del gateway ─────────────────────────────────────
 

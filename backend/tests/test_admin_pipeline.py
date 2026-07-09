@@ -246,7 +246,7 @@ async def test_rate_limit_budget(session_factory):
 
 async def test_capabilities_endpoint_serializes_slots_dataclass():
     """Regresión: OperationSpec usa slots=True (sin __dict__) — debe usarse asdict."""
-    from noc.adapters.api.routers.admin import capabilities
+    from noc.adapters.api.routers.admin_operations import capabilities
 
     caps = await capabilities()
     types = {c.operation_type for c in caps}
@@ -258,7 +258,7 @@ async def test_capabilities_endpoint_serializes_slots_dataclass():
 async def test_create_operation_endpoint_after_implicit_transaction(session_factory):
     """Regresión: el SELECT del nodo abre transacción implícita; el
     session.begin() posterior rompía con 'transaction already begun' (500)."""
-    from noc.adapters.api.routers.admin import OperationIn, create_operation
+    from noc.adapters.api.routers.admin_operations import OperationIn, create_operation
 
     ingest = IngestService(session_factory)
     await ingest.handle_event(

@@ -12,10 +12,9 @@ consola (pasarelas, alertas, malla) se alimenta de los eventos ya existentes.
 """
 
 import logging
-import uuid
-from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
+from noc.application.envelopes import SYSTEM_SOURCE, make_event_envelope
 from noc.domain.admin.entities import AdminBatch, AdminOperation
 
 logger = logging.getLogger("noc.activity")
@@ -34,18 +33,11 @@ class ActivityPublisher:
         self._publish = publish
 
     async def emit(
-        self, event_type: str, payload: dict[str, Any], gateway_id: str = "noc-backend"
+        self, event_type: str, payload: dict[str, Any], gateway_id: str = SYSTEM_SOURCE
     ) -> None:
         if self._publish is None:
             return
-        event = {
-            "schema_version": 1,
-            "event_type": event_type,
-            "event_id": str(uuid.uuid4()),
-            "gateway_id": gateway_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "payload": payload,
-        }
+        event = make_event_envelope(event_type, payload, gateway_id=gateway_id)
         try:
             await self._publish(event)
         except Exception:
