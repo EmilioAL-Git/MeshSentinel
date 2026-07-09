@@ -87,11 +87,11 @@ class CommandConsumer:
 
     async def _handle_gateway_command(self, command_type: str, payload: dict[str, Any]) -> None:
         if command_type == "command.gateway_discover":
-            result = await self._manager.discover()
+            result = await self._manager.discover(payload.get("request_id"))
             await self._publish("gateway.devices_found", result)
         elif command_type == "command.gateway_test_connection":
             result = await self._manager.test_connection(
-                payload["transport_type"], payload.get("connection_params") or {}
+                payload["transport_type"], payload.get("connection_params") or {}, payload.get("request_id")
             )
             await self._publish("gateway.test_connection_result", result)
         elif command_type == "command.gateway_connect":

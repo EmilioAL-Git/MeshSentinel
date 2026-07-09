@@ -91,9 +91,13 @@ class TransportManager:
         await self._start(settings)
 
     async def test_connection(
-        self, transport_type: str, connection_params: dict[str, Any], timeout: float = 25.0
+        self,
+        transport_type: str,
+        connection_params: dict[str, Any],
+        request_id: str | None = None,
+        timeout: float = 25.0,
     ) -> dict[str, Any]:
-        request_id = str(uuid.uuid4())
+        request_id = request_id or str(uuid.uuid4())
         settings = _apply_connection_params(self._base_settings, transport_type, connection_params)
         status, detail = await self._start(settings, wait_timeout=timeout) or ("timeout", None)
         if status != "connected":
@@ -129,10 +133,12 @@ class TransportManager:
             },
         )
 
-    async def discover(self) -> dict[str, Any]:
+    async def discover(self, request_id: str | None = None) -> dict[str, Any]:
         from gateway.transports.usb import MeshtasticUsbTransport
 
-        request_id = str(uuid.uuid4())
+        # Debe coincidir con el request_id que envió el backend (correlación
+        # por Future en GatewayService): mintar uno propio rompería el enlace.
+        request_id = request_id or str(uuid.uuid4())
         devices = await asyncio.to_thread(MeshtasticUsbTransport.discover_devices)
         return {"request_id": request_id, "devices": devices}
 
