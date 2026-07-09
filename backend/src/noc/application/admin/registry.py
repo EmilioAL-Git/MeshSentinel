@@ -6,6 +6,7 @@ verificables por lectura posterior, incapaces de dejar un nodo inaccesible).
 Añadir una operación = una entrada aquí + su soporte en el gateway.
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -21,6 +22,8 @@ MODULE_CONFIG_SECTIONS = [s.name for s in _SCHEMA_MODULE_CONFIG_SECTIONS]
 # Límites del firmware (mesh_pb2.User)
 OWNER_SHORT_NAME_MAX = 4
 OWNER_LONG_NAME_MAX = 39
+
+NODE_ID_PATTERN = re.compile(r"^![0-9a-f]{8}$")
 
 
 @dataclass(slots=True, frozen=True)
@@ -45,6 +48,10 @@ class OperationSpec:
     required_role: str  # RBAC futuro; hoy informativo (diseño §8)
     param_choices: dict[str, list[str]] = field(default_factory=dict)
     param_fields: list[ParamField] = field(default_factory=list)
+    # ADR 0019: SETs sin lectura de verificación posible (favoritos/ignorados,
+    # ficha de contacto). El gateway solo puede reportar ACK/NAK del
+    # firmware, nunca "confirmed"/"mismatch" por lectura posterior.
+    ack_only: bool = False
 
     @property
     def requires_confirmation(self) -> bool:
@@ -110,6 +117,43 @@ OPERATIONS: dict[str, OperationSpec] = {
             "Escribir una sección de configuración de módulos (con verificación)",
             kind="set", allow_bulk=True, destructive=False, required_role="admin",
             param_choices={"section": MODULE_CONFIG_SECTIONS},
+        ),
+        # Favoritos/ignorados remotos (M4.1, ADR 0019): sin lectura de
+        # verificación posible, solo ACK/NAK del firmware.
+        OperationSpec(
+            "favorite.set",
+            "Marcar un nodo como favorito en la NodeDB del nodo destino",
+            kind="set", allow_bulk=True, destructive=False, required_role="admin",
+            param_fields=[ParamField("subject_node_id", "string", required=True)],
+            ack_only=True,
+        ),
+        OperationSpec(
+            "favorite.remove",
+            "Quitar un nodo de favoritos en la NodeDB del nodo destino",
+            kind="set", allow_bulk=True, destructive=False, required_role="admin",
+            param_fields=[ParamField("subject_node_id", "string", required=True)],
+            ack_only=True,
+        ),
+        OperationSpec(
+            "ignored.set",
+            "Marcar un nodo como ignorado en la NodeDB del nodo destino",
+            kind="set", allow_bulk=True, destructive=False, required_role="admin",
+            param_fields=[ParamField("subject_node_id", "string", required=True)],
+            ack_only=True,
+        ),
+        OperationSpec(
+            "ignored.remove",
+            "Quitar un nodo de ignorados en la NodeDB del nodo destino",
+            kind="set", allow_bulk=True, destructive=False, required_role="admin",
+            param_fields=[ParamField("subject_node_id", "string", required=True)],
+            ack_only=True,
+        ),
+        OperationSpec(
+            "contact.add",
+            "Enviar la ficha (SharedContact) de un nodo para que el destino lo reconozca en su NodeDB",
+            kind="action", allow_bulk=True, destructive=False, required_role="admin",
+            param_fields=[ParamField("subject_node_id", "string", required=True)],
+            ack_only=True,
         ),
     ]
 }
@@ -177,11 +221,35 @@ def _validate_generic_set(section_choices: list[str]) -> Callable[[dict[str, Any
     return validator
 
 
+def _validate_subject_node_id(params: dict[str, Any]) -> dict[str, Any]:
+    subject = params.get("subject_node_id")
+    if not isinstance(subject, str) or not NODE_ID_PATTERN.match(subject):
+        raise ValueError("subject_node_id must be a canonical node id (!xxxxxxxx)")
+    return {"subject_node_id": subject}
+
+
+def _validate_contact_add(params: dict[str, Any]) -> dict[str, Any]:
+    """`subject_node_id` es obligatorio; el resto de campos (los datos de la
+    ficha del nodo sujeto: nombre, hardware, clave pública) los completa la
+    orquestación de backend a partir del Node Registry, no el operador."""
+    out = _validate_subject_node_id(params)
+    for name in ("long_name", "short_name", "hw_model", "public_key"):
+        value = params.get(name)
+        if value is not None:
+            out[name] = str(value)
+    return out
+
+
 _VALIDATORS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "owner.set": _validate_owner_set,
     "position.set_fixed": _validate_fixed_position,
     "config.set": _validate_generic_set(CONFIG_SECTIONS),
     "module_config.set": _validate_generic_set(MODULE_CONFIG_SECTIONS),
+    "favorite.set": _validate_subject_node_id,
+    "favorite.remove": _validate_subject_node_id,
+    "ignored.set": _validate_subject_node_id,
+    "ignored.remove": _validate_subject_node_id,
+    "contact.add": _validate_contact_add,
 }
 
 

@@ -62,6 +62,24 @@ class SqlAdminOperationRepository:
         rows = await self._session.scalars(stmt)
         return [_entity(r) for r in rows]
 
+    async def list_by_node_and_types(
+        self, node_id: str, operation_types: tuple[str, ...], limit: int = 200
+    ) -> list[AdminOperation]:
+        """Historial reciente de un nodo restringido a ciertos tipos de
+        operación, más nuevo primero (M4.1: estado de sync remoto derivado,
+        ADR 0019 — sin tabla propia, se deriva de `admin_operations`)."""
+        stmt = (
+            select(AdminOperationModel)
+            .where(
+                AdminOperationModel.target_node_id == node_id,
+                AdminOperationModel.operation_type.in_(operation_types),
+            )
+            .order_by(AdminOperationModel.created_at.desc())
+            .limit(limit)
+        )
+        rows = await self._session.scalars(stmt)
+        return [_entity(r) for r in rows]
+
     async def update_fields(self, op_id: int, changes: dict) -> AdminOperation | None:
         m = await self._session.get(AdminOperationModel, op_id)
         if m is None:

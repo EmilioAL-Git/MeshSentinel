@@ -11,7 +11,8 @@ from typing import Any, Callable
 
 from google.protobuf import json_format
 from google.protobuf.descriptor import FieldDescriptor as FD
-from meshtastic.protobuf import admin_pb2, config_pb2, module_config_pb2
+from meshtastic.protobuf import admin_pb2, config_pb2, mesh_pb2, module_config_pb2
+from meshtastic.util import to_node_num
 
 CONFIG_SECTION_TO_ENUM = {
     "device": "DEVICE_CONFIG",
@@ -310,4 +311,83 @@ SET_OPERATIONS: dict[str, SetOperation] = {
         verify_get=lambda p: ("module_config.get", {"section": p["section"]}),
         compare=compare_module_config,
     ),
+}
+
+
+# ── Operaciones "ack-only" (M4.1, ADR 0019) ──────────────────────────────────
+# Favoritos/ignorados y ficha de contacto: el firmware no expone ninguna
+# lectura de vuelta, así que aquí no hay verify_get/compare — solo se
+# construye el AdminMessage; el resultado se resuelve por ACK/NAK de la capa
+# de transporte (ver usb.py: `_ack_roundtrip`).
+
+
+def build_favorite_set(params: dict[str, Any]) -> Any:
+    msg = admin_pb2.AdminMessage()
+    msg.set_favorite_node = to_node_num(params["subject_node_id"])
+    return msg
+
+
+def build_favorite_remove(params: dict[str, Any]) -> Any:
+    msg = admin_pb2.AdminMessage()
+    msg.remove_favorite_node = to_node_num(params["subject_node_id"])
+    return msg
+
+
+def build_ignored_set(params: dict[str, Any]) -> Any:
+    msg = admin_pb2.AdminMessage()
+    msg.set_ignored_node = to_node_num(params["subject_node_id"])
+    return msg
+
+
+def build_ignored_remove(params: dict[str, Any]) -> Any:
+    msg = admin_pb2.AdminMessage()
+    msg.remove_ignored_node = to_node_num(params["subject_node_id"])
+    return msg
+
+
+def build_contact_add(params: dict[str, Any]) -> Any:
+    """SharedContact (ADR 0019 §4): vía oficial para "dar a conocer" un nodo a
+    otro sin suplantar el campo `from` del paquete (lo fija el firmware del
+    dispositivo transmisor; un NODEINFO_APP construido a mano aparecería como
+    si viniera del propio gateway). Los datos del sujeto los aporta el
+    backend desde el Node Registry al construir la operación.
+    """
+    contact = admin_pb2.SharedContact()
+    contact.node_num = to_node_num(params["subject_node_id"])
+    contact.user.id = params["subject_node_id"]
+    if params.get("long_name"):
+        contact.user.long_name = params["long_name"]
+    if params.get("short_name"):
+        contact.user.short_name = params["short_name"]
+    if params.get("hw_model"):
+        try:
+            contact.user.hw_model = mesh_pb2.HardwareModel.Value(params["hw_model"])
+        except ValueError:
+            pass  # hw_model desconocido para esta versión del protobuf: se omite
+    if params.get("public_key"):
+        import base64
+
+        try:
+            contact.user.public_key = base64.b64decode(params["public_key"])
+        except (ValueError, TypeError):
+            pass
+    msg = admin_pb2.AdminMessage()
+    msg.add_contact.CopyFrom(contact)
+    return msg
+
+
+@dataclass(frozen=True)
+class AckOnlyOperation:
+    """SET/acción sin verificación por lectura: build_set(params) ->
+    AdminMessage. El resultado se resuelve por ACK/NAK, no por comparación."""
+
+    build_set: Callable[[dict[str, Any]], Any]
+
+
+ACK_ONLY_OPERATIONS: dict[str, AckOnlyOperation] = {
+    "favorite.set": AckOnlyOperation(build_set=build_favorite_set),
+    "favorite.remove": AckOnlyOperation(build_set=build_favorite_remove),
+    "ignored.set": AckOnlyOperation(build_set=build_ignored_set),
+    "ignored.remove": AckOnlyOperation(build_set=build_ignored_remove),
+    "contact.add": AckOnlyOperation(build_set=build_contact_add),
 }

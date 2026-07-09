@@ -285,6 +285,7 @@ export interface CapabilityOut {
   requires_confirmation: boolean;
   param_choices: Record<string, string[]>;
   param_fields: ParamFieldOut[];
+  ack_only: boolean;
 }
 
 export interface OperationOut {
@@ -319,6 +320,38 @@ export const createOperation = (body: {
 }) => send<OperationOut>("POST", "/admin/operations", body);
 export const cancelOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/cancel`);
 export const retryOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/retry`);
+
+// ── Favoritos/ignorados remotos (M4.1) ──────────────────────────────────────
+// "confirmado" = el firmware aceptó el AdminMessage (ACK); el NOC no puede
+// releer la NodeDB remota para verificarlo de verdad (ADR 0019).
+export type RemoteFlagSyncState = "pending" | "sent" | "confirmed" | "error";
+
+export interface RemoteFlagStatusOut {
+  subject_node_id: string;
+  desired: boolean;
+  sync_state: RemoteFlagSyncState;
+  operation_id: number;
+  updated_at: string | null;
+}
+
+export interface RemoteFlagsOut {
+  favorite: RemoteFlagStatusOut | null;
+  ignored: RemoteFlagStatusOut | null;
+}
+
+export const fetchRemoteFlags = (nodeId: string, subjectNodeId?: string) =>
+  get<RemoteFlagsOut>(
+    `/admin/remote-flags/${encodeURIComponent(nodeId)}${subjectNodeId ? `?subject_node_id=${encodeURIComponent(subjectNodeId)}` : ""}`,
+  );
+
+export const queueRemoteFlag = (
+  nodeId: string,
+  body: { flag_type: "favorite" | "ignored"; action: "set" | "remove"; subject_node_id: string; send_contact: boolean },
+) => send<{ batch_id: number; operation_type: string; node_ids: string[] }>(
+  "POST",
+  `/admin/remote-flags/${encodeURIComponent(nodeId)}/queue`,
+  body,
+);
 
 // ── Editor de configuración (M1.4) ──────────────────────────────────────────
 

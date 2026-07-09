@@ -203,8 +203,10 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
             <p style={{ marginTop: 0 }}>
               ⚠️ Vas a <strong>modificar</strong> el nodo <strong>{nodeName(nodeId)}</strong> con{" "}
               <span style={styles.mono}>{opType}</span> y parámetros{" "}
-              <span style={styles.mono}>{JSON.stringify(buildParams())}</span>. Tras el envío se hará
-              una lectura de verificación automática.
+              <span style={styles.mono}>{JSON.stringify(buildParams())}</span>.{" "}
+              {spec?.ack_only
+                ? "Tras el envío se comprobará el ACK/NAK del firmware — el dispositivo no permite releer este valor para verificarlo."
+                : "Tras el envío se hará una lectura de verificación automática."}
             </p>
             <p style={styles.dim}>
               Escribe el ID del nodo (<span style={styles.mono}>{nodeId}</span>) para confirmar:

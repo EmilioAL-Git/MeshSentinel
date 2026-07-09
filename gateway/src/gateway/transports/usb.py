@@ -256,7 +256,7 @@ class MeshtasticUsbTransport(Transport):
             self._admin_waiters.pop((node_id, response_key), None)
 
     async def execute_admin(self, operation: dict[str, Any]) -> dict[str, Any]:
-        from gateway.decoder.admin import SET_OPERATIONS, build_admin_request
+        from gateway.decoder.admin import ACK_ONLY_OPERATIONS, SET_OPERATIONS, build_admin_request
 
         self._check_link()
         node_id = str(operation["target_node_id"]).lower()
@@ -268,9 +268,63 @@ class MeshtasticUsbTransport(Transport):
 
         if op_type in SET_OPERATIONS:
             return await self._execute_set(node_id, op_type, params, operation)
+        if op_type in ACK_ONLY_OPERATIONS:
+            return await self._execute_ack_set(node_id, op_type, params, operation)
 
         message, response_key = build_admin_request(op_type, params)
         return await self._admin_roundtrip(node_id, message, response_key)
+
+    async def _ack_roundtrip(self, send: Any, timeout: float) -> dict[str, Any]:
+        """Envía un mensaje esperando solo el ACK/NAK de la capa de transporte
+        (ADR 0019): sin AdminMessage de respuesta que correlacionar por clave,
+        a diferencia de `_admin_roundtrip`. `send(onAckNak)` corre en un hilo
+        (bloqueante); `onAckNak` es el nombre exacto que la librería exige
+        para que el handler reciba también los ACKs positivos, no solo NAKs
+        (ver mesh_interface.sendData: "if the onResponse callback is called
+        'onAckNak' this will implicitly be true").
+        """
+        assert self._loop is not None
+        future: asyncio.Future[dict[str, Any]] = self._loop.create_future()
+
+        def onAckNak(packet: dict[str, Any]) -> None:  # noqa: N802
+            if not future.done():
+                self._loop.call_soon_threadsafe(future.set_result, packet)
+
+        await asyncio.to_thread(send, onAckNak)
+        packet = await asyncio.wait_for(future, timeout=timeout)
+        routing = (packet.get("decoded") or {}).get("routing") or {}
+        error_reason = routing.get("errorReason") or "NONE"
+        return {"ack": error_reason == "NONE", "error_reason": error_reason}
+
+    async def _execute_ack_set(
+        self, node_id: str, op_type: str, params: dict[str, Any], operation: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Favoritos/ignorados/ficha de contacto (M4.1, ADR 0019): sin lectura
+        de verificación posible, solo ACK/NAK. `ensureSessionKey()` es pública
+        y gestiona el passkey PKC igual que hace la librería para sus propios
+        wrappers (`Node.setFavorite`, etc.); usamos `_sendAdmin` directamente
+        para inyectar nuestro propio callback de ACK en vez del genérico de la
+        librería (que solo anota estado interno, no observable desde aquí).
+        """
+        from gateway.decoder.admin import ACK_ONLY_OPERATIONS
+
+        spec = ACK_ONLY_OPERATIONS[op_type]
+        set_msg = spec.build_set(params)
+        timeout = max(10.0, float(operation.get("timeout_seconds") or 120) / 3)
+
+        def _send(on_ack: Any) -> None:
+            node = self._iface.getNode(node_id, requestChannels=False)
+            node.ensureSessionKey()
+            node._sendAdmin(set_msg, wantResponse=False, onResponse=on_ack)
+
+        ack = await self._ack_roundtrip(_send, timeout)
+        logger.info(
+            "usb.admin_ack op=%s node=%s ack=%s reason=%s",
+            operation.get("operation_id"), node_id, ack["ack"], ack["error_reason"],
+        )
+        if not ack["ack"]:
+            raise RuntimeError(f"admin NAK: {ack['error_reason']}")
+        return {"requested": params, "ack": ack, "verify": "unavailable"}
 
     async def _execute_set(
         self, node_id: str, op_type: str, params: dict[str, Any], operation: dict[str, Any]

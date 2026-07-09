@@ -35,6 +35,12 @@ class SimNode:
     config_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     module_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     rng: random.Random = field(default_factory=random.Random)
+    # Favoritos/ignorados/contactos remotos (M4.1): NodeDB simulada de ESTE
+    # nodo (claves = node_num de otros nodos), fiel a que el firmware no
+    # expone forma de leerlos de vuelta (ADR 0019).
+    favorites: set[int] = field(default_factory=set)
+    ignored_nodes: set[int] = field(default_factory=set)
+    known_contacts: set[int] = field(default_factory=set)
 
 
 class SimulatedTransport(Transport):
@@ -246,6 +252,27 @@ class SimulatedTransport(Transport):
                 "verified": {section: new_section},
                 "verify": "confirmed",
             }
+        # Favoritos/ignorados/ficha de contacto (M4.1, ADR 0019): sin lectura
+        # de verificación posible (fiel al firmware real), solo ACK.
+        if op_type in ("favorite.set", "favorite.remove", "ignored.set", "ignored.remove", "contact.add"):
+            subject_num = int(params["subject_node_id"][1:], 16)
+            await asyncio.sleep(node.rng.uniform(0.3, 1.0))
+            if op_type == "favorite.set":
+                node.favorites.add(subject_num)
+            elif op_type == "favorite.remove":
+                node.favorites.discard(subject_num)
+            elif op_type == "ignored.set":
+                node.ignored_nodes.add(subject_num)
+            elif op_type == "ignored.remove":
+                node.ignored_nodes.discard(subject_num)
+            else:
+                node.known_contacts.add(subject_num)
+            return {
+                "requested": params,
+                "ack": {"ack": True, "error_reason": "NONE"},
+                "verify": "unavailable",
+            }
+
         raise ValueError(f"Unsupported admin operation: {op_type}")
 
     async def close(self) -> None:

@@ -4,23 +4,59 @@ import {
   addGroupMember,
   createGroup,
   createTag,
+  displayName,
   fetchGroups,
   fetchNode,
   fetchNodePositions,
   fetchNodeTelemetry,
+  fetchRemoteFlags,
   fetchTags,
+  queueRemoteFlag,
   removeGroupMember,
   setNodeFavorite,
   setNodeIgnored,
   setNodeTags,
   type NodeSummaryOut,
+  type RemoteFlagSyncState,
 } from "../api/client";
 import { styles } from "../styles";
 
 interface Props {
   nodeId: string;
   summary?: NodeSummaryOut;
+  summaries?: NodeSummaryOut[];
   onClose: () => void;
+}
+
+const SYNC_STATE_LABEL: Record<RemoteFlagSyncState, string> = {
+  pending: "Pendiente",
+  sent: "Enviado",
+  confirmed: "Confirmado",
+  error: "Error",
+};
+
+const SYNC_STATE_COLOR: Record<RemoteFlagSyncState, string> = {
+  pending: "#8b949e",
+  sent: "#1f6feb",
+  confirmed: "#1f6f43",
+  error: "#cf222e",
+};
+
+function SyncBadge({ state }: { state: RemoteFlagSyncState }) {
+  return (
+    <span
+      style={{
+        background: SYNC_STATE_COLOR[state],
+        color: "#fff",
+        borderRadius: 12,
+        padding: "0.1rem 0.6rem",
+        fontSize: "0.75rem",
+      }}
+      title="«Confirmado» = el firmware aceptó la operación (ACK). El NOC no puede releer la NodeDB remota del nodo destino para verificarlo."
+    >
+      {SYNC_STATE_LABEL[state]}
+    </span>
+  );
 }
 
 const btn: CSSProperties = {
@@ -41,7 +77,7 @@ function Row({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-export function NodeDetail({ nodeId, summary, onClose }: Props) {
+export function NodeDetail({ nodeId, summary, summaries = [], onClose }: Props) {
   const queryClient = useQueryClient();
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["node", nodeId] });
@@ -100,6 +136,30 @@ export function NodeDetail({ nodeId, summary, onClose }: Props) {
 
   const [tagInput, setTagInput] = useState("");
   const [groupInput, setGroupInput] = useState("");
+
+  // ── Favoritos/ignorados remotos (M4.1, ADR 0019) ────────────────────────
+  const [subjectNodeId, setSubjectNodeId] = useState("");
+  const [sendContact, setSendContact] = useState(false);
+  const remoteFlags = useQuery({
+    queryKey: ["remote-flags", nodeId, subjectNodeId],
+    queryFn: () => fetchRemoteFlags(nodeId, subjectNodeId || undefined),
+    refetchInterval: 5_000,
+  });
+  const queueFlag = useMutation({
+    mutationFn: (vars: { flagType: "favorite" | "ignored"; action: "set" | "remove" }) =>
+      queueRemoteFlag(nodeId, {
+        flag_type: vars.flagType,
+        action: vars.action,
+        subject_node_id: subjectNodeId,
+        send_contact: sendContact,
+      }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["remote-flags", nodeId] });
+      queryClient.invalidateQueries({ queryKey: ["batches"] });
+      queryClient.invalidateQueries({ queryKey: ["operations"] });
+    },
+  });
+  const subjectOptions = summaries.filter((s) => s.node.node_id !== nodeId);
 
   if (node.isLoading) return <div style={styles.card}>Cargando {nodeId}…</div>;
   if (node.isError || !node.data) return <div style={styles.card}>Error cargando {nodeId}</div>;
@@ -236,6 +296,83 @@ export function NodeDetail({ nodeId, summary, onClose }: Props) {
           }}
         />
       </div>
+
+      <h3>Favoritos / ignorados remotos</h3>
+      <p style={{ ...styles.dim, fontSize: "0.8rem" }}>
+        Administra la NodeDB del firmware de <strong>este</strong> nodo: qué otro nodo debe
+        aparecer como favorito o ignorado en su pantalla. Se encola como una operación admin
+        (pipeline y Batches existentes) — no tiene relación con el ★/ojo locales de arriba, que
+        son solo de organización del NOC.
+      </p>
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center", marginBottom: "0.5rem" }}>
+        <select
+          style={{ background: "#0d1117", border: "1px solid #30363d", color: "#e6edf3", borderRadius: 6, padding: "0.3rem 0.5rem" }}
+          value={subjectNodeId}
+          onChange={(e) => setSubjectNodeId(e.target.value)}
+        >
+          <option value="">— nodo sujeto —</option>
+          {subjectOptions.map((s) => (
+            <option key={s.node.node_id} value={s.node.node_id}>
+              {displayName(s.node)}
+            </option>
+          ))}
+        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.85rem" }}>
+          <input type="checkbox" checked={sendContact} onChange={(e) => setSendContact(e.target.checked)} />
+          Enviar antes una ficha de contacto del nodo sujeto
+        </label>
+      </div>
+      <p style={{ ...styles.dim, fontSize: "0.78rem", marginTop: "-0.3rem" }}>
+        Si este nodo no tiene todavía al sujeto en su NodeDB, el firmware puede ignorar la
+        operación de favorito/ignorado. Esta opción envía antes su ficha (nombre, hardware,
+        clave pública) para que quede reconocido. Aumenta el tráfico de administración: solo
+        actívala si sospechas que el nodo destino no lo conoce. Desactivada por defecto.
+      </p>
+      <table style={styles.table}>
+        <tbody>
+          <tr>
+            <td style={{ ...styles.td, ...styles.dim, width: "40%" }}>Favorito remoto</td>
+            <td style={styles.td}>
+              {remoteFlags.data?.favorite ? <SyncBadge state={remoteFlags.data.favorite.sync_state} /> : <span style={styles.dim}>— sin gestionar —</span>}
+              <button
+                style={{ ...btn, marginLeft: 8 }}
+                disabled={!subjectNodeId || queueFlag.isPending}
+                onClick={() => queueFlag.mutate({ flagType: "favorite", action: "set" })}
+              >
+                Marcar
+              </button>
+              <button
+                style={{ ...btn, marginLeft: 6 }}
+                disabled={!subjectNodeId || queueFlag.isPending}
+                onClick={() => queueFlag.mutate({ flagType: "favorite", action: "remove" })}
+              >
+                Quitar
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <td style={{ ...styles.td, ...styles.dim, width: "40%" }}>Ignorado remoto</td>
+            <td style={styles.td}>
+              {remoteFlags.data?.ignored ? <SyncBadge state={remoteFlags.data.ignored.sync_state} /> : <span style={styles.dim}>— sin gestionar —</span>}
+              <button
+                style={{ ...btn, marginLeft: 8 }}
+                disabled={!subjectNodeId || queueFlag.isPending}
+                onClick={() => queueFlag.mutate({ flagType: "ignored", action: "set" })}
+              >
+                Marcar
+              </button>
+              <button
+                style={{ ...btn, marginLeft: 6 }}
+                disabled={!subjectNodeId || queueFlag.isPending}
+                onClick={() => queueFlag.mutate({ flagType: "ignored", action: "remove" })}
+              >
+                Quitar
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      {queueFlag.isError && <p style={styles.bad}>{String(queueFlag.error)}</p>}
     </div>
   );
 }

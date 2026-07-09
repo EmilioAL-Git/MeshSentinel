@@ -406,7 +406,12 @@ export default function App() {
               )}
             </div>
             {selected && (
-              <NodeDetail nodeId={selected} summary={selectedSummary} onClose={() => setSelected(null)} />
+              <NodeDetail
+                nodeId={selected}
+                summary={selectedSummary}
+                summaries={summaries}
+                onClose={() => setSelected(null)}
+              />
             )}
           </div>
         </div>
