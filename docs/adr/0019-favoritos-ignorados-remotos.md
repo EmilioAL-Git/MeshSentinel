@@ -45,16 +45,26 @@ conocer" ese nodo primero, opcional y bajo demanda del operador.
    locales `nodes.is_favorite`/`is_ignored` (M1.2) quedan completamente
    intactas y sin relación con este estado — son conceptos distintos
    (filtro/organización propios del NOC vs. NodeDB del firmware remoto).
-4. **"Enviar ficha de contacto" (antes "NodeInfo previo"), rediseñado tras
-   investigación**: enviar un paquete NODEINFO_APP construido a mano con los
-   datos de un nodo tercero **no funciona** — el campo `from` del paquete lo
-   fija el firmware del dispositivo conectado al transmitir; el nodo destino
-   interpretaría el payload como si fuera la identidad del propio gateway,
-   corrompiendo su entrada en la NodeDB remota. La vía correcta y ya prevista
-   por el protocolo es `AdminMessage.add_contact` con un `SharedContact`
-   (`node_num`, `user{id, long_name, short_name, hw_model, public_key}`):
-   un admin message explícito ("añade este contacto"), no una suplantación de
-   origen. Nueva operación **`contact.add`** (`kind="action"`, `ack_only`),
+4. **`contact.add` (`SharedContact`/`add_contact`) — separado deliberadamente
+   de NODEINFO_APP**: se evaluó y se descartó enviar un paquete NODEINFO_APP
+   construido a mano con los datos de un nodo tercero — **no funciona**, el
+   campo `from` del paquete lo fija el firmware del dispositivo conectado al
+   transmitir; el nodo destino interpretaría el payload como si fuera la
+   identidad del propio gateway, corrompiendo su entrada en la NodeDB remota.
+   Son dos mecanismos distintos del protocolo y deben quedar nombrados sin
+   ambigüedad: NODEINFO_APP es el broadcast normal de identidad (ya
+   decodificado en `gateway/decoder/meshtastic.py`, sin relación con esto);
+   `AdminMessage.add_contact`/`SharedContact` es la vía de administración
+   remota correcta y ya prevista por el protocolo (`node_num`,
+   `user{id, long_name, short_name, hw_model, public_key}`) — un admin
+   message explícito ("añade este contacto"), no una suplantación de origen.
+   **Convención de nombres, en adelante y para siempre**: código, comentarios,
+   ADRs y documentación se refieren a esta operación únicamente como
+   `contact.add` / `SharedContact` / `add_contact` — nunca como "NodeInfo" ni
+   variantes ("NodeInfo previo", "ficha NodeInfo", etc.). La UI puede usar
+   texto en lenguaje natural ("ficha del nodo", "información del nodo") pero
+   sin sugerir que se envía un NODEINFO_APP. Nueva operación
+   **`contact.add`** (`kind="action"`, `ack_only`),
    construida enteramente por el backend a partir de los datos ya conocidos
    del nodo sujeto en el Node Registry (no hace falta leer nada del nodo
    destino). Encapsulado en `gateway/decoder/admin.py` + `usb.py`; reemplazable

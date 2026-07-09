@@ -15,6 +15,10 @@ menos dos nodos conocidos por el NOC (target y sujeto).
 - El ★/ojo de la cabecera del detalle de nodo (favorito/ignorado **local**,
   M1.2) es un concepto totalmente distinto y no debe cambiar al operar la
   sección "Favoritos / ignorados remotos".
+- **`contact.add` (SharedContact/add_contact) ≠ NodeInfo**: son dos mecanismos
+  distintos del protocolo (ADR 0019 §4). Si en algún punto del código, los
+  logs o la UI aparece la operación llamada "NodeInfo" en vez de
+  `contact.add`, es una regresión de nomenclatura a corregir.
 
 ## A. Marcar y quitar favorito/ignorado
 
