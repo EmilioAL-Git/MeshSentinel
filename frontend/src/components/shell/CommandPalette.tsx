@@ -230,7 +230,12 @@ export function CommandPalette({
             padding: "0.8rem 1rem",
           }}
           onKeyDown={(e) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") {
+              // Corta la propagación: Esc aquí solo cierra la paleta, no
+              // el cajón de detalle que escucha en window (OpsCenter)
+              e.stopPropagation();
+              onClose();
+            }
             else if (e.key === "ArrowDown") {
               e.preventDefault();
               setCursor((c) => Math.min(c + 1, results.length - 1));

@@ -1,47 +1,111 @@
-# Diario de operador
+# Diario de operador — MeshSentinel
 
-No es documentación técnica: es un registro de fricciones de uso real
-detectadas mientras se implementa o se opera el NOC. Cada entrada documenta
-algo incómodo, lento o poco claro para un operador — no hace falta
-resolverlo al anotarlo. La UX evoluciona con el uso (v0.7, principio 8).
-
-Formato: fecha · contexto · observación · (opcional) idea de mejora.
+No es documentación técnica: es el diario de uso real del NOC. Registra
+fricciones, descubrimientos y cómo evoluciona la UX con el uso (v0.7,
+principio 8). Cada entrada incluye, cuando tiene sentido: **fecha,
+contexto, qué intentaba hacer, fricción, impacto, idea de mejora y estado**
+(pendiente / diseñado / implementado / mitigado / descartado). Los
+descubrimientos que no son problemas ("siempre acabo usando el mapa antes
+que la lista") valen tanto como los bugs de UX.
 
 ---
 
-## 2026-07-10 — durante la implementación de v0.7.0
+## 2026-07-10 · v0.7.1 — construyendo el Centro de Operaciones
 
-- **Las pestañas Operaciones y Batches obligan a saltar para seguir una
-  misma acción.** Al cablear el segmento `▶` de la barra inferior quedó
-  claro que "qué está pasando con mi lote" requiere una vista y "qué pasó
-  con sus operaciones" otra. Ya decidido en diseño (§13, fusión en
-  Trabajos, v0.7.4) — anotado aquí porque la fricción es real ya.
+### El popup del mapa se ha quedado viejo el mismo día
+- **Contexto**: cablear el clic de marcador para abrir el cajón de detalle.
+- **Qué intentaba**: mapa → nodo → detalle en 1 clic (presupuesto del diseño §8.4).
+- **Fricción**: el popup de Leaflet sigue en medio: clic → popup → "Ver
+  detalle" → cajón (2 clics y un popup que tapa el mapa). El diseño ya lo
+  resolvía (hover = tooltip, clic = inspector directo) pero eso es v0.7.2.
+- **Impacto**: la interacción más frecuente del Centro gasta un clic de más.
+- **Mejora**: marcador → cajón directo; el popup se degrada a tooltip.
+- **Estado**: diseñado (§5.4), pendiente de v0.7.2.
 
-- **`succeeded_unconfirmed` como texto de chip es jerga de contrato.** El
-  chip de la vista Operaciones muestra el estado crudo del backend; el
-  operador tiene que conocer ADR 0019 para interpretarlo. El tooltip ayuda
-  pero el literal asusta. Idea: vocabulario de operador también en la vista
-  general ("confirmada por lectura" / "aceptada sin verificar"), sin perder
-  el estado técnico en el detalle.
+### NodeDetail dentro del cajón funciona, pero se nota "prestado"
+- **Contexto**: el cajón de 420 px reutiliza NodeDetail tal cual (decisión
+  correcta: cero reescritura).
+- **Fricción**: NodeDetail fue diseñado como columna de página — tablas
+  anchas, secciones largas, todo abierto a la vez. En el cajón exige mucho
+  scroll para llegar a favoritos remotos u organización.
+- **Impacto**: consultar algo concreto de un nodo es más lento de lo que
+  el cajón promete.
+- **Mejora**: la reorganización prevista (cabecera fija de estado +
+  secciones plegables) — es exactamente v0.7.2.
+- **Estado**: diseñado (§8.1), pendiente.
 
-- **El HUD muestra "…" hasta que cargan las queries (2-3 s en frío).** No
-  es un fallo, pero en la apertura de turno los primeros segundos el shell
-  no responde aún a "¿la red está bien?". Idea futura: cachear el último
-  resumen en localStorage y pintarlo atenuado como "dato de la última
-  sesión" hasta que llegue el fresco.
+### Descubrimiento: el semáforo con motivos expandidos funciona
+- **Contexto**: primer arranque del Centro con la red degradada del stack dev.
+- **Observación**: leer "RED DEGRADADA › 1 pasarela(s) sin conexión" sin
+  ningún clic responde la pregunta antes de formularla. Patrón a repetir:
+  cualquier estado anómalo debería llevar su porqué al lado, no detrás de
+  un clic.
+- **Estado**: implementado; extender el patrón donde aparezcan estados.
 
-- **La cola (`⧗`) de la barra inferior cuenta pending+queued de las últimas
-  200 operaciones.** Si la cola real superara 200 (lote enorme), el número
-  se quedaría corto. Hoy imposible en la práctica (rate limit 60/min y
-  lotes pequeños), pero cuando exista la vista Trabajos convendría un
-  endpoint de conteos agregados en vez de contar client-side.
+### Descubrimiento: con el panel Trabajos abierto, la actividad desaparece
+- **Contexto**: monitorizar un lote mientras llegaba telemetría.
+- **Observación**: el riel muestra UN panel a la vez; en Trabajos, los
+  eventos solo se perciben por el badge y el bloque de alertas. No es
+  grave (la barra inferior cubre lo vital) pero en pantallas anchas se
+  echa de menos ver Actividad ∥ Trabajos a la vez.
+- **Mejora**: el anclaje de segundo panel en ultrawide ya está en el
+  diseño (§2.3 y §6.1).
+- **Estado**: diseñado, sin fase asignada — candidato si sobra tiempo en v0.7.2/3.
 
-- **El aviso de reconexión WS no distingue "backend caído" de "solo WS
-  caído".** El banner dice "reconectando" también cuando todo el backend
-  está abajo (aunque la barra inferior sí lo distingue vía /health). Vale
-  como está, pero el texto podría coordinarse cuando ambos fallan.
+### El Dashboard clásico ya estorba
+- **Contexto**: tras hacer el Centro la vista por defecto.
+- **Observación**: todo lo que enseña el Dashboard clásico está ya en el
+  Centro, mejor colocado. Mantener ambos confunde ("¿cuál es la verdad?").
+  La red de seguridad tiene sentido unos días, no meses.
+- **Estado**: retirada prevista en cuanto el usuario valide el Centro con
+  hardware real.
 
-- **El reloj de la barra muestra HH:MM sin segundos.** Para correlar con
-  logs (uno de sus propósitos declarados, §11.2) los segundos ayudarían;
-  se dejó en minutos para no tener un tick por segundo. Revisar si algún
-  flujo real los echa de menos.
+### "Ver historial →" del panel Trabajos aterriza en un sitio partido en dos
+- **Contexto**: el panel Trabajos enlaza al historial completo.
+- **Fricción**: el historial real está partido entre las vistas
+  Operaciones y Batches; el panel unificado hace más evidente que esa
+  separación es artificial (un lote ES un conjunto de operaciones).
+- **Impacto**: la auditoría de "qué pasó anoche" sigue exigiendo dos vistas.
+- **Mejora**: la fusión en la vista Trabajos (§13) sube de prioridad tras
+  probar el panel.
+- **Estado**: diseñado, previsto para la fase de vistas especializadas.
+
+---
+
+## 2026-07-10 · v0.7.0 — fundaciones
+
+### Operaciones y Batches obligan a saltar entre pestañas
+- **Fricción**: seguir una misma acción (lote → sus operaciones) exige dos vistas.
+- **Estado**: **mitigado** en v0.7.1 (panel Trabajos del Centro: en curso +
+  cola + recientes en un sitio); la fusión completa con historial sigue
+  pendiente (§13).
+
+### `succeeded_unconfirmed` como texto de chip es jerga de contrato
+- **Fricción**: el operador necesita conocer ADR 0019 para interpretar el
+  literal; el tooltip ayuda pero el crudo asusta.
+- **Mejora**: vocabulario de operador también en la vista general
+  ("confirmada por lectura" / "aceptada sin verificar") conservando el
+  estado técnico en el detalle.
+- **Estado**: pendiente.
+
+### El HUD muestra "…" hasta que cargan las queries (2-3 s en frío)
+- **Impacto**: los primeros segundos del turno el shell no responde a "¿la
+  red está bien?".
+- **Mejora**: cachear el último resumen en localStorage y pintarlo
+  atenuado ("dato de la última sesión") hasta que llegue el fresco.
+- **Estado**: pendiente.
+
+### La cola (⧗) cuenta sobre las últimas 200 operaciones
+- **Fricción**: con una cola real >200 el número se quedaría corto. Hoy
+  imposible en la práctica (rate limit 60/min).
+- **Mejora**: endpoint de conteos agregados cuando exista la vista Trabajos.
+- **Estado**: pendiente (requiere backend; fuera de v0.7).
+
+### El aviso de reconexión WS no distingue "backend caído" de "solo WS caído"
+- **Estado**: pendiente; la barra inferior sí los distingue vía /health —
+  coordinar el texto del banner cuando ambos fallan.
+
+### El reloj de la barra muestra HH:MM sin segundos
+- **Fricción**: para correlar con logs los segundos ayudarían; se evitó un
+  tick por segundo.
+- **Estado**: pendiente de ver si algún flujo real los echa de menos.

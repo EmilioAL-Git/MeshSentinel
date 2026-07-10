@@ -7,6 +7,7 @@ import {
   fetchBatches,
   fetchDashboardSummary,
   fetchGateways,
+  fetchGatewayStats,
   fetchGroups,
   fetchHealth,
   fetchNodes,
@@ -30,6 +31,7 @@ import { NodeDetail } from "./components/NodeDetail";
 import { NodeFiltersBar } from "./components/NodeFiltersBar";
 import { NodesTable } from "./components/NodesTable";
 import { OperationsView } from "./components/OperationsView";
+import { OpsCenter } from "./components/opscenter/OpsCenter";
 import { ProfilesView } from "./components/ProfilesView";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { Hud } from "./components/shell/Hud";
@@ -49,6 +51,7 @@ const DATA_EVENTS = new Set([
 ]);
 
 type View =
+  | "ops"
   | "dashboard"
   | "nodes"
   | "map"
@@ -60,18 +63,21 @@ type View =
   | "activity"
   | "gateways";
 
-// Vistas de la aplicación: alimenta la navegación y las acciones "Ir a" de ⌘K
+// Vistas de la aplicación: el Centro de Operaciones es la principal; el resto
+// son especializadas (menú Vistas ▾ y acciones "Ir a" de ⌘K). El Dashboard
+// clásico queda como red de seguridad hasta que el Centro lo absorba del todo.
 const VIEWS: { id: View; label: string }[] = [
-  { id: "dashboard", label: "Dashboard" },
+  { id: "ops", label: "Centro de Operaciones" },
   { id: "nodes", label: "Nodos" },
   { id: "map", label: "Mapa" },
   { id: "alerts", label: "Alertas" },
   { id: "operations", label: "Operaciones" },
+  { id: "batches", label: "Batches" },
   { id: "config", label: "Configuración" },
   { id: "profiles", label: "Perfiles" },
-  { id: "batches", label: "Batches" },
   { id: "activity", label: "Actividad" },
   { id: "gateways", label: "Gateways" },
+  { id: "dashboard", label: "Dashboard clásico" },
 ];
 
 const selBtn = {
@@ -84,22 +90,76 @@ const selBtn = {
   fontSize: "0.85rem",
 } as const;
 
-function NavTab({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+/** Menú "Vistas ▾": sustituye a las 10 pestañas — el Centro es la pantalla
+ * principal y el resto se visita puntualmente (v0.7 §13). */
+function ViewsMenu({ view, onNavigate }: { view: View; onNavigate: (v: View) => void }) {
+  const [open, setOpen] = useState(false);
+  const current = VIEWS.find((v) => v.id === view);
   return (
-    <button
-      onClick={onClick}
-      style={{
-        background: active ? "var(--accent)" : "transparent",
-        color: "var(--text)",
-        border: "1px solid " + (active ? "var(--accent)" : "var(--border)"),
-        borderRadius: 6,
-        padding: "0.35rem 1rem",
-        cursor: "pointer",
-        fontSize: "0.9rem",
-      }}
-    >
-      {label}
-    </button>
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          background: view === "ops" ? "transparent" : t.accentTint,
+          color: view === "ops" ? t.textDim : t.accent,
+          border: `1px solid ${view === "ops" ? t.border : t.accent}`,
+          borderRadius: 6,
+          padding: "0.3rem 0.8rem",
+          cursor: "pointer",
+          fontSize: "0.85rem",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {view === "ops" ? "Vistas ▾" : `${current?.label ?? ""} ▾`}
+      </button>
+      {open && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 940 }} onClick={() => setOpen(false)} />
+          <div
+            style={{
+              position: "absolute",
+              top: "calc(100% + 4px)",
+              right: 0,
+              zIndex: 950,
+              background: t.surface,
+              border: `1px solid ${t.border}`,
+              borderRadius: 6,
+              boxShadow: "0 8px 28px rgba(0, 0, 0, 0.5)",
+              minWidth: 210,
+              padding: "0.3rem 0",
+            }}
+          >
+            {VIEWS.map((v, i) => (
+              <div key={v.id}>
+                {(i === 1 || v.id === "dashboard") && (
+                  <div style={{ borderTop: `1px solid ${t.borderSubtle}`, margin: "0.25rem 0" }} />
+                )}
+                <button
+                  onClick={() => {
+                    onNavigate(v.id);
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    background: v.id === view ? t.accentTint : "transparent",
+                    border: "none",
+                    borderLeft: `2px solid ${v.id === view ? t.accent : "transparent"}`,
+                    color: v.id === view ? t.accent : t.text,
+                    padding: "0.35rem 0.9rem",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  {v.label}
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -147,7 +207,12 @@ export default function App() {
     enabled: runningBatchId != null,
     refetchInterval: 10_000,
   });
-  const [view, setView] = useState<View>("dashboard");
+  const [view, setView] = useState<View>("ops");
+  const gatewayStats = useQuery({
+    queryKey: ["gateway-stats"],
+    queryFn: fetchGatewayStats,
+    refetchInterval: 30_000,
+  });
   const [wsStatus, setWsStatus] = useState<EventsSocketStatus>({
     state: "connecting",
     disconnectedAt: null,
@@ -251,7 +316,6 @@ export default function App() {
   const summaries = nodes.data ?? [];
   const filteredSummaries = filteredNodes.data ?? [];
   const onlineCount = filteredSummaries.filter((s) => s.node.online).length;
-  const activeAlertCount = (alerts.data ?? []).filter((a) => a.status !== "resolved").length;
   const favorites = summaries.filter((s) => s.node.is_favorite);
   const hwModels = useMemo(
     () => [...new Set(summaries.map((s) => s.node.hw_model).filter((h): h is string => h != null))].sort(),
@@ -281,9 +345,11 @@ export default function App() {
     [gateways.data],
   );
 
+  // Abrir un nodo: en el Centro es un cajón in situ (sin cambiar de pantalla);
+  // desde las vistas especializadas se abre en Nodos como hasta ahora.
   const showDetail = useCallback((nodeId: string) => {
     setSelected(nodeId);
-    setView("nodes");
+    setView((v) => (v === "ops" ? v : "nodes"));
   }, []);
 
   const selectedSummary =
@@ -295,12 +361,42 @@ export default function App() {
   ).length;
 
   return (
-    <div style={{ ...styles.page, paddingBottom: "calc(var(--statusbar-height) + 1.5rem)" }}>
-      {/* Cabecera del shell v0.7 (§3.1): identidad + ⌘K + HUD. La fila de
-          pestañas es transitoria hasta que el Centro llegue en v0.7.1. */}
-      <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", marginBottom: "0.75rem" }}>
-        <h1 style={{ margin: 0, fontSize: "1.15rem", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>
-          ⌬ Meshtastic NOC
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        overflow: "hidden",
+        background: t.bg,
+        color: t.text,
+        fontFamily: t.fontUi,
+      }}
+    >
+      {/* Cabecera del shell (§3.1): identidad + ⌘K + HUD + Vistas ▾.
+          El logo vuelve siempre al Centro de Operaciones. */}
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "1rem",
+          padding: "0.4rem 1rem",
+          background: t.surface,
+          borderBottom: `1px solid ${t.border}`,
+          flexShrink: 0,
+        }}
+      >
+        <h1
+          onClick={() => setView("ops")}
+          title="Centro de Operaciones"
+          style={{
+            margin: 0,
+            fontSize: "1.02rem",
+            letterSpacing: "0.02em",
+            whiteSpace: "nowrap",
+            cursor: "pointer",
+          }}
+        >
+          ⌬ MeshSentinel
         </h1>
         <button
           onClick={() => setPaletteOpen(true)}
@@ -310,13 +406,13 @@ export default function App() {
             color: t.textDim,
             border: `1px solid ${t.border}`,
             borderRadius: 6,
-            padding: "0.3rem 0.9rem",
+            padding: "0.28rem 0.9rem",
             cursor: "pointer",
             fontSize: "0.85rem",
             display: "inline-flex",
             alignItems: "center",
             gap: "0.5rem",
-            minWidth: 220,
+            minWidth: 210,
           }}
         >
           <span>🔍 Buscar…</span>
@@ -330,35 +426,19 @@ export default function App() {
           activeOps={activeOps}
           onGoTo={setView}
         />
-      </div>
-      <nav style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
-        <NavTab active={view === "dashboard"} label="Dashboard" onClick={() => setView("dashboard")} />
-        <NavTab active={view === "nodes"} label="Nodos" onClick={() => setView("nodes")} />
-        <NavTab active={view === "map"} label="Mapa" onClick={() => setView("map")} />
-        <NavTab
-          active={view === "alerts"}
-          label={activeAlertCount > 0 ? `Alertas (${activeAlertCount})` : "Alertas"}
-          onClick={() => setView("alerts")}
-        />
-        <NavTab active={view === "operations"} label="Operaciones" onClick={() => setView("operations")} />
-        <NavTab active={view === "config"} label="Configuración" onClick={() => setView("config")} />
-        <NavTab active={view === "profiles"} label="Perfiles" onClick={() => setView("profiles")} />
-        <NavTab active={view === "batches"} label="Batches" onClick={() => setView("batches")} />
-        <NavTab active={view === "activity"} label="Actividad" onClick={() => setView("activity")} />
-        <NavTab active={view === "gateways"} label="Gateways" onClick={() => setView("gateways")} />
-      </nav>
+        <ViewsMenu view={view} onNavigate={setView} />
+      </header>
 
       {/* WS caído = estado de primera clase (§11.2): aviso fino, nunca silencio */}
       {wsStatus.state === "reconnecting" && (
         <div
           style={{
             background: t.warnTint,
-            border: `1px solid ${t.warn}`,
+            borderBottom: `1px solid ${t.warn}`,
             color: t.warn,
-            borderRadius: 6,
-            padding: "0.35rem 0.8rem",
-            marginBottom: "0.75rem",
+            padding: "0.3rem 1rem",
             fontSize: "0.85rem",
+            flexShrink: 0,
           }}
         >
           Reconectando con el servidor de eventos — datos congelados desde{" "}
@@ -387,6 +467,29 @@ export default function App() {
         }}
       />
 
+      {/* Pantalla principal: Centro de Operaciones, a viewport completo */}
+      {view === "ops" && (
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <OpsCenter
+            summaries={summaries}
+            gatewayNodeIds={gatewayNodeIds}
+            summary={dashboard.data}
+            alerts={alerts.data ?? []}
+            gateways={gateways.data ?? []}
+            stats={gatewayStats.data}
+            operations={operations.data ?? []}
+            runningBatch={runningBatch.data}
+            activity={activity}
+            selected={selected}
+            onSelect={setSelected}
+            onGoTo={(v) => setView(v as View)}
+          />
+        </div>
+      )}
+
+      {/* Vistas especializadas: contenedor con scroll propio */}
+      {view !== "ops" && (
+      <main style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
       {view === "dashboard" && (
         <Dashboard
           summary={dashboard.data}
@@ -555,6 +658,8 @@ export default function App() {
             )}
           </div>
         </div>
+      )}
+      </main>
       )}
 
       <StatusBar

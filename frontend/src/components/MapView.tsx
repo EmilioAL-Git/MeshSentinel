@@ -10,6 +10,13 @@ interface Props {
   summaries: NodeSummaryOut[];
   gatewayNodeIds: Set<string>;
   onShowDetail: (nodeId: string) => void;
+  /**
+   * Modo lienzo (Centro de Operaciones, v0.7 §5): sin tarjeta ni título,
+   * ocupa el 100 % del contenedor y la leyenda/contadores pasan a overlays
+   * translúcidos sobre el propio mapa. El modo clásico sigue sirviendo a la
+   * vista Mapa a pantalla completa.
+   */
+  fill?: boolean;
 }
 
 const COLOR_ONLINE = "var(--ok)";
@@ -137,6 +144,46 @@ const NodeMarker = memo(
     prev.summary.node.gateway_id === next.summary.node.gateway_id,
 );
 
+/**
+ * El mapa nunca se desmonta al plegar/redimensionar paneles (requisito duro
+ * del diseño §3.2): un ResizeObserver avisa a Leaflet del nuevo tamaño del
+ * contenedor para que recalcule el viewport sin remontar.
+ */
+function AutoResize() {
+  const map = useMap();
+  useEffect(() => {
+    const container = map.getContainer();
+    const observer = new ResizeObserver(() => map.invalidateSize());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [map]);
+  return null;
+}
+
+const overlayStyle = {
+  position: "absolute" as const,
+  zIndex: 800, // por encima de las tiles de Leaflet (400), debajo de popups (1000+)
+  background: "color-mix(in srgb, var(--surface) 82%, transparent)",
+  backdropFilter: "blur(6px)",
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  padding: "0.3rem 0.6rem",
+  fontSize: "0.78rem",
+  color: "var(--text-dim)",
+};
+
+function Legend() {
+  return (
+    <>
+      <span style={{ color: COLOR_ONLINE }}>●</span> online&nbsp;&nbsp;
+      <span style={{ color: COLOR_OFFLINE }}>●</span> offline&nbsp;&nbsp;
+      <span style={{ color: COLOR_GATEWAY }}>◆</span> pasarela&nbsp;&nbsp;
+      <span style={{ background: "var(--accent)", color: "#fff", borderRadius: 8, padding: "0 4px", fontSize: "0.7rem" }}>n</span>{" "}
+      oído por n pasarelas
+    </>
+  );
+}
+
 /** Encuadra el mapa a los marcadores solo en la primera carga de datos. */
 function FitOnFirstData({ summaries }: { summaries: NodeSummaryOut[] }) {
   const map = useMap();
@@ -154,9 +201,52 @@ function FitOnFirstData({ summaries }: { summaries: NodeSummaryOut[] }) {
   return null;
 }
 
-export function MapView({ summaries, gatewayNodeIds, onShowDetail }: Props) {
+export function MapView({ summaries, gatewayNodeIds, onShowDetail, fill = false }: Props) {
   const withPosition = useMemo(() => summaries.filter((s) => s.last_position), [summaries]);
   const withoutPosition = summaries.length - withPosition.length;
+
+  const map = (
+    <MapContainer
+      center={[40.4168, -3.7038]}
+      zoom={12}
+      preferCanvas
+      zoomControl={!fill}
+      style={fill ? { height: "100%", width: "100%", background: "var(--bg)" } : { height: "70vh", borderRadius: 6 }}
+    >
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      <AutoResize />
+      <FitOnFirstData summaries={withPosition} />
+      <MarkerClusterGroup chunkedLoading maxClusterRadius={50}>
+        {withPosition.map((s) => (
+          <NodeMarker
+            key={s.node.node_id}
+            summary={s}
+            isGateway={gatewayNodeIds.has(s.node.node_id)}
+            onShowDetail={onShowDetail}
+          />
+        ))}
+      </MarkerClusterGroup>
+    </MapContainer>
+  );
+
+  if (fill) {
+    // Lienzo del Centro de Operaciones: overlays en las esquinas (§5.1)
+    return (
+      <div style={{ position: "relative", height: "100%", width: "100%" }}>
+        {map}
+        <div style={{ ...overlayStyle, top: 10, left: 10 }}>
+          {withPosition.length} nodos en el mapa
+          {withoutPosition > 0 && ` · ${withoutPosition} sin posición`}
+        </div>
+        <div style={{ ...overlayStyle, bottom: 10, left: 10 }}>
+          <Legend />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.card}>
@@ -167,34 +257,9 @@ export function MapView({ summaries, gatewayNodeIds, onShowDetail }: Props) {
           {withoutPosition > 0 && ` · ${withoutPosition} sin posición`}
         </span>
       </div>
-      <MapContainer
-        center={[40.4168, -3.7038]}
-        zoom={12}
-        preferCanvas
-        style={{ height: "70vh", borderRadius: 6 }}
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        <FitOnFirstData summaries={withPosition} />
-        <MarkerClusterGroup chunkedLoading maxClusterRadius={50}>
-          {withPosition.map((s) => (
-            <NodeMarker
-              key={s.node.node_id}
-              summary={s}
-              isGateway={gatewayNodeIds.has(s.node.node_id)}
-              onShowDetail={onShowDetail}
-            />
-          ))}
-        </MarkerClusterGroup>
-      </MapContainer>
+      {map}
       <div style={{ ...styles.dim, marginTop: "0.5rem", fontSize: "0.8rem" }}>
-        <span style={{ color: COLOR_ONLINE }}>●</span> online&nbsp;&nbsp;
-        <span style={{ color: COLOR_OFFLINE }}>●</span> offline&nbsp;&nbsp;
-        <span style={{ color: COLOR_GATEWAY }}>◆</span> pasarela&nbsp;&nbsp;
-        <span style={{ background: "var(--accent)", color: "#fff", borderRadius: 8, padding: "0 4px", fontSize: "0.7rem" }}>n</span>{" "}
-        oído por n pasarelas
+        <Legend />
       </div>
     </div>
   );

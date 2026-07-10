@@ -18,10 +18,7 @@ import { t } from "../../tokens";
  */
 
 const barStyle: CSSProperties = {
-  position: "fixed",
-  left: 0,
-  right: 0,
-  bottom: 0,
+  flexShrink: 0,
   height: "var(--statusbar-height)",
   display: "flex",
   alignItems: "center",

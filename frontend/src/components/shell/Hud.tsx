@@ -50,7 +50,7 @@ export function Hud({
   gateways: GatewayOut[];
   alerts: AlertOut[];
   activeOps: number;
-  onGoTo: (view: "dashboard" | "nodes" | "gateways" | "alerts" | "operations") => void;
+  onGoTo: (view: "ops" | "nodes" | "gateways" | "alerts" | "operations") => void;
 }) {
   const enabled = gateways.filter((g) => g.enabled && g.deleted_at == null);
   const connected = enabled.filter((g) => g.status === "connected").length;
@@ -61,7 +61,7 @@ export function Hud({
 
   return (
     <div style={hudStyle} title="Constantes vitales de la red">
-      <button style={itemStyle} onClick={() => onGoTo("dashboard")} title="Salud global de la red">
+      <button style={itemStyle} onClick={() => onGoTo("ops")} title="Salud global de la red">
         <span style={{ color: healthColor(status), fontSize: 10 }}>██</span>
         <span style={{ color: healthColor(status) }}>{status ? HEALTH_LABEL[status] : "…"}</span>
       </button>

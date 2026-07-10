@@ -366,6 +366,7 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const fetchAlerts = (status?: string, limit = 100) =>
   get<AlertOut[]>(`/alerts?limit=${limit}${status ? `&status=${status}` : ""}`);
+export const ackAlert = (id: number) => send<AlertOut>("POST", `/alerts/${id}/ack`);
 export const fetchAlertRules = () => get<AlertRuleOut[]>("/alert-rules");
 export const patchAlertRule = (id: number, changes: Partial<AlertRuleOut>) =>
   send<AlertRuleOut>("PATCH", `/alert-rules/${id}`, changes);
