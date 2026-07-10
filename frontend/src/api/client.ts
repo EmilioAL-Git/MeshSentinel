@@ -752,15 +752,69 @@ export interface NocEvent {
   payload: Record<string, unknown>;
 }
 
-export function openEventsSocket(onEvent: (e: NocEvent) => void): WebSocket {
+/**
+ * Estado de la conexión de eventos, de primera clase para la UI (v0.7 §11.2):
+ * antes el socket moría en silencio y la interfaz se quedaba congelada sin
+ * avisar. `disconnectedAt` permite mostrar "datos congelados desde HH:MM:SS".
+ */
+export interface EventsSocketStatus {
+  state: "connecting" | "connected" | "reconnecting";
+  /** Instante de la última desconexión (null si nunca se ha caído). */
+  disconnectedAt: Date | null;
+}
+
+export interface EventsSocketHandle {
+  close: () => void;
+}
+
+export function openEventsSocket(
+  onEvent: (e: NocEvent) => void,
+  onStatus?: (s: EventsSocketStatus) => void,
+): EventsSocketHandle {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${window.location.host}/ws/events`);
-  ws.onmessage = (msg) => {
-    try {
-      onEvent(JSON.parse(msg.data));
-    } catch {
-      // evento malformado: se ignora
-    }
+  const url = `${proto}://${window.location.host}/ws/events`;
+  let ws: WebSocket | null = null;
+  let closedByClient = false;
+  let retryTimer: number | null = null;
+  let retryDelayMs = 1_000;
+  let everConnected = false;
+  let disconnectedAt: Date | null = null;
+
+  const connect = () => {
+    onStatus?.({ state: everConnected ? "reconnecting" : "connecting", disconnectedAt });
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      everConnected = true;
+      retryDelayMs = 1_000;
+      disconnectedAt = null;
+      onStatus?.({ state: "connected", disconnectedAt: null });
+    };
+    ws.onmessage = (msg) => {
+      try {
+        onEvent(JSON.parse(msg.data));
+      } catch {
+        // evento malformado: se ignora
+      }
+    };
+    // onerror siempre viene seguido de onclose: la reconexión vive solo ahí
+    ws.onclose = () => {
+      if (closedByClient) return;
+      if (disconnectedAt == null) disconnectedAt = new Date();
+      onStatus?.({ state: "reconnecting", disconnectedAt });
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        connect();
+      }, retryDelayMs);
+      retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
+    };
   };
-  return ws;
+
+  connect();
+  return {
+    close: () => {
+      closedByClient = true;
+      if (retryTimer != null) window.clearTimeout(retryTimer);
+      ws?.close();
+    },
+  };
 }

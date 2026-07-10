@@ -24,18 +24,18 @@ import { styles } from "../styles";
 import { coerceValue, displayValue, FieldControl, readCurrentValue, RISK_STYLE } from "./ConfigEditor";
 
 const input: CSSProperties = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 6,
   padding: "0.3rem 0.5rem",
 };
 const btn: CSSProperties = { ...input, cursor: "pointer" };
 
 const DIFF_COLOR: Record<string, string> = {
-  equal: "#3fb950",
-  different: "#e3b341",
-  unknown: "#8b949e",
+  equal: "var(--ok)",
+  different: "var(--warn)",
+  unknown: "var(--text-dim)",
 };
 const DIFF_LABEL: Record<string, string> = {
   equal: "igual",
@@ -226,7 +226,7 @@ function ProfileEditor({
         {Object.keys(groups).map((group) => (
           <button
             key={group}
-            style={{ ...btn, background: activeGroup === group ? "#1f6feb" : "transparent" }}
+            style={{ ...btn, background: activeGroup === group ? "var(--accent)" : "transparent" }}
             onClick={() => {
               setActiveGroup(group);
               const first = groups[group][0];
@@ -247,8 +247,8 @@ function ProfileEditor({
               key={sectionName}
               style={{
                 ...btn,
-                background: activeSection === sectionName ? "#30363d" : "transparent",
-                borderColor: managed > 0 ? "#e3b341" : "#30363d",
+                background: activeSection === sectionName ? "var(--border)" : "transparent",
+                borderColor: managed > 0 ? "var(--warn)" : "var(--border)",
                 fontSize: "0.8rem",
               }}
               onClick={() => setActiveSection(sectionName)}
@@ -304,7 +304,7 @@ function ProfileEditor({
           parte del perfil.
         </span>
         <button
-          style={{ ...btn, marginLeft: "auto", background: canSave ? "#1f6feb" : "transparent" }}
+          style={{ ...btn, marginLeft: "auto", background: canSave ? "var(--accent)" : "transparent" }}
           disabled={!canSave || save.isPending}
           onClick={() => save.mutate()}
         >
@@ -341,7 +341,7 @@ function ComparePanel({
 
   const c = compare.data;
   return (
-    <div style={{ border: "1px solid #30363d", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
+    <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
         <h3 style={{ margin: 0 }}>Comparar con nodo</h3>
         <NodeSelect value={nodeId} onChange={setNodeId} options={summaries} showOnlineStatus />
@@ -463,7 +463,7 @@ function SyncPanel({
   };
 
   return (
-    <div style={{ border: "1px solid #30363d", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
+    <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
         <h3 style={{ margin: 0 }}>Sincronizar nodos</h3>
         <select style={input} value={version} onChange={(e) => { setVersion(e.target.value); setPreview(null); }}>
@@ -499,7 +499,7 @@ function SyncPanel({
             key={s.node.node_id}
             style={{
               display: "flex", gap: "0.3rem", alignItems: "center", cursor: "pointer",
-              border: "1px solid " + (checked.has(s.node.node_id) ? "#1f6feb" : "#30363d"),
+              border: "1px solid " + (checked.has(s.node.node_id) ? "var(--accent)" : "var(--border)"),
               borderRadius: 12, padding: "0.1rem 0.6rem", fontSize: "0.85rem",
             }}
           >
@@ -515,7 +515,7 @@ function SyncPanel({
       </div>
 
       <button
-        style={{ ...btn, background: checked.size > 0 ? "#1f6feb" : "transparent" }}
+        style={{ ...btn, background: checked.size > 0 ? "var(--accent)" : "transparent" }}
         disabled={checked.size === 0 || doPreview.isPending}
         onClick={() => doPreview.mutate()}
       >
@@ -539,7 +539,7 @@ function SyncPanel({
                   <span style={styles.mono}>{p.display_name}</span> — {p.change_count} cambio
                   {p.change_count === 1 ? "" : "s"} en {Object.keys(p.sections_to_apply).join(", ")}
                   {p.warnings.length > 0 && (
-                    <span style={{ color: "#d29922" }}> · {p.warnings.join("; ")}</span>
+                    <span style={{ color: "var(--warn)" }}> · {p.warnings.join("; ")}</span>
                   )}
                 </li>
               ))}
@@ -562,7 +562,7 @@ function SyncPanel({
               </p>
               <input style={input} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
               <button
-                style={{ ...btn, marginLeft: 8, background: confirmText === "CONFIRMAR" ? "#1f6feb" : "transparent" }}
+                style={{ ...btn, marginLeft: 8, background: confirmText === "CONFIRMAR" ? "var(--accent)" : "transparent" }}
                 disabled={confirmText !== "CONFIRMAR" || doSync.isPending}
                 onClick={() => doSync.mutate()}
               >
@@ -641,7 +641,7 @@ function ProfileDetail({
               style={{
                 ...btn,
                 fontSize: "0.8rem",
-                background: (viewVersion ?? p.latest_version) === v.version ? "#30363d" : "transparent",
+                background: (viewVersion ?? p.latest_version) === v.version ? "var(--border)" : "transparent",
               }}
               onClick={() => setViewVersion(v.version)}
               title={`${v.comment ?? "sin comentario"} · ${relativeTime(v.created_at)}`}
@@ -764,7 +764,7 @@ export function ProfilesView({
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>Perfiles de configuración</h2>
         <button
-          style={{ ...btn, marginLeft: "auto", background: "#1f6feb" }}
+          style={{ ...btn, marginLeft: "auto", background: "var(--accent)" }}
           onClick={() => setEditor({ kind: "create", initial: {} })}
         >
           + Nuevo perfil
@@ -800,7 +800,7 @@ export function ProfilesView({
                 <td style={styles.td}>
                   {deleteArmed === p.id ? (
                     <button
-                      style={{ ...btn, background: "#b62324" }}
+                      style={{ ...btn, background: "var(--crit)" }}
                       onClick={(e) => { e.stopPropagation(); doDelete.mutate(p.id); }}
                     >
                       ¿Eliminar «{p.name}» y sus versiones?

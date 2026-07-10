@@ -8,29 +8,30 @@ import {
 import { type GatewayOut, type NodeSummaryOut } from "../api/client";
 import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
+import { chipStyle } from "../tokens";
 
 const input: CSSProperties = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 6,
   padding: "0.3rem 0.5rem",
 };
 const btn: CSSProperties = { ...input, cursor: "pointer" };
 
 const SEVERITY_COLOR: Record<ActivitySeverity, string> = {
-  info: "#8b949e",
-  ok: "#3fb950",
-  warn: "#d29922",
-  error: "#f85149",
+  info: "var(--text-dim)",
+  ok: "var(--ok)",
+  warn: "var(--warn)",
+  error: "var(--crit)",
 };
 
 const CATEGORY_COLOR: Record<ActivityCategory, string> = {
-  operacion: "#1f6feb",
-  batch: "#8250df",
-  pasarela: "#1f6f43",
-  alerta: "#b62324",
-  malla: "#57606a",
+  operacion: "var(--accent)",
+  batch: "var(--accent)",
+  pasarela: "var(--ok)",
+  alerta: "var(--crit)",
+  malla: "var(--text-faint)",
 };
 
 const ALL_CATEGORIES = Object.keys(CATEGORY_LABEL) as ActivityCategory[];
@@ -162,18 +163,15 @@ export function ActivityConsole({
                   gap: "0.6rem",
                   alignItems: "baseline",
                   padding: "0.25rem 0",
-                  borderBottom: "1px solid #21262d",
+                  borderBottom: "1px solid var(--border-subtle)",
                 }}
               >
                 <span style={{ ...styles.mono, ...styles.dim, whiteSpace: "nowrap" }}>{e.time}</span>
                 <span
                   style={{
-                    background: CATEGORY_COLOR[e.category],
-                    color: "#fff",
-                    borderRadius: 12,
+                    ...chipStyle(CATEGORY_COLOR[e.category]),
                     padding: "0 0.5rem",
                     fontSize: "0.7rem",
-                    whiteSpace: "nowrap",
                   }}
                 >
                   {CATEGORY_LABEL[e.category]}
@@ -183,12 +181,12 @@ export function ActivityConsole({
                     title={`Pasarela de origen: ${e.gatewayId}`}
                     style={{
                       ...styles.mono,
-                      border: "1px solid #30363d",
+                      border: "1px solid var(--border)",
                       borderRadius: 12,
                       padding: "0 0.4rem",
                       fontSize: "0.7rem",
                       whiteSpace: "nowrap",
-                      color: "#8b949e",
+                      color: "var(--text-dim)",
                     }}
                   >
                     {e.gatewayId}

@@ -3,15 +3,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ACTIVITY_LIMIT, DASHBOARD_ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
 import {
   fetchAlerts,
+  fetchBatch,
+  fetchBatches,
   fetchDashboardSummary,
   fetchGateways,
   fetchGroups,
   fetchHealth,
   fetchNodes,
+  fetchOperations,
+  fetchProfiles,
   fetchTags,
   openEventsSocket,
   setNodeFavorite,
   setNodeIgnored,
+  type EventsSocketStatus,
   type NodeFilterParams,
 } from "./api/client";
 import { ActivityConsole } from "./components/ActivityConsole";
@@ -26,7 +31,11 @@ import { NodeFiltersBar } from "./components/NodeFiltersBar";
 import { NodesTable } from "./components/NodesTable";
 import { OperationsView } from "./components/OperationsView";
 import { ProfilesView } from "./components/ProfilesView";
+import { CommandPalette } from "./components/shell/CommandPalette";
+import { Hud } from "./components/shell/Hud";
+import { StatusBar } from "./components/shell/StatusBar";
 import { styles } from "./styles";
+import { t } from "./tokens";
 
 const DATA_EVENTS = new Set([
   "node.seen",
@@ -51,10 +60,24 @@ type View =
   | "activity"
   | "gateways";
 
+// Vistas de la aplicación: alimenta la navegación y las acciones "Ir a" de ⌘K
+const VIEWS: { id: View; label: string }[] = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "nodes", label: "Nodos" },
+  { id: "map", label: "Mapa" },
+  { id: "alerts", label: "Alertas" },
+  { id: "operations", label: "Operaciones" },
+  { id: "config", label: "Configuración" },
+  { id: "profiles", label: "Perfiles" },
+  { id: "batches", label: "Batches" },
+  { id: "activity", label: "Actividad" },
+  { id: "gateways", label: "Gateways" },
+];
+
 const selBtn = {
   background: "transparent",
-  color: "#e6edf3",
-  border: "1px solid #30363d",
+  color: "var(--text)",
+  border: "1px solid var(--border)",
   borderRadius: 6,
   padding: "0.2rem 0.7rem",
   cursor: "pointer",
@@ -66,9 +89,9 @@ function NavTab({ active, label, onClick }: { active: boolean; label: string; on
     <button
       onClick={onClick}
       style={{
-        background: active ? "#1f6feb" : "transparent",
-        color: "#e6edf3",
-        border: "1px solid " + (active ? "#1f6feb" : "#30363d"),
+        background: active ? "var(--accent)" : "transparent",
+        color: "var(--text)",
+        border: "1px solid " + (active ? "var(--accent)" : "var(--border)"),
         borderRadius: 6,
         padding: "0.35rem 1rem",
         cursor: "pointer",
@@ -105,7 +128,33 @@ export default function App() {
     queryFn: () => fetchAlerts(undefined, 100),
     refetchInterval: 30_000,
   });
+  // Soporte del shell v0.7 (HUD + barra inferior): cola/actividad admin y lote
+  // en curso. Las claves coinciden con las que ya invalida el handler del WS.
+  const operations = useQuery({
+    queryKey: ["operations", "shell"],
+    queryFn: () => fetchOperations(undefined, 200),
+    refetchInterval: 30_000,
+  });
+  const runningBatches = useQuery({
+    queryKey: ["batches", "running"],
+    queryFn: () => fetchBatches({ status: "running", limit: 5 }),
+    refetchInterval: 30_000,
+  });
+  const runningBatchId = runningBatches.data?.[0]?.id;
+  const runningBatch = useQuery({
+    queryKey: ["batch", runningBatchId],
+    queryFn: () => fetchBatch(runningBatchId!),
+    enabled: runningBatchId != null,
+    refetchInterval: 10_000,
+  });
   const [view, setView] = useState<View>("dashboard");
+  const [wsStatus, setWsStatus] = useState<EventsSocketStatus>({
+    state: "connecting",
+    disconnectedAt: null,
+  });
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // Perfiles: solo se cargan cuando la paleta los necesita
+  const profiles = useQuery({ queryKey: ["profiles"], queryFn: fetchProfiles, enabled: paletteOpen });
   const [selected, setSelected] = useState<string | null>(null);
   // Selección múltiple para batches (M2)
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
@@ -159,7 +208,7 @@ export default function App() {
           queryClient.invalidateQueries({ queryKey: ["batch-ops"] });
         }, 2000);
       }
-    });
+    }, setWsStatus);
 
     const flush = window.setInterval(() => {
       if (pending.length === 0) return;
@@ -177,6 +226,27 @@ export default function App() {
       if (invalidateTimer.current != null) window.clearTimeout(invalidateTimer.current);
     };
   }, [queryClient]);
+
+  // Al recuperar el WS tras una caída, todo puede estar obsoleto: refresco único
+  const prevWsState = useRef(wsStatus.state);
+  useEffect(() => {
+    if (prevWsState.current === "reconnecting" && wsStatus.state === "connected") {
+      queryClient.invalidateQueries();
+    }
+    prevWsState.current = wsStatus.state;
+  }, [wsStatus.state, queryClient]);
+
+  // Búsqueda global: Ctrl+K / ⌘K en cualquier vista (v0.7 §10)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const summaries = nodes.data ?? [];
   const filteredSummaries = filteredNodes.data ?? [];
@@ -220,37 +290,102 @@ export default function App() {
     filteredSummaries.find((s) => s.node.node_id === selected) ??
     summaries.find((s) => s.node.node_id === selected);
 
+  const activeOps = (operations.data ?? []).filter(
+    (o) => o.status === "pending" || o.status === "queued" || o.status === "running",
+  ).length;
+
   return (
-    <div style={styles.page}>
-      <div style={{ display: "flex", alignItems: "center", gap: "1.5rem", marginBottom: "1rem" }}>
-        <h1 style={{ margin: 0 }}>Meshtastic NOC</h1>
-        <nav style={{ display: "flex", gap: "0.5rem" }}>
-          <NavTab active={view === "dashboard"} label="Dashboard" onClick={() => setView("dashboard")} />
-          <NavTab active={view === "nodes"} label="Nodos" onClick={() => setView("nodes")} />
-          <NavTab active={view === "map"} label="Mapa" onClick={() => setView("map")} />
-          <NavTab
-            active={view === "alerts"}
-            label={activeAlertCount > 0 ? `Alertas (${activeAlertCount})` : "Alertas"}
-            onClick={() => setView("alerts")}
-          />
-          <NavTab active={view === "operations"} label="Operaciones" onClick={() => setView("operations")} />
-          <NavTab active={view === "config"} label="Configuración" onClick={() => setView("config")} />
-          <NavTab active={view === "profiles"} label="Perfiles" onClick={() => setView("profiles")} />
-          <NavTab active={view === "batches"} label="Batches" onClick={() => setView("batches")} />
-          <NavTab active={view === "activity"} label="Actividad" onClick={() => setView("activity")} />
-          <NavTab active={view === "gateways"} label="Gateways" onClick={() => setView("gateways")} />
-        </nav>
-        <span style={{ marginLeft: "auto" }}>
-          Backend:{" "}
-          {health.isError ? (
-            <span style={styles.bad}>inaccesible</span>
-          ) : (
-            <span style={health.data?.status === "ok" ? styles.ok : styles.bad}>
-              {health.data?.status ?? "…"}
-            </span>
-          )}
-        </span>
+    <div style={{ ...styles.page, paddingBottom: "calc(var(--statusbar-height) + 1.5rem)" }}>
+      {/* Cabecera del shell v0.7 (§3.1): identidad + ⌘K + HUD. La fila de
+          pestañas es transitoria hasta que el Centro llegue en v0.7.1. */}
+      <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", marginBottom: "0.75rem" }}>
+        <h1 style={{ margin: 0, fontSize: "1.15rem", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>
+          ⌬ Meshtastic NOC
+        </h1>
+        <button
+          onClick={() => setPaletteOpen(true)}
+          title="Búsqueda global (Ctrl+K / ⌘K)"
+          style={{
+            background: t.bg,
+            color: t.textDim,
+            border: `1px solid ${t.border}`,
+            borderRadius: 6,
+            padding: "0.3rem 0.9rem",
+            cursor: "pointer",
+            fontSize: "0.85rem",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            minWidth: 220,
+          }}
+        >
+          <span>🔍 Buscar…</span>
+          <span style={{ marginLeft: "auto", fontFamily: t.fontMono, fontSize: "0.75rem" }}>⌘K</span>
+        </button>
+        <span style={{ marginLeft: "auto" }} />
+        <Hud
+          summary={dashboard.data}
+          gateways={gateways.data ?? []}
+          alerts={alerts.data ?? []}
+          activeOps={activeOps}
+          onGoTo={setView}
+        />
       </div>
+      <nav style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+        <NavTab active={view === "dashboard"} label="Dashboard" onClick={() => setView("dashboard")} />
+        <NavTab active={view === "nodes"} label="Nodos" onClick={() => setView("nodes")} />
+        <NavTab active={view === "map"} label="Mapa" onClick={() => setView("map")} />
+        <NavTab
+          active={view === "alerts"}
+          label={activeAlertCount > 0 ? `Alertas (${activeAlertCount})` : "Alertas"}
+          onClick={() => setView("alerts")}
+        />
+        <NavTab active={view === "operations"} label="Operaciones" onClick={() => setView("operations")} />
+        <NavTab active={view === "config"} label="Configuración" onClick={() => setView("config")} />
+        <NavTab active={view === "profiles"} label="Perfiles" onClick={() => setView("profiles")} />
+        <NavTab active={view === "batches"} label="Batches" onClick={() => setView("batches")} />
+        <NavTab active={view === "activity"} label="Actividad" onClick={() => setView("activity")} />
+        <NavTab active={view === "gateways"} label="Gateways" onClick={() => setView("gateways")} />
+      </nav>
+
+      {/* WS caído = estado de primera clase (§11.2): aviso fino, nunca silencio */}
+      {wsStatus.state === "reconnecting" && (
+        <div
+          style={{
+            background: t.warnTint,
+            border: `1px solid ${t.warn}`,
+            color: t.warn,
+            borderRadius: 6,
+            padding: "0.35rem 0.8rem",
+            marginBottom: "0.75rem",
+            fontSize: "0.85rem",
+          }}
+        >
+          Reconectando con el servidor de eventos — datos congelados desde{" "}
+          {wsStatus.disconnectedAt?.toLocaleTimeString("es-ES", { hour12: false }) ?? "…"}
+        </div>
+      )}
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        summaries={summaries}
+        gateways={gateways.data ?? []}
+        tags={tags.data ?? []}
+        groups={groups.data ?? []}
+        profiles={profiles.data ?? []}
+        views={VIEWS}
+        onNavigate={(v) => setView(v as View)}
+        onOpenNode={showDetail}
+        onFilterTag={(tagName) => {
+          setFilters({ tag: tagName });
+          setView("nodes");
+        }}
+        onFilterGroup={(groupId) => {
+          setFilters({ group_id: groupId });
+          setView("nodes");
+        }}
+      />
 
       {view === "dashboard" && (
         <Dashboard
@@ -371,7 +506,7 @@ export default function App() {
                   Limpiar
                 </button>
                 <button
-                  style={{ ...selBtn, background: checkedIds.size > 0 ? "#1f6feb" : "transparent" }}
+                  style={{ ...selBtn, background: checkedIds.size > 0 ? "var(--accent)" : "transparent" }}
                   disabled={checkedIds.size === 0}
                   onClick={() => setWizardOpen(true)}
                 >
@@ -421,6 +556,17 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <StatusBar
+        wsStatus={wsStatus}
+        backendOk={!health.isError && health.data?.status === "ok"}
+        summary={dashboard.data}
+        gateways={gateways.data ?? []}
+        alerts={alerts.data ?? []}
+        operations={operations.data ?? []}
+        runningBatch={runningBatch.data}
+        onGoTo={setView}
+      />
     </div>
   );
 }

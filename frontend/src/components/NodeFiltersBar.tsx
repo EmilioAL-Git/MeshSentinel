@@ -3,9 +3,9 @@ import type { GatewayOut, GroupOut, NodeFilterParams, TagOut } from "../api/clie
 import { styles } from "../styles";
 
 const input: CSSProperties = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 6,
   padding: "0.3rem 0.5rem",
 };

@@ -13,17 +13,18 @@ import {
 } from "../api/client";
 import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
+import { chipStyle } from "../tokens";
 
 const STATUS_COLOR: Record<OperationStatus, string> = {
-  pending: "#8b949e",
-  queued: "#1f4c8f",
-  running: "#1f6feb",
-  succeeded: "#1f6f43",
-  succeeded_unconfirmed: "#8250df",
-  verify_failed: "#cf222e",
-  failed: "#b62324",
-  timeout: "#9e6a03",
-  cancelled: "#57606a",
+  pending: "var(--text-dim)",
+  queued: "var(--accent)",
+  running: "var(--accent)",
+  succeeded: "var(--ok)",
+  succeeded_unconfirmed: "var(--warn)",
+  verify_failed: "var(--crit)",
+  failed: "var(--crit)",
+  timeout: "var(--warn)",
+  cancelled: "var(--text-faint)",
 };
 
 const STATUS_LABEL: Partial<Record<OperationStatus, string>> = {
@@ -51,9 +52,9 @@ const ACK_ONLY_NOTE =
   "\"sin confirmar\" es su techo máximo posible, no un problema — nunca llegará a \"succeeded\".";
 
 const input: CSSProperties = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 6,
   padding: "0.3rem 0.5rem",
 };
@@ -229,7 +230,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
 
         {/* Confirmación explícita para operaciones de escritura (M1.3) */}
         {confirming && spec?.requires_confirmation && (
-          <div style={{ border: "1px solid #9e6a03", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
+          <div style={{ border: "1px solid var(--warn)", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
             <p style={{ marginTop: 0 }}>
               ⚠️ Vas a <strong>modificar</strong> el nodo <strong>{nodeName(nodeId)}</strong> con{" "}
               <span style={styles.mono}>{opType}</span> y parámetros{" "}
@@ -311,13 +312,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
                     <td style={{ ...styles.td, ...styles.mono }}>{op.gateway_id}</td>
                     <td style={styles.td}>
                       <span
-                        style={{
-                          background: STATUS_COLOR[op.status],
-                          color: "#fff",
-                          borderRadius: 12,
-                          padding: "0.1rem 0.6rem",
-                          fontSize: "0.75rem",
-                        }}
+                        style={chipStyle(STATUS_COLOR[op.status])}
                         title={
                           op.status === "succeeded_unconfirmed" && ACK_ONLY_NO_VERIFY.has(op.operation_type)
                             ? ACK_ONLY_NOTE

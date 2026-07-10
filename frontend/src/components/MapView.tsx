@@ -12,9 +12,9 @@ interface Props {
   onShowDetail: (nodeId: string) => void;
 }
 
-const COLOR_ONLINE = "#3fb950";
-const COLOR_OFFLINE = "#8b949e";
-const COLOR_GATEWAY = "#d29922";
+const COLOR_ONLINE = "var(--ok)";
+const COLOR_OFFLINE = "var(--text-dim)";
+const COLOR_GATEWAY = "var(--warn)";
 
 // Los iconos se cachean: crear divIcons nuevos en cada render fuerza a Leaflet
 // a recrear los elementos DOM de todos los marcadores.
@@ -31,13 +31,13 @@ function nodeIcon(online: boolean, isGateway: boolean, gatewayCount: number): L.
     // Badge de redundancia (M6.2): nº de pasarelas que oyen al nodo ahora
     const badge =
       gatewayCount > 1
-        ? `<div style="position:absolute;top:-7px;right:-7px;background:#1f6feb;color:#fff;` +
+        ? `<div style="position:absolute;top:-7px;right:-7px;background:var(--accent);color:#fff;` +
           `border-radius:8px;font-size:9px;line-height:12px;min-width:12px;text-align:center;` +
-          `padding:0 2px;border:1px solid #0d1117">${gatewayCount}</div>`
+          `padding:0 2px;border:1px solid var(--bg)">${gatewayCount}</div>`
         : "";
     icon = L.divIcon({
       className: "",
-      html: `<div style="position:relative"><div style="${shape}background:${color};border:2px solid #0d1117;box-shadow:0 0 4px rgba(0,0,0,.6)"></div>${badge}</div>`,
+      html: `<div style="position:relative"><div style="${shape}background:${color};border:2px solid var(--bg);box-shadow:0 0 4px rgba(0,0,0,.6)"></div>${badge}</div>`,
       iconSize: [18, 18],
       iconAnchor: [9, 9],
     });
@@ -72,7 +72,7 @@ const NodeMarker = memo(
       >
         <Popup>
           <div style={{ minWidth: 200, fontSize: "0.85rem" }}>
-            {node.is_favorite && <span style={{ color: "#e3b341" }}>★ </span>}
+            {node.is_favorite && <span style={{ color: "var(--warn)" }}>★ </span>}
             <strong>{node.short_name ?? "?"}</strong> {node.long_name ?? ""}{" "}
             {isGateway && <em>(pasarela)</em>}
             <table style={{ width: "100%", marginTop: 4 }}>
@@ -193,7 +193,7 @@ export function MapView({ summaries, gatewayNodeIds, onShowDetail }: Props) {
         <span style={{ color: COLOR_ONLINE }}>●</span> online&nbsp;&nbsp;
         <span style={{ color: COLOR_OFFLINE }}>●</span> offline&nbsp;&nbsp;
         <span style={{ color: COLOR_GATEWAY }}>◆</span> pasarela&nbsp;&nbsp;
-        <span style={{ background: "#1f6feb", color: "#fff", borderRadius: 8, padding: "0 4px", fontSize: "0.7rem" }}>n</span>{" "}
+        <span style={{ background: "var(--accent)", color: "#fff", borderRadius: 8, padding: "0 4px", fontSize: "0.7rem" }}>n</span>{" "}
         oído por n pasarelas
       </div>
     </div>

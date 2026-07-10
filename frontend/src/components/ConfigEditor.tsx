@@ -20,15 +20,15 @@ interface Props {
 }
 
 export const RISK_STYLE: Record<string, CSSProperties> = {
-  SAFE: { background: "#1f6f43", color: "#fff" },
-  WARNING: { background: "#9e6a03", color: "#fff" },
-  DANGEROUS: { background: "#b62324", color: "#fff" },
+  SAFE: { background: "var(--ok-tint)", color: "var(--ok)", border: "1px solid var(--ok)" },
+  WARNING: { background: "var(--warn-tint)", color: "var(--warn)", border: "1px solid var(--warn)" },
+  DANGEROUS: { background: "var(--crit-tint)", color: "var(--crit)", border: "1px solid var(--crit)" },
 };
 
 const input: CSSProperties = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 6,
   padding: "0.3rem 0.5rem",
   minWidth: 180,
@@ -375,7 +375,7 @@ export function ConfigEditor({ summaries }: Props) {
                 key={group}
                 style={{
                   ...btn,
-                  background: activeGroup === group ? "#1f6feb" : "transparent",
+                  background: activeGroup === group ? "var(--accent)" : "transparent",
                 }}
                 onClick={() => {
                   setActiveGroup(group);
@@ -398,8 +398,8 @@ export function ConfigEditor({ summaries }: Props) {
                   key={sectionName}
                   style={{
                     ...btn,
-                    background: activeSection === sectionName ? "#30363d" : "transparent",
-                    borderColor: hasEdits ? "#e3b341" : "#30363d",
+                    background: activeSection === sectionName ? "var(--border)" : "transparent",
+                    borderColor: hasEdits ? "var(--warn)" : "var(--border)",
                     fontSize: "0.8rem",
                   }}
                   onClick={() => setActiveSection(sectionName)}
@@ -456,7 +456,7 @@ export function ConfigEditor({ summaries }: Props) {
                 Descartar
               </button>{" "}
               <button
-                style={{ ...btn, background: changes.length ? "#1f6feb" : "transparent" }}
+                style={{ ...btn, background: changes.length ? "var(--accent)" : "transparent" }}
                 disabled={changes.length === 0 || apply.isPending}
                 onClick={() => setConfirmOpen(true)}
               >
@@ -489,7 +489,7 @@ export function ConfigEditor({ summaries }: Props) {
             </table>
           )}
           {confirmOpen && (
-            <div style={{ border: "1px solid #9e6a03", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
+            <div style={{ border: "1px solid var(--warn)", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
               <p style={{ marginTop: 0 }}>
                 Vas a aplicar <strong>{changes.length}</strong> cambio{changes.length === 1 ? "" : "s"} sobre{" "}
                 <strong>{nodeId}</strong>. Se encolará una operación por sección modificada, cada una

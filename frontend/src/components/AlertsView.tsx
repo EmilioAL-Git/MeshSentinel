@@ -14,9 +14,9 @@ import {
 import { styles } from "../styles";
 
 const SEVERITY_STYLE: Record<Severity, CSSProperties> = {
-  INFO: { background: "#1f4c8f", color: "#fff" },
-  WARNING: { background: "#9e6a03", color: "#fff" },
-  CRITICAL: { background: "#b62324", color: "#fff" },
+  INFO: { background: "transparent", color: "var(--text-dim)", border: "1px solid var(--border)" },
+  WARNING: { background: "var(--warn-tint)", color: "var(--warn)", border: "1px solid var(--warn)" },
+  CRITICAL: { background: "var(--crit-tint)", color: "var(--crit)", border: "1px solid var(--crit)" },
 };
 
 const badge = (extra: CSSProperties): CSSProperties => ({
@@ -95,9 +95,9 @@ export function AlertsView() {
   const resolved = all.filter((a) => a.status === "resolved").slice(0, 20);
 
   const inputStyle: CSSProperties = {
-    background: "#0d1117",
-    border: "1px solid #30363d",
-    color: "#e6edf3",
+    background: "var(--bg)",
+    border: "1px solid var(--border)",
+    color: "var(--text)",
     borderRadius: 6,
     padding: "0.3rem 0.5rem",
   };

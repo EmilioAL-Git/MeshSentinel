@@ -1,0 +1,153 @@
+/*
+ * Tokens de diseño de la v0.7 (Centro de Operaciones).
+ * Referencia normativa: docs/design/v0.7-centro-de-operaciones.md §14.
+ * Regla central: si un color no significa nada, es gris. Los semánticos
+ * (--ok/--warn/--crit) son exclusivos de estado; --accent es interacción.
+ * Los valores hex deben mantenerse sincronizados con src/tokens.ts.
+ */
+
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Fondos */
+  --bg: #0b0e14;
+  --surface: #11151d;
+  --surface-2: #171c26;
+  --border: #232a36;
+  --border-subtle: #1a202b;
+
+  /* Texto */
+  --text: #d7dee8;
+  --text-dim: #8b96a5;
+  --text-faint: #5c6675;
+
+  /* Semánticos (uso exclusivo: estado) */
+  --ok: #2ea06a;
+  --warn: #d9a03c;
+  --crit: #e5484d;
+
+  /* Interacción (nunca estado) */
+  --accent: #4c8dff;
+
+  /* Fondos teñidos (~12 %) para semáforo/alertas */
+  --ok-tint: rgba(46, 160, 106, 0.12);
+  --warn-tint: rgba(217, 160, 60, 0.12);
+  --crit-tint: rgba(229, 72, 77, 0.12);
+  --accent-tint: rgba(76, 141, 255, 0.12);
+
+  /* Tipografía */
+  --font-ui: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Métricas del shell (§3) */
+  --header-height: 44px;
+  --statusbar-height: 28px;
+
+  /* Espaciado (escala de 4 px) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+}
+
+a {
+  color: var(--accent);
+}
+
+/* Foco visible para navegación por teclado (principio 7/8) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Scrollbars discretos para sesiones largas */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Pulso del punto "conectado" de la barra inferior — junto con los halos de
+   alerta del mapa, única animación permanente permitida (§14.5) */
+@keyframes noc-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.noc-pulse {
+  animation: noc-pulse 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .noc-pulse {
+    animation: none;
+  }
+  * {
+    transition: none !important;
+  }
+}

@@ -19,34 +19,35 @@ import {
 } from "../api/client";
 import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
+import { chipStyle } from "../tokens";
 
 const input: CSSProperties = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 6,
   padding: "0.3rem 0.5rem",
 };
 const btn: CSSProperties = { ...input, cursor: "pointer" };
 
 const BATCH_STATUS_COLOR: Record<BatchStatus, string> = {
-  running: "#1f6feb",
-  paused: "#9e6a03",
-  cancelled: "#57606a",
-  completed: "#1f6f43",
-  completed_with_errors: "#b62324",
+  running: "var(--accent)",
+  paused: "var(--warn)",
+  cancelled: "var(--text-faint)",
+  completed: "var(--ok)",
+  completed_with_errors: "var(--crit)",
 };
 
 const OP_STATUS_COLOR: Record<string, string> = {
-  pending: "#8b949e",
-  queued: "#1f4c8f",
-  running: "#1f6feb",
-  succeeded: "#1f6f43",
-  succeeded_unconfirmed: "#8250df",
-  verify_failed: "#cf222e",
-  failed: "#b62324",
-  timeout: "#9e6a03",
-  cancelled: "#57606a",
+  pending: "var(--text-dim)",
+  queued: "var(--accent)",
+  running: "var(--accent)",
+  succeeded: "var(--ok)",
+  succeeded_unconfirmed: "var(--warn)",
+  verify_failed: "var(--crit)",
+  failed: "var(--crit)",
+  timeout: "var(--warn)",
+  cancelled: "var(--text-faint)",
 };
 
 function fmtSeconds(s: number | null | undefined): string {
@@ -76,13 +77,9 @@ function batchTypeLabel(operationType: string, params: Record<string, unknown>):
 function StatusChip({ status }: { status: string }) {
   return (
     <span
-      style={{
-        background: OP_STATUS_COLOR[status] ?? BATCH_STATUS_COLOR[status as BatchStatus] ?? "#30363d",
-        color: "#fff",
-        borderRadius: 12,
-        padding: "0.1rem 0.6rem",
-        fontSize: "0.75rem",
-      }}
+      style={chipStyle(
+        OP_STATUS_COLOR[status] ?? BATCH_STATUS_COLOR[status as BatchStatus] ?? "var(--text-dim)",
+      )}
     >
       {status}
     </span>
@@ -285,7 +282,7 @@ export function BatchWizard({
 
       {/* Paso 2: vista previa */}
       {preview && (
-        <div style={{ border: "1px solid #30363d", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
+        <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
           <h3 style={{ marginTop: 0 }}>Simulación (no modifica nada)</h3>
           <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
             <span>Seleccionados: <strong>{preview.total_selected}</strong></span>
@@ -310,7 +307,7 @@ export function BatchWizard({
           )}
           {preview.eligible.some((n) => n.warnings.length > 0) && (
             <div style={{ marginTop: "0.5rem" }}>
-              <strong style={{ color: "#d29922" }}>Advertencias:</strong>
+              <strong style={{ color: "var(--warn)" }}>Advertencias:</strong>
               <ul style={{ margin: "0.2rem 0" }}>
                 {preview.eligible
                   .filter((n) => n.warnings.length > 0)
@@ -330,7 +327,7 @@ export function BatchWizard({
           </p>
           <input style={input} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
           <button
-            style={{ ...btn, marginLeft: 8, background: confirmText === "CONFIRMAR" ? "#1f6feb" : "transparent" }}
+            style={{ ...btn, marginLeft: 8, background: confirmText === "CONFIRMAR" ? "var(--accent)" : "transparent" }}
             disabled={confirmText !== "CONFIRMAR" || preview.eligible_count === 0 || doCreate.isPending}
             onClick={() => doCreate.mutate()}
           >
@@ -411,7 +408,7 @@ function BatchMonitor({
             {(b.status === "running" || b.status === "paused") &&
               (cancelArmed ? (
                 <button
-                  style={{ ...btn, background: "#b62324" }}
+                  style={{ ...btn, background: "var(--crit)" }}
                   onClick={() => { cancel.mutate(); setCancelArmed(false); }}
                 >
                   ¿Cancelar {p.counts["pending"] ?? 0} pendientes?
@@ -423,12 +420,12 @@ function BatchMonitor({
         </div>
 
         {/* Barra de progreso */}
-        <div style={{ background: "#21262d", borderRadius: 8, height: 22, marginTop: "0.8rem", overflow: "hidden" }}>
+        <div style={{ background: "var(--border-subtle)", borderRadius: 8, height: 22, marginTop: "0.8rem", overflow: "hidden" }}>
           <div
             style={{
               width: `${p.percent}%`,
               height: "100%",
-              background: b.status === "completed_with_errors" ? "#b62324" : "#1f6f43",
+              background: b.status === "completed_with_errors" ? "var(--crit)" : "var(--ok)",
               transition: "width 0.5s",
             }}
           />
@@ -454,7 +451,7 @@ function BatchMonitor({
           {Object.entries(p.counts).map(([status, count]) => (
             <button
               key={status}
-              style={{ ...btn, borderColor: opStatusFilter === status ? "#e3b341" : "#30363d", fontSize: "0.8rem" }}
+              style={{ ...btn, borderColor: opStatusFilter === status ? "var(--warn)" : "var(--border)", fontSize: "0.8rem" }}
               onClick={() => setOpStatusFilter(opStatusFilter === status ? "" : status)}
             >
               <StatusChip status={status} /> {count}

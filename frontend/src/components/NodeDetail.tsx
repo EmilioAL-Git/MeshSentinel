@@ -24,6 +24,7 @@ import {
 } from "../api/client";
 import { NodeSelect } from "./NodeSelect";
 import { styles } from "../styles";
+import { chipStyle } from "../tokens";
 
 interface Props {
   nodeId: string;
@@ -40,22 +41,16 @@ const SYNC_STATE_LABEL: Record<RemoteFlagSyncState, string> = {
 };
 
 const SYNC_STATE_COLOR: Record<RemoteFlagSyncState, string> = {
-  pending: "#8b949e",
-  sent: "#1f6feb",
-  confirmed: "#1f6f43",
-  error: "#cf222e",
+  pending: "var(--text-dim)",
+  sent: "var(--accent)",
+  confirmed: "var(--ok)",
+  error: "var(--crit)",
 };
 
 function SyncBadge({ state }: { state: RemoteFlagSyncState }) {
   return (
     <span
-      style={{
-        background: SYNC_STATE_COLOR[state],
-        color: "#fff",
-        borderRadius: 12,
-        padding: "0.1rem 0.6rem",
-        fontSize: "0.75rem",
-      }}
+      style={chipStyle(SYNC_STATE_COLOR[state])}
       title="«Confirmado» = el firmware aceptó la operación (ACK). El NOC no puede releer la NodeDB remota del nodo destino para verificarlo."
     >
       {SYNC_STATE_LABEL[state]}
@@ -65,8 +60,8 @@ function SyncBadge({ state }: { state: RemoteFlagSyncState }) {
 
 const btn: CSSProperties = {
   background: "none",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 6,
   cursor: "pointer",
   padding: "0.2rem 0.6rem",
@@ -285,7 +280,7 @@ export function NodeDetail({ nodeId, summary, summaries = [], onClose }: Props) 
         <h2 style={{ margin: 0 }}>
           <span
             title={n.is_favorite ? "Quitar de favoritos" : "Marcar favorito"}
-            style={{ cursor: "pointer", color: n.is_favorite ? "#e3b341" : "#484f58" }}
+            style={{ cursor: "pointer", color: n.is_favorite ? "var(--warn)" : "var(--text-faint)" }}
             onClick={() => favorite.mutate(!n.is_favorite)}
           >
             {n.is_favorite ? "★" : "☆"}
@@ -298,7 +293,7 @@ export function NodeDetail({ nodeId, summary, summaries = [], onClose }: Props) 
         <span>
           <button
             onClick={() => ignored.mutate(!n.is_ignored)}
-            style={{ ...btn, marginRight: 6, color: n.is_ignored ? "#f85149" : "#e6edf3" }}
+            style={{ ...btn, marginRight: 6, color: n.is_ignored ? "var(--crit)" : "var(--text)" }}
           >
             {n.is_ignored ? "Dejar de ignorar" : "Ignorar"}
           </button>
@@ -341,7 +336,7 @@ export function NodeDetail({ nodeId, summary, summaries = [], onClose }: Props) 
                 <td style={{ ...styles.td, ...styles.mono }}>
                   {l.gateway_id}
                   {l.primary && (
-                    <span title="Pasarela primaria del nodo" style={{ color: "#e3b341", marginLeft: 6 }}>
+                    <span title="Pasarela primaria del nodo" style={{ color: "var(--warn)", marginLeft: 6 }}>
                       ◆ primaria
                     </span>
                   )}
@@ -410,7 +405,7 @@ export function NodeDetail({ nodeId, summary, summaries = [], onClose }: Props) 
           </label>
         ))}
         <input
-          style={{ background: "#0d1117", border: "1px solid #30363d", color: "#e6edf3", borderRadius: 6, padding: "0.2rem 0.4rem", width: 120 }}
+          style={{ background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)", borderRadius: 6, padding: "0.2rem 0.4rem", width: 120 }}
           placeholder="nueva etiqueta"
           value={tagInput}
           onChange={(e) => setTagInput(e.target.value)}
@@ -436,7 +431,7 @@ export function NodeDetail({ nodeId, summary, summaries = [], onClose }: Props) 
           </label>
         ))}
         <input
-          style={{ background: "#0d1117", border: "1px solid #30363d", color: "#e6edf3", borderRadius: 6, padding: "0.2rem 0.4rem", width: 120 }}
+          style={{ background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)", borderRadius: 6, padding: "0.2rem 0.4rem", width: 120 }}
           placeholder="nuevo grupo"
           value={groupInput}
           onChange={(e) => setGroupInput(e.target.value)}

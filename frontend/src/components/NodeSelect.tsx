@@ -5,9 +5,9 @@ import { styles } from "../styles";
 const wrap: CSSProperties = { position: "relative", display: "inline-block" };
 
 const input: CSSProperties = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 6,
   padding: "0.3rem 0.5rem",
   width: "100%",
@@ -19,8 +19,8 @@ const dropdown: CSSProperties = {
   top: "calc(100% + 2px)",
   left: 0,
   zIndex: 20,
-  background: "#161b22",
-  border: "1px solid #30363d",
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
   borderRadius: 6,
   maxHeight: 220,
   overflowY: "auto",
@@ -140,7 +140,7 @@ export function NodeSelect({
               key={s.node.node_id}
               style={{
                 ...optionStyle,
-                background: i === highlight ? "#1f6feb33" : undefined,
+                background: i === highlight ? "var(--accent)33" : undefined,
                 fontWeight: s.node.node_id === value ? 600 : 400,
               }}
               onMouseEnter={() => setHighlight(i)}

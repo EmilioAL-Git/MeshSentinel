@@ -8,6 +8,7 @@ import {
   type NodeSummaryOut,
 } from "../api/client";
 import { styles } from "../styles";
+import { chipStyle, t } from "../tokens";
 import type { ActivityEntry } from "../activity";
 
 interface Props {
@@ -20,9 +21,9 @@ interface Props {
 }
 
 const STATUS_STYLE: Record<string, CSSProperties> = {
-  HEALTHY: { background: "#1f6f43", color: "#fff" },
-  WARNING: { background: "#9e6a03", color: "#fff" },
-  CRITICAL: { background: "#b62324", color: "#fff" },
+  HEALTHY: { background: t.okTint, color: t.ok, border: `1px solid ${t.ok}` },
+  WARNING: { background: t.warnTint, color: t.warn, border: `1px solid ${t.warn}` },
+  CRITICAL: { background: t.critTint, color: t.crit, border: `1px solid ${t.crit}` },
 };
 
 const REASON_LABEL: Record<CriticalReason, string> = {
@@ -67,7 +68,7 @@ function CriticalRow({ node, onShowDetail }: { node: CriticalNodeOut; onShowDeta
         {node.reasons.map((r) => (
           <span
             key={r}
-            style={{ ...styles.badgeOffline, marginRight: 4, background: r === "low_battery" ? "#9e6a03" : "#6e2c31" }}
+            style={{ ...chipStyle(r === "low_battery" ? t.warn : t.crit), marginRight: 4 }}
           >
             {REASON_LABEL[r]}
             {r === "low_battery" && node.battery_level != null ? ` (${node.battery_level}%)` : ""}
@@ -79,7 +80,7 @@ function CriticalRow({ node, onShowDetail }: { node: CriticalNodeOut; onShowDeta
       <td style={styles.td}>
         <button
           onClick={() => onShowDetail(node.node_id)}
-          style={{ background: "none", border: "1px solid #30363d", color: "#e6edf3", borderRadius: 6, cursor: "pointer", padding: "0.15rem 0.5rem" }}
+          style={{ background: "none", border: "1px solid var(--border)", color: "var(--text)", borderRadius: 6, cursor: "pointer", padding: "0.15rem 0.5rem" }}
         >
           Detalle →
         </button>
@@ -133,15 +134,15 @@ export function Dashboard({ summary, loading, activity, favorites, onNavigate, o
       {/* Acceso rápido a favoritos (M1.2) */}
       {favorites.length > 0 && (
         <div style={{ ...styles.card, display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ color: "#e3b341" }}>★ Favoritos:</span>
+          <span style={{ color: "var(--warn)" }}>★ Favoritos:</span>
           {favorites.map((f) => (
             <button
               key={f.node.node_id}
               onClick={() => onShowDetail(f.node.node_id)}
               style={{
                 background: "transparent",
-                border: "1px solid #30363d",
-                color: "#e6edf3",
+                border: "1px solid var(--border)",
+                color: "var(--text)",
                 borderRadius: 12,
                 padding: "0.15rem 0.7rem",
                 cursor: "pointer",
@@ -172,7 +173,7 @@ export function Dashboard({ summary, loading, activity, favorites, onNavigate, o
         <Card
           label={`Batería < ${t.low_battery_percent}%`}
           value={summary.low_battery_count}
-          accent={summary.low_battery_count > 0 ? { color: "#d29922" } : undefined}
+          accent={summary.low_battery_count > 0 ? { color: "var(--warn)" } : undefined}
         />
         <Card
           label="Batería media"
@@ -265,7 +266,7 @@ export function Dashboard({ summary, loading, activity, favorites, onNavigate, o
           ) : (
             <ul style={{ ...styles.mono, listStyle: "none", padding: 0, margin: 0 }}>
               {activity.map((a) => (
-                <li key={a.id} style={{ padding: "0.2rem 0", borderBottom: "1px solid #21262d" }}>
+                <li key={a.id} style={{ padding: "0.2rem 0", borderBottom: "1px solid var(--border-subtle)" }}>
                   <span style={styles.dim}>{a.time}</span> {a.text}
                 </li>
               ))}
@@ -279,8 +280,8 @@ export function Dashboard({ summary, loading, activity, favorites, onNavigate, o
 
 const quickBtn: CSSProperties = {
   background: "transparent",
-  color: "#e6edf3",
-  border: "1px solid #30363d",
+  color: "var(--text)",
+  border: "1px solid var(--border)",
   borderRadius: 6,
   padding: "0.35rem 1rem",
   cursor: "pointer",

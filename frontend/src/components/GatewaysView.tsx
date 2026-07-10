@@ -20,9 +20,9 @@ import {
 import { styles } from "../styles";
 
 const input: CSSProperties = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 6,
   padding: "0.3rem 0.5rem",
 };
@@ -230,7 +230,7 @@ function AddGatewayWizard({
                 key={d.port}
                 style={{
                   display: "flex", gap: "0.6rem", alignItems: "center", cursor: "pointer",
-                  border: "1px solid " + (selectedPort === d.port ? "#1f6feb" : "#30363d"),
+                  border: "1px solid " + (selectedPort === d.port ? "var(--accent)" : "var(--border)"),
                   borderRadius: 6, padding: "0.4rem 0.6rem",
                 }}
               >
@@ -278,7 +278,7 @@ function AddGatewayWizard({
           onChange={(e) => setName(e.target.value)}
         />
         <button
-          style={{ ...btn, marginLeft: "0.5rem", background: testResult?.ok ? "#1f6feb" : "transparent" }}
+          style={{ ...btn, marginLeft: "0.5rem", background: testResult?.ok ? "var(--accent)" : "transparent" }}
           disabled={!testResult?.ok || !name.trim() || save.isPending}
           onClick={() => save.mutate()}
           title={!testResult?.ok ? "Prueba la conexión con éxito antes de guardar" : undefined}
@@ -322,7 +322,7 @@ function GatewayCard({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayS
         <strong>{gateway.name ?? gateway.gateway_id}</strong>
         <span style={styles.dim}>{TRANSPORT_LABEL[gateway.transport] ?? gateway.transport}</span>
         <StatusBadge status={gateway.status} />
-        {!gateway.managed && <span style={{ color: "#d29922" }}>sin configurar</span>}
+        {!gateway.managed && <span style={{ color: "var(--warn)" }}>sin configurar</span>}
         {gateway.managed && !gateway.enabled && <span style={styles.dim}>deshabilitado</span>}
         <span style={{ marginLeft: "auto", ...styles.dim, fontSize: "0.8rem" }}>{expanded ? "▲" : "▼"}</span>
       </div>
@@ -331,16 +331,16 @@ function GatewayCard({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayS
       {stats && (
         <div style={{ display: "flex", gap: "1.2rem", flexWrap: "wrap", marginTop: "0.4rem", fontSize: "0.85rem", ...styles.dim }}>
           <span title="Nodos con escucha activa por esta pasarela">
-            Nodos visibles: <strong style={{ color: "#e6edf3" }}>{stats.nodes_visible}</strong>
+            Nodos visibles: <strong style={{ color: "var(--text)" }}>{stats.nodes_visible}</strong>
           </span>
           <span title="Nodos que solo esta pasarela oye ahora mismo">
-            Exclusivos: <strong style={{ color: "#e6edf3" }}>{stats.nodes_exclusive}</strong>
+            Exclusivos: <strong style={{ color: "var(--text)" }}>{stats.nodes_exclusive}</strong>
           </span>
           <span title="Nodos que también oye otra pasarela">
-            Compartidos: <strong style={{ color: "#e6edf3" }}>{stats.nodes_shared}</strong>
+            Compartidos: <strong style={{ color: "var(--text)" }}>{stats.nodes_shared}</strong>
           </span>
           <span title="Nodos cuya pasarela primaria es esta">
-            Primaria de: <strong style={{ color: "#e6edf3" }}>{stats.primary_for}</strong>
+            Primaria de: <strong style={{ color: "var(--text)" }}>{stats.primary_for}</strong>
           </span>
           <span>Última actividad: {relativeTime(stats.last_heard_at)}</span>
         </div>
@@ -406,7 +406,7 @@ function GatewayCard({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayS
                 {gateway.enabled ? "Deshabilitar" : "Habilitar"}
               </button>
               {deleteArmed ? (
-                <button style={{ ...btn, background: "#b62324" }} onClick={() => doDelete.mutate()}>
+                <button style={{ ...btn, background: "var(--crit)" }} onClick={() => doDelete.mutate()}>
                   ¿Eliminar «{gateway.name}»?
                 </button>
               ) : (
@@ -471,7 +471,7 @@ export function GatewaysView() {
       <div style={{ ...styles.card, display: "flex", alignItems: "center", gap: "0.8rem" }}>
         <h2 style={{ margin: 0 }}>Gateways</h2>
         <button
-          style={{ ...btn, marginLeft: "auto", background: candidates.length > 0 ? "#1f6feb" : "transparent" }}
+          style={{ ...btn, marginLeft: "auto", background: candidates.length > 0 ? "var(--accent)" : "transparent" }}
           disabled={candidates.length === 0}
           onClick={() => candidates.length > 0 && setWizardFor(candidates[0])}
           title={

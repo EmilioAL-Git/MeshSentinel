@@ -1,5 +1,6 @@
 import { activeGatewayCount, type NodeSummaryOut } from "../api/client";
 import { styles } from "../styles";
+import { chipStyle } from "../tokens";
 
 interface Props {
   summaries: NodeSummaryOut[];
@@ -60,7 +61,7 @@ export function NodesTable({
             key={node.node_id}
             style={{
               ...styles.rowHover,
-              background: selected === node.node_id ? "#1c2530" : undefined,
+              background: selected === node.node_id ? "var(--surface-2)" : undefined,
               opacity: node.is_ignored ? 0.55 : 1,
             }}
             onClick={() => onSelect(node.node_id)}
@@ -76,7 +77,7 @@ export function NodesTable({
             <td style={styles.td}>
               <span
                 title={node.is_favorite ? "Quitar de favoritos" : "Marcar favorito"}
-                style={{ cursor: "pointer", color: node.is_favorite ? "#e3b341" : "#484f58" }}
+                style={{ cursor: "pointer", color: node.is_favorite ? "var(--warn)" : "var(--text-faint)" }}
                 onClick={(e) => {
                   e.stopPropagation();
                   onToggleFavorite(node.node_id, !node.is_favorite);
@@ -95,7 +96,7 @@ export function NodesTable({
                 <span
                   key={t.id}
                   style={{
-                    background: t.color ?? "#30363d",
+                    background: t.color ?? "var(--border)",
                     borderRadius: 10,
                     padding: "0.05rem 0.5rem",
                     marginRight: 4,
@@ -126,9 +127,7 @@ export function NodesTable({
                 <span
                   title={`Oído ahora mismo por ${gwCount} pasarelas — detalle en el panel del nodo`}
                   style={{
-                    background: "#1f6feb",
-                    color: "#fff",
-                    borderRadius: 10,
+                    ...chipStyle("var(--accent)"),
                     padding: "0 0.4rem",
                     marginLeft: 6,
                     fontSize: "0.72rem",
