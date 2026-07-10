@@ -104,9 +104,11 @@ function AddGatewayWizard({
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [transportType, setTransportType] = useState<"usb" | "simulated">("usb");
+  const [transportType, setTransportType] = useState<"usb" | "tcp" | "simulated">("usb");
   const [devices, setDevices] = useState<DeviceOut[] | null>(null);
   const [selectedPort, setSelectedPort] = useState("");
+  const [tcpHost, setTcpHost] = useState("");
+  const [tcpPort, setTcpPort] = useState("4403");
   const [simSeed, setSimSeed] = useState(String(suggestSeed(gateways)));
   const [simNodeCount, setSimNodeCount] = useState("12");
   const [simSharedSeed, setSimSharedSeed] = useState("0");
@@ -114,17 +116,16 @@ function AddGatewayWizard({
   const [testResult, setTestResult] = useState<TestConnectionResultOut | null>(null);
   const [name, setName] = useState("");
 
-  const connectionParams = (): Record<string, unknown> =>
-    transportType === "usb"
-      ? selectedPort
-        ? { device: selectedPort }
-        : {}
-      : {
-          seed: Number(simSeed) || 42,
-          node_count: Number(simNodeCount) || 12,
-          shared_seed: Number(simSharedSeed) || 0,
-          shared_node_count: Number(simSharedNodeCount) || 4,
-        };
+  const connectionParams = (): Record<string, unknown> => {
+    if (transportType === "usb") return selectedPort ? { device: selectedPort } : {};
+    if (transportType === "tcp") return { host: tcpHost.trim(), port: Number(tcpPort) || 4403 };
+    return {
+      seed: Number(simSeed) || 42,
+      node_count: Number(simNodeCount) || 12,
+      shared_seed: Number(simSharedSeed) || 0,
+      shared_node_count: Number(simSharedNodeCount) || 4,
+    };
+  };
 
   const discover = useMutation({
     mutationFn: () => discoverDevices(gatewayId),
@@ -159,7 +160,12 @@ function AddGatewayWizard({
     },
   });
 
-  const paramsReady = transportType === "usb" ? selectedPort !== "" : simSeed.trim() !== "";
+  const paramsReady =
+    transportType === "usb"
+      ? selectedPort !== ""
+      : transportType === "tcp"
+        ? tcpHost.trim() !== ""
+        : simSeed.trim() !== "";
 
   return (
     <div style={styles.card}>
@@ -187,11 +193,12 @@ function AddGatewayWizard({
           style={input}
           value={transportType}
           onChange={(e) => {
-            setTransportType(e.target.value as "usb" | "simulated");
+            setTransportType(e.target.value as "usb" | "tcp" | "simulated");
             setTestResult(null);
           }}
         >
           <option value="usb">USB</option>
+          <option value="tcp">TCP</option>
           <option value="simulated">Simulado</option>
         </select>
         <button style={{ ...btn, marginLeft: "auto" }} onClick={onCancel}>✕ Cancelar</button>
@@ -209,6 +216,36 @@ function AddGatewayWizard({
             <label>Nodos <input style={{ ...input, width: 70 }} type="number" value={simNodeCount} onChange={(e) => { setSimNodeCount(e.target.value); setTestResult(null); }} /></label>
             <label title="0 = sin nodos compartidos">Semilla compartida <input style={{ ...input, width: 80 }} type="number" value={simSharedSeed} onChange={(e) => { setSimSharedSeed(e.target.value); setTestResult(null); }} /></label>
             <label>Nodos compartidos <input style={{ ...input, width: 70 }} type="number" value={simSharedNodeCount} onChange={(e) => { setSimSharedNodeCount(e.target.value); setTestResult(null); }} /></label>
+          </div>
+        </div>
+      )}
+
+      {transportType === "tcp" && (
+        <div style={{ margin: "0.8rem 0" }}>
+          <p style={styles.dim}>
+            1. Dirección del nodo en la red (WiFi/Ethernet). Sin búsqueda automática: introduce el
+            host manualmente. El firmware solo admite un cliente TCP a la vez — cierra la app
+            oficial si está conectada a ese nodo.
+          </p>
+          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+            <label>
+              Host{" "}
+              <input
+                style={{ ...input, width: 180 }}
+                placeholder="192.168.1.50 o meshtastic.local"
+                value={tcpHost}
+                onChange={(e) => { setTcpHost(e.target.value); setTestResult(null); }}
+              />
+            </label>
+            <label>
+              Puerto{" "}
+              <input
+                style={{ ...input, width: 80 }}
+                type="number"
+                value={tcpPort}
+                onChange={(e) => { setTcpPort(e.target.value); setTestResult(null); }}
+              />
+            </label>
           </div>
         </div>
       )}

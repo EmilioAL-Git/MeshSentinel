@@ -1,0 +1,457 @@
+"""Base común de transportes sobre la librería oficial `meshtastic`
+(ADR 0009/0010/0023).
+
+La librería es síncrona: sus interfaces de stream (SerialInterface,
+TCPInterface — ambas heredan de StreamInterface) lanzan un hilo lector y
+publican por PyPubSub. Este módulo puentea esos callbacks (hilo) hacia asyncio
+mediante call_soon_threadsafe + Queue, y gestiona reconexión con backoff
+exponencial. Contiene TODO el comportamiento compartido: ciclo de vida,
+snapshot de NodeDB, telemetría y el pipeline completo de administración
+remota (GET, SET verificable, ack-only con sus 6 erratas de ADR 0019).
+
+Las subclases (usb.py, tcp.py) solo aportan CÓMO se crea la MeshInterface
+(`_connect_blocking`) y cómo describir el endpoint en logs — ninguna lógica
+propia (ADR 0023: sin forks de comportamiento entre transportes).
+"""
+
+import asyncio
+import logging
+import random
+from abc import abstractmethod
+from collections import Counter
+from typing import Any
+
+from pubsub import pub
+
+from gateway.config import Settings
+from gateway.decoder.meshtastic import decode_nodedb_entry, decode_packet
+from gateway.transports.base import EmitFn, Transport
+
+logger = logging.getLogger("gateway.transport")
+
+# Centinela de cierre forzoso (close() del transporte): termina el pump siempre
+_FORCE_DISCONNECT = object()
+
+
+class MeshtasticStreamTransport(Transport):
+    def __init__(self, emit: EmitFn, settings: Settings) -> None:
+        super().__init__(emit)
+        self._settings = settings
+        self._closed = asyncio.Event()
+        self._queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1000)
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._iface: Any = None
+        self._counters: Counter[str] = Counter()
+        # Waiters de respuestas admin: (node_id, response_key) -> Future
+        self._admin_waiters: dict[tuple[str, str], asyncio.Future[dict[str, Any]]] = {}
+        # True tras la primera conexión con éxito: distingue "conectando" de
+        # "reconectando" en el estado emitido (M5, ADR 0021 §4)
+        self._ever_connected = False
+
+    # ── Hooks de subclase: la ÚNICA diferencia entre transportes ────────────
+
+    @abstractmethod
+    def _connect_blocking(self) -> Any:
+        """Crea y devuelve la MeshInterface conectada (bloqueante, corre con
+        to_thread). Debe lanzar ConnectionError si no hay endpoint alcanzable."""
+
+    @abstractmethod
+    def _endpoint_description(self) -> str:
+        """Descripción corta del endpoint para logs (device path, host:puerto…)."""
+
+    # ── Callbacks PyPubSub: corren en el hilo lector de la librería ─────────
+    # Nunca tocan Redis ni asyncio directamente; solo encolan thread-safe.
+
+    def _enqueue(self, item: Any) -> None:
+        if self._loop is None:
+            return
+        try:
+            self._loop.call_soon_threadsafe(self._queue.put_nowait, item)
+        except (RuntimeError, asyncio.QueueFull):
+            self._counters["dropped"] += 1
+
+    def _on_receive(self, packet: dict[str, Any], interface: Any) -> None:  # noqa: ARG002
+        self._enqueue(("packet", packet))
+
+    def _on_connection_lost(self, interface: Any) -> None:
+        # OJO: iface.close() también dispara connection.lost (el hilo lector al
+        # salir llama a _disconnected). El evento va etiquetado con SU interface
+        # para que el pump ignore desconexiones de conexiones anteriores; sin
+        # esto, cada reconexión tumbaba la conexión nueva en bucle perpetuo.
+        logger.warning("%s.connection_lost endpoint=%s", self.name, self._endpoint_description())
+        self._enqueue(("disconnect", interface))
+
+    # ── Ciclo de vida ────────────────────────────────────────────────────────
+
+    async def run(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        pub.subscribe(self._on_receive, "meshtastic.receive")
+        pub.subscribe(self._on_connection_lost, "meshtastic.connection.lost")
+
+        delay = self._settings.reconnect_initial_delay
+        while not self._closed.is_set():
+            self.status = "reconnecting" if self._ever_connected else "connecting"
+            await self.emit_status()
+            try:
+                self._iface = await asyncio.to_thread(self._connect_blocking)
+            except Exception as exc:
+                self.status = "error"
+                await self.emit_status(detail=f"connect failed: {exc}")
+                logger.error("%s.connect_failed error=%r retry_in=%.0fs", self.name, exc, delay)
+                await self._sleep(delay)
+                delay = min(delay * 2, self._settings.reconnect_max_delay)
+                continue
+
+            delay = self._settings.reconnect_initial_delay  # conexión OK: backoff a cero
+            await self._on_connected()
+            await self._pump_events()  # hasta desconexión o cierre
+
+            await asyncio.to_thread(self._close_iface)
+            self._fail_pending_admin("connection lost during operation")
+            self._drain_queue()  # descarta paquetes/eventos de la conexión muerta
+            if not self._closed.is_set():
+                self.status = "disconnected"
+                await self.emit_status(detail="connection lost, reconnecting")
+                await self._sleep(self._settings.reconnect_initial_delay)
+
+    async def _on_connected(self) -> None:
+        info = await asyncio.to_thread(self._local_node_info)
+        self.local_node_id, self.local_short_name, self.local_long_name, \
+            self.local_hw_model, self.local_firmware_version, nodes = info
+        self.status = "connected"
+        self._ever_connected = True
+        await self.emit_status()
+        logger.info(
+            "%s.connected endpoint=%s local_node=%s nodedb_size=%d",
+            self.name,
+            self._endpoint_description(),
+            self.local_node_id,
+            len(nodes),
+        )
+        # Snapshot de la NodeDB del dispositivo: puebla el registry al instante.
+        for node_id_raw, entry in nodes.items():
+            decoded = decode_nodedb_entry(node_id_raw, entry)
+            if decoded:
+                await self._publish(*decoded)
+
+    def _local_node_info(
+        self,
+    ) -> tuple[str | None, str | None, str | None, str | None, str | None, dict[str, Any]]:
+        nodes = dict(getattr(self._iface, "nodes", None) or {})
+        my_info = self._iface.getMyNodeInfo() or {}
+        user = my_info.get("user") or {}
+        local_id = user.get("id")
+        metadata = getattr(self._iface, "metadata", None)
+        firmware = getattr(metadata, "firmware_version", None) if metadata is not None else None
+        return (
+            local_id.lower() if isinstance(local_id, str) else None,
+            user.get("shortName"),
+            user.get("longName"),
+            user.get("hwModel"),
+            firmware,
+            nodes,
+        )
+
+    def _fail_pending_admin(self, reason: str) -> None:
+        """Falla las operaciones admin en vuelo sin esperar su timeout completo."""
+        for key, future in list(self._admin_waiters.items()):
+            if not future.done():
+                future.set_exception(ConnectionError(reason))
+            self._admin_waiters.pop(key, None)
+
+    def _drain_queue(self) -> None:
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+
+    async def _pump_events(self) -> None:
+        while not self._closed.is_set():
+            item = await self._queue.get()
+            if item is _FORCE_DISCONNECT:
+                return
+            kind, payload = item
+            if kind == "disconnect":
+                if payload is self._iface:
+                    return
+                logger.debug("%s.stale_disconnect ignored (previous interface)", self.name)
+                self._counters["stale_disconnects"] += 1
+                continue
+            if kind != "packet":
+                continue
+            packet = payload
+            if self._resolve_admin_response(packet):
+                continue
+            try:
+                decoded = decode_packet(packet)
+            except Exception:
+                self._counters["decode_errors"] += 1
+                logger.exception("%s.decode_error packet_id=%s", self.name, packet.get("id"))
+                continue
+            if decoded is None:
+                self._counters["ignored"] += 1
+                continue
+            await self._publish(*decoded)
+
+    async def _publish(self, event_type: str, payload: dict[str, Any]) -> None:
+        await self._emit(event_type, payload)
+        self._counters[event_type] += 1
+        self._counters["total"] += 1
+        logger.debug("%s.event_published type=%s node=%s", self.name, event_type, payload.get("node_id"))
+        if self._counters["total"] % 100 == 0:
+            self._log_counters()
+
+    def _log_counters(self) -> None:
+        stats = " ".join(f"{k}={v}" for k, v in sorted(self._counters.items()))
+        logger.info("%s.stats %s", self.name, stats)
+
+    async def _sleep(self, base: float) -> None:
+        jitter = base * random.uniform(0.8, 1.2)
+        try:
+            await asyncio.wait_for(self._closed.wait(), timeout=jitter)
+        except asyncio.TimeoutError:
+            pass
+
+    def _close_iface(self) -> None:
+        if self._iface is not None:
+            try:
+                self._iface.close()
+            except Exception:
+                logger.debug("%s.close_error", self.name, exc_info=True)
+            self._iface = None
+
+    # ── Administración remota (M1.1: solo GET) ──────────────────────────────
+
+    def _resolve_admin_response(self, packet: dict[str, Any]) -> bool:
+        decoded = packet.get("decoded")
+        if not isinstance(decoded, dict) or decoded.get("portnum") != "ADMIN_APP":
+            return False
+        admin = decoded.get("admin")
+        from_id = str(packet.get("fromId") or "").lower()
+        if isinstance(admin, dict):
+            self._counters["admin_responses"] += 1
+            for key in admin:
+                fut = self._admin_waiters.get((from_id, key))
+                if fut is not None and not fut.done():
+                    fut.set_result(admin)
+                    logger.info("%s.admin_response node=%s key=%s", self.name, from_id, key)
+        return True  # los paquetes ADMIN_APP no van al bus de telemetría
+
+    def _send_admin_blocking(self, node_id: str, message: Any) -> None:
+        # requestChannels=False: pedir canales al crear el Node remoto costaría
+        # varios paquetes LoRa innecesarios para un GET
+        node = self._iface.getNode(node_id, requestChannels=False)
+        node._sendAdmin(message, wantResponse=True)
+
+    def _check_link(self) -> None:
+        if self.status != "connected" or self._iface is None or self._loop is None:
+            raise ConnectionError(f"{self.name} transport not connected")
+        # El enlace puede haberse caído sin que el pump lo haya procesado aún:
+        # comprobar el estado real de la librería evita bloquear 30 s en
+        # _waitConnected() y devuelve un error accionable (el backend reintenta)
+        lib_connected = getattr(self._iface, "isConnected", None)
+        if lib_connected is not None and not lib_connected.is_set():
+            raise ConnectionError(f"{self.name} link not ready (device disconnected or reconnecting)")
+
+    async def _admin_roundtrip(self, node_id: str, message: Any, response_key: str) -> dict[str, Any]:
+        """Envía un AdminMessage y espera su respuesta correlacionada."""
+        assert self._loop is not None
+        future: asyncio.Future[dict[str, Any]] = self._loop.create_future()
+        self._admin_waiters[(node_id, response_key)] = future
+        try:
+            await asyncio.to_thread(self._send_admin_blocking, node_id, message)
+            admin = await future
+            result = admin.get(response_key)
+            return result if isinstance(result, dict) else {"value": result}
+        finally:
+            self._admin_waiters.pop((node_id, response_key), None)
+
+    async def execute_admin(self, operation: dict[str, Any]) -> dict[str, Any]:
+        from gateway.decoder.admin import ACK_ONLY_OPERATIONS, SET_OPERATIONS, build_admin_request
+
+        self._check_link()
+        node_id = str(operation["target_node_id"]).lower()
+        op_type = operation["operation_type"]
+        params = operation.get("params") or {}
+        logger.info(
+            "%s.admin_sent op=%s type=%s node=%s",
+            self.name, operation.get("operation_id"), op_type, node_id,
+        )
+
+        if op_type in SET_OPERATIONS:
+            return await self._execute_set(node_id, op_type, params, operation)
+        if op_type in ACK_ONLY_OPERATIONS:
+            return await self._execute_ack_set(node_id, op_type, params, operation)
+
+        message, response_key = build_admin_request(op_type, params)
+        return await self._admin_roundtrip(node_id, message, response_key)
+
+    async def _ack_roundtrip(self, send: Any, timeout: float) -> dict[str, Any]:
+        """Envía un mensaje esperando solo el ACK/NAK de la capa de transporte
+        (ADR 0019): sin AdminMessage de respuesta que correlacionar por clave,
+        a diferencia de `_admin_roundtrip`. `send(onAckNak)` corre en un hilo
+        (bloqueante); `onAckNak` es el nombre exacto que la librería exige
+        para que el handler reciba también los ACKs positivos, no solo NAKs
+        (ver mesh_interface.sendData: "if the onResponse callback is called
+        'onAckNak' this will implicitly be true").
+
+        Errata (ADR 0019 §"ACK implícito"): en un primer intento distinguimos
+        un ACK real del destino (`packet["from"]` != nodo local) de un "ACK
+        implícito" (`from` == nodo local: el radio se rindió tras agotar
+        reintentos y generó una respuesta sintética — la propia librería lo
+        marca así en `Node.onAckNak`, imprimiendo literalmente "Received an
+        implicit ACK. Packet will likely arrive, but cannot be guaranteed.")
+        y tratamos el implícito como fallo (forzando reintento). Comprobado
+        en campo que fue un diagnóstico incompleto: con `wantResponse=True`
+        ya corregido (errata "wantResponse=False privaba de confirmación
+        real"), un ACK implícito SÍ se ha correspondido con una aplicación
+        real en el dispositivo (`ignored.remove` confirmado como aplicado
+        por el usuario pese a ACK implícito) — la propia librería ya avisa
+        de que es "probablemente, no garantizado", no "ha fallado". Forzar
+        reintentos ante un implícito solo generaba falsos negativos
+        (operación "failed" tras 3 intentos pese a haber funcionado en el
+        primero). Se mantiene el registro de la distinción en logs con fines
+        de diagnóstico, pero ya NO determina el resultado: solo un NAK
+        explícito (`errorReason != "NONE"`) cuenta como fallo.
+        """
+        assert self._loop is not None
+        future: asyncio.Future[dict[str, Any]] = self._loop.create_future()
+
+        def onAckNak(packet: dict[str, Any]) -> None:  # noqa: N802
+            if not future.done():
+                self._loop.call_soon_threadsafe(future.set_result, packet)
+
+        await asyncio.to_thread(send, onAckNak)
+        packet = await asyncio.wait_for(future, timeout=timeout)
+        routing = (packet.get("decoded") or {}).get("routing") or {}
+        error_reason = routing.get("errorReason") or "NONE"
+        if error_reason != "NONE":
+            return {"ack": False, "error_reason": error_reason}
+        implicit = packet.get("from") == self._iface.localNode.nodeNum
+        return {"ack": True, "error_reason": "IMPLICIT_ACK" if implicit else "NONE"}
+
+    async def _execute_ack_set(
+        self, node_id: str, op_type: str, params: dict[str, Any], operation: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Favoritos/ignorados/ficha de contacto (M4.1, ADR 0019): sin lectura
+        de verificación posible, solo ACK/NAK. `ensureSessionKey()` es pública
+        y gestiona el passkey PKC igual que hace la librería para sus propios
+        wrappers (`Node.setFavorite`, etc.); usamos `_sendAdmin` directamente
+        para inyectar nuestro propio callback de ACK en vez del genérico de la
+        librería (que solo anota estado interno, no observable desde aquí).
+
+        `wantResponse=True` (bug corregido, ADR 0019 errata): antes se pasaba
+        `False` razonando que no hay AdminMessage de respuesta que correlacionar
+        para estas operaciones. Pero `want_response` en el MeshPacket no es solo
+        eso: es lo que activa el seguimiento fiable (reintentos por la propia
+        malla y NAK/"ACK implícito" reales) en `mesh_interface.sendData`. Con
+        `wantResponse=False` no se solicita ninguna confirmación real al
+        destino, así que cualquier "ack" observado no era fiable — exactamente
+        el mismo `wantResponse=True` (por defecto) que usan `Node.setFavorite`/
+        `Node.setIgnored` en la librería oficial, y con el que el CLI sí
+        consigue una confirmación real (tras varios NAK MAX_RETRANSMIT,
+        eventualmente un ACK genuino).
+
+        Passkey PKC forzado a refrescar en cada intento (bug corregido, ADR
+        0019 errata): `ensureSessionKey()` es un no-op si el nodo YA tiene un
+        `adminSessionPassKey` cacheado (lo comprueba, no lo renueva). El
+        firmware trata ese passkey como un nonce de un solo uso — al agotar
+        `max_attempts` con reenvío redundante (errata 4) el primer intento lo
+        consume y los siguientes lo reutilizan sin saberlo, y el firmware los
+        rechaza con NAK `ADMIN_BAD_SESSION_KEY`. Se limpia la caché de la
+        librería antes de cada intento para forzar un handshake nuevo.
+        """
+        from meshtastic.util import to_node_num
+
+        from gateway.decoder.admin import ACK_ONLY_OPERATIONS
+
+        spec = ACK_ONLY_OPERATIONS[op_type]
+        set_msg = spec.build_set(params)
+        timeout = max(10.0, float(operation.get("timeout_seconds") or 120) / 3)
+        # node.nodeNum puede ser str (p.ej. "!e7ef4fb4") según cómo la
+        # librería haya cacheado el Node — _getOrCreateByNum exige int
+        # (formatea con :08x internamente). Se deriva del propio node_id, que
+        # sabemos canónico, en vez de confiar en el tipo de node.nodeNum.
+        node_num = to_node_num(node_id)
+
+        def _send(on_ack: Any) -> None:
+            node = self._iface.getNode(node_id, requestChannels=False)
+            self._iface._getOrCreateByNum(node_num).pop("adminSessionPassKey", None)
+            node.ensureSessionKey()
+            node._sendAdmin(set_msg, wantResponse=True, onResponse=on_ack)
+
+        ack = await self._ack_roundtrip(_send, timeout)
+        logger.info(
+            "%s.admin_ack op=%s node=%s ack=%s reason=%s",
+            self.name, operation.get("operation_id"), node_id, ack["ack"], ack["error_reason"],
+        )
+        if not ack["ack"]:
+            raise RuntimeError(f"admin NAK: {ack['error_reason']}")
+        return {"requested": params, "ack": ack, "verify": "unavailable"}
+
+    async def _execute_set(
+        self, node_id: str, op_type: str, params: dict[str, Any], operation: dict[str, Any]
+    ) -> dict[str, Any]:
+        """SET verificable (M1.3): GET previo -> SET -> GET de verificación.
+
+        El GET previo cumple doble función: auditar el valor anterior y
+        establecer el session passkey PKC (la librería lo almacena de cualquier
+        respuesta ADMIN_APP recibida, _onAdminReceive). El veredicto viaja en
+        result.verify — el contrato de eventos v1 no cambia; el backend mapea
+        a succeeded / succeeded_unconfirmed / verify_failed (ADR 0014).
+        """
+        from gateway.decoder.admin import SET_OPERATIONS, build_admin_request
+
+        spec = SET_OPERATIONS[op_type]
+        get_type, get_params = spec.verify_get(params)
+        # Presupuesto por lectura: margen dentro del timeout global del consumer
+        read_timeout = max(10.0, float(operation.get("timeout_seconds") or 120) / 3)
+
+        try:
+            message, response_key = build_admin_request(get_type, get_params)
+            previous = await asyncio.wait_for(
+                self._admin_roundtrip(node_id, message, response_key), timeout=read_timeout
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            # Sin lectura previa tampoco hay passkey de sesión: el SET no podría
+            # autenticarse — fallar aquí es más honesto que un verify dudoso
+            raise TimeoutError("node did not answer pre-read (no admin session)") from None
+
+        # El SET genérico (M1.4) necesita `previous` para fusionar los campos
+        # no tocados y evitar que se reseteen a defaults del firmware
+        set_msg = spec.build_set(params, previous)
+        await asyncio.to_thread(self._send_admin_blocking, node_id, set_msg)
+        logger.info("%s.admin_set_sent op=%s node=%s", self.name, operation.get("operation_id"), node_id)
+        await asyncio.sleep(self._settings.set_settle_seconds)
+
+        verified: dict[str, Any] | None = None
+        verify = "unavailable"
+        try:
+            message, response_key = build_admin_request(get_type, get_params)
+            verified = await asyncio.wait_for(
+                self._admin_roundtrip(node_id, message, response_key), timeout=read_timeout
+            )
+            verify = "confirmed" if spec.compare(params, verified) else "mismatch"
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                "%s.verify_unavailable op=%s node=%s",
+                self.name, operation.get("operation_id"), node_id,
+            )
+
+        logger.info(
+            "%s.admin_verify op=%s node=%s verify=%s",
+            self.name, operation.get("operation_id"), node_id, verify,
+        )
+        return {"previous": previous, "requested": params, "verified": verified, "verify": verify}
+
+    async def send_command(self, command: dict[str, Any]) -> None:
+        logger.warning("%s.command_rejected type=%s (not supported)", self.name, command.get("command_type"))
+
+    async def close(self) -> None:
+        self._closed.set()
+        self._enqueue(_FORCE_DISCONNECT)  # desbloquea _pump_events si estaba esperando
+        await asyncio.to_thread(self._close_iface)
+        self.status = "disconnected"
+        await self.emit_status(detail="shutdown")
+        self._log_counters()

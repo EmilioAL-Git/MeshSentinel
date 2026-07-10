@@ -69,6 +69,50 @@ def test_reconnect_tears_down_previous_transport() -> None:
     asyncio.run(_test_reconnect_tears_down_previous_transport())
 
 
+async def _test_connect_unsupported_type_preserves_active_transport() -> None:
+    """Regresión (ADR 0023 §4): el teardown del transporte activo ocurría ANTES
+    de validar el nuevo — un connect con tipo no soportado dejaba la pasarela
+    sin conexión. Ahora la construcción/validación va primero."""
+    manager, _events = make_manager()
+    await manager.connect("simulated", {})
+    await asyncio.sleep(0.05)
+    active = manager.transport
+    assert active is not None
+
+    try:
+        await manager.connect("http", {"url": "http://x"})
+    except NotImplementedError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("expected NotImplementedError")
+
+    assert manager.transport is active  # la conexión activa sobrevive intacta
+    await manager.teardown()
+
+
+def test_connect_unsupported_type_preserves_active_transport() -> None:
+    asyncio.run(_test_connect_unsupported_type_preserves_active_transport())
+
+
+async def _test_connection_invalid_params_fails_fast_and_preserves_transport() -> None:
+    """test_connection con params inválidos (TCP sin host) devuelve ok=False al
+    instante — sin agotar el timeout de correlación — y no toca la conexión activa."""
+    manager, _events = make_manager()
+    await manager.connect("simulated", {})
+    await asyncio.sleep(0.05)
+    active = manager.transport
+
+    result = await manager.test_connection("tcp", {}, timeout=5.0)
+    assert result["ok"] is False
+    assert "host" in result["error"]
+    assert manager.transport is active
+    await manager.teardown()
+
+
+def test_connection_invalid_params_fails_fast_and_preserves_transport() -> None:
+    asyncio.run(_test_connection_invalid_params_fails_fast_and_preserves_transport())
+
+
 async def _test_discover_returns_list() -> None:
     manager, _events = make_manager()
     result = await manager.discover()

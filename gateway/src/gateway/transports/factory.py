@@ -11,5 +11,9 @@ def create_transport(settings: Settings, emit: EmitFn) -> Transport:
         from gateway.transports.usb import MeshtasticUsbTransport
 
         return MeshtasticUsbTransport(emit, settings)
-    # tcp / http: fases futuras
+    if settings.transport == "tcp":
+        from gateway.transports.tcp import MeshtasticTcpTransport
+
+        return MeshtasticTcpTransport(emit, settings)
+    # http: fase futura
     raise NotImplementedError(f"Transport '{settings.transport}' not implemented yet")

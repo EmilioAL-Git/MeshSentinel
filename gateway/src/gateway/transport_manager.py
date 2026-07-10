@@ -58,7 +58,16 @@ class TransportManager:
 
     async def start_from_env(self) -> None:
         """Arranque del proceso: comportamiento de hoy, sin comandos (compatibilidad)."""
-        await self._start(self._base_settings)
+        try:
+            await self._start(self._base_settings)
+        except Exception:
+            # Sin esto el fallo quedaba enterrado en el gather() del shutdown y el
+            # proceso corría sin transporte en silencio (solo heartbeats).
+            logger.exception(
+                "transport_manager.bootstrap_failed transport=%s — proceso sin transporte; "
+                "configúralo desde la app (command.gateway_connect)",
+                self._base_settings.transport,
+            )
 
     async def _emit_tracked(self, event_type: str, payload: dict[str, Any], generation: int) -> None:
         await self._publish(event_type, payload)
@@ -70,6 +79,18 @@ class TransportManager:
             outcome.set_result((status, payload.get("detail")))
 
     async def _start(self, settings: Settings, wait_timeout: float | None = None) -> tuple[str, str | None] | None:
+        # `generation` se fija DESPUÉS del teardown (que también la incrementa);
+        # emit no puede dispararse antes porque el transporte aún no corre.
+        generation = 0
+
+        async def emit(event_type: str, payload: dict[str, Any]) -> None:
+            await self._emit_tracked(event_type, payload, generation)
+
+        # Construir (y validar) el transporte nuevo ANTES de destruir el activo:
+        # un tipo no soportado o params inválidos no deben dejar la pasarela sin
+        # su conexión actual (bug corregido en ADR 0023 §4).
+        transport = create_transport(settings, emit)
+
         await self.teardown()
         self._generation += 1
         generation = self._generation
@@ -79,10 +100,6 @@ class TransportManager:
             outcome = loop.create_future()
         self._outcome = outcome
 
-        async def emit(event_type: str, payload: dict[str, Any]) -> None:
-            await self._emit_tracked(event_type, payload, generation)
-
-        transport = create_transport(settings, emit)
         self._transport = transport
         self._task = asyncio.create_task(transport.run(), name="transport")
 
@@ -106,7 +123,13 @@ class TransportManager:
     ) -> dict[str, Any]:
         request_id = request_id or str(uuid.uuid4())
         settings = _apply_connection_params(self._base_settings, transport_type, connection_params)
-        status, detail = await self._start(settings, wait_timeout=timeout) or ("timeout", None)
+        try:
+            status, detail = await self._start(settings, wait_timeout=timeout) or ("timeout", None)
+        except Exception as exc:
+            # Construcción fallida (tipo no soportado, params inválidos): la
+            # conexión activa sigue intacta y la UI recibe el error al instante
+            # en vez de agotar el timeout de correlación del backend.
+            return {"request_id": request_id, "ok": False, "error": str(exc)}
         if status != "connected":
             await self.teardown()
             error = detail or ("sin respuesta del transporte" if status == "timeout" else "fallo de conexión")

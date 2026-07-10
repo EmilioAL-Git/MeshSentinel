@@ -57,6 +57,9 @@ GATEWAY_TRANSPORT=tcp
 GATEWAY_TCP_HOST=192.168.1.50
 ```
 
+(El firmware solo admite un cliente TCP a la vez: cierra la app oficial si
+está conectada al mismo nodo. Ver `docs/acceptance/tcp.md`.)
+
 Para serial, además descomenta el bloque `devices:` del servicio `gateway` en
 `docker-compose.yml`.
 
