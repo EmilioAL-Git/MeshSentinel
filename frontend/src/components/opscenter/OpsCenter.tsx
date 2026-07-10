@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import type L from "leaflet";
 import type { ActivityEntry } from "../../activity";
 import type {
   AlertOut,
@@ -12,7 +12,6 @@ import type {
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { t } from "../../tokens";
 import { MapView } from "../MapView";
-import { NodeDetail } from "../NodeDetail";
 import { ActivityPanel } from "./ActivityPanel";
 import { ConsoleRail } from "./ConsoleRail";
 import { JobsPanel } from "./JobsPanel";
@@ -22,10 +21,8 @@ import { StatusPanel } from "./StatusPanel";
  * Centro de Operaciones (v0.7 §3): la pantalla principal de MeshSentinel.
  * Tres columnas — estado (leer) · mapa (lienzo protagonista) · consola
  * operativa (actuar) — el operador trabaja aquí sin cambiar de pantalla.
- * El detalle de nodo se abre como cajón superpuesto al borde derecho desde
- * CUALQUIER origen (mapa, alertas, atención, actividad): mismo panel,
- * mismo sitio (principio 4, adelantado de v0.7.2 para eliminar ya el salto
- * de vista que rompía el contexto).
+ * El detalle de nodo es el Inspector GLOBAL (renderizado en App, §8.1):
+ * este componente solo selecciona; el cajón es el mismo en toda la app.
  */
 
 const collapseBtn = (side: "left" | "right"): React.CSSProperties => ({
@@ -58,6 +55,7 @@ export function OpsCenter({
   selected,
   onSelect,
   onGoTo,
+  onMapReady,
 }: {
   summaries: NodeSummaryOut[];
   gatewayNodeIds: Set<string>;
@@ -71,20 +69,10 @@ export function OpsCenter({
   selected: string | null;
   onSelect: (nodeId: string | null) => void;
   onGoTo: (view: string) => void;
+  onMapReady: (map: L.Map) => void;
 }) {
   const [leftOpen, setLeftOpen] = usePersistedState<boolean>("ops.left.open", true);
-  const selectedSummary = summaries.find((s) => s.node.node_id === selected);
   const setSelected = onSelect;
-
-  // Esc cierra el cajón de detalle (la paleta ⌘K corta su propio Escape)
-  useEffect(() => {
-    if (!selected) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onSelect(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selected, onSelect]);
 
   const activeOps = operations.filter(
     (o) => o.status === "pending" || o.status === "queued" || o.status === "running",
@@ -117,9 +105,17 @@ export function OpsCenter({
         )}
       </div>
 
-      {/* Mapa: lienzo protagonista, borde a borde */}
+      {/* Mapa: lienzo protagonista, borde a borde. Clic en marcador = abrir
+          el Inspector global (renderizado en App, §8.1) */}
       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-        <MapView summaries={summaries} gatewayNodeIds={gatewayNodeIds} onShowDetail={setSelected} fill />
+        <MapView
+          summaries={summaries}
+          gatewayNodeIds={gatewayNodeIds}
+          onShowDetail={setSelected}
+          fill
+          selectedId={selected}
+          onMapReady={onMapReady}
+        />
         <button
           style={collapseBtn("left")}
           onClick={() => setLeftOpen(!leftOpen)}
@@ -127,32 +123,6 @@ export function OpsCenter({
         >
           {leftOpen ? "◂" : "▸"}
         </button>
-
-        {/* Cajón de detalle de nodo, superpuesto al borde derecho (§8.1) */}
-        {selected && (
-          <div
-            style={{
-              position: "absolute",
-              top: 0,
-              right: 0,
-              bottom: 0,
-              width: "min(420px, 92%)",
-              background: t.bg,
-              borderLeft: `1px solid ${t.border}`,
-              boxShadow: "-8px 0 24px rgba(0, 0, 0, 0.45)",
-              overflowY: "auto",
-              zIndex: 820,
-              padding: "0.6rem",
-            }}
-          >
-            <NodeDetail
-              nodeId={selected}
-              summary={selectedSummary}
-              summaries={summaries}
-              onClose={() => setSelected(null)}
-            />
-          </div>
-        )}
       </div>
 
       {/* Consola operativa: riel de iconos (actuar) */}

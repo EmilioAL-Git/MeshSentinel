@@ -128,6 +128,32 @@ a {
   background: transparent;
 }
 
+/* Leaflet en oscuro: tooltips y controles heredan la identidad MeshSentinel
+   en vez del blanco de serie (§14) */
+.leaflet-tooltip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  border-radius: 5px;
+}
+.leaflet-tooltip-top:before {
+  border-top-color: var(--border);
+}
+.leaflet-control-zoom a,
+.leaflet-control-attribution {
+  background: var(--surface) !important;
+  color: var(--text-dim) !important;
+  border-color: var(--border) !important;
+}
+.leaflet-control-attribution a {
+  color: var(--text-dim) !important;
+}
+.leaflet-container {
+  background: var(--bg);
+  font-family: var(--font-ui);
+}
+
 /* Pulso del punto "conectado" de la barra inferior — junto con los halos de
    alerta del mapa, única animación permanente permitida (§14.5) */
 @keyframes noc-pulse {

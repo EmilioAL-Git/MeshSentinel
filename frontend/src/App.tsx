@@ -26,8 +26,8 @@ import { BatchesView, BatchWizard } from "./components/BatchesView";
 import { ConfigEditor } from "./components/ConfigEditor";
 import { Dashboard } from "./components/Dashboard";
 import { GatewaysView } from "./components/GatewaysView";
+import { Inspector } from "./components/inspector/Inspector";
 import { MapView } from "./components/MapView";
-import { NodeDetail } from "./components/NodeDetail";
 import { NodeFiltersBar } from "./components/NodeFiltersBar";
 import { NodesTable } from "./components/NodesTable";
 import { OperationsView } from "./components/OperationsView";
@@ -36,6 +36,7 @@ import { ProfilesView } from "./components/ProfilesView";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { Hud } from "./components/shell/Hud";
 import { StatusBar } from "./components/shell/StatusBar";
+import { ToastHost } from "./components/shell/Toast";
 import { styles } from "./styles";
 import { t } from "./tokens";
 
@@ -345,11 +346,41 @@ export default function App() {
     [gateways.data],
   );
 
-  // Abrir un nodo: en el Centro es un cajón in situ (sin cambiar de pantalla);
-  // desde las vistas especializadas se abre en Nodos como hasta ahora.
+  // Abrir un nodo = abrir el Inspector global in situ, se esté donde se esté
+  // (v0.7 §8.1). NUNCA navega: el contexto no se pierde (principio 6).
   const showDetail = useCallback((nodeId: string) => {
     setSelected(nodeId);
-    setView((v) => (v === "ops" ? v : "nodes"));
+  }, []);
+
+  // Esc cierra el Inspector (la paleta ⌘K corta su propio Escape antes)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelected(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // ⌖ Centrar del Inspector: si el mapa del Centro no está montado (otra
+  // vista), se navega al Centro y el flyTo queda pendiente hasta onMapReady.
+  const mapRef = useRef<import("leaflet").Map | null>(null);
+  const pendingCenter = useRef<[number, number] | null>(null);
+  const onMapReady = useCallback((map: import("leaflet").Map) => {
+    mapRef.current = map;
+    if (pendingCenter.current) {
+      map.flyTo(pendingCenter.current, Math.max(map.getZoom(), 13));
+      pendingCenter.current = null;
+    }
+  }, []);
+  const centerOnMap = useCallback((lat: number, lng: number) => {
+    setView((v) => {
+      if (v === "ops" && mapRef.current) {
+        mapRef.current.flyTo([lat, lng], Math.max(mapRef.current.getZoom(), 13));
+        return v;
+      }
+      pendingCenter.current = [lat, lng];
+      return "ops";
+    });
   }, []);
 
   const selectedSummary =
@@ -379,7 +410,8 @@ export default function App() {
           display: "flex",
           alignItems: "center",
           gap: "1rem",
-          padding: "0.4rem 1rem",
+          height: "var(--header-height)",
+          padding: "0 1rem",
           background: t.surface,
           borderBottom: `1px solid ${t.border}`,
           flexShrink: 0,
@@ -483,6 +515,7 @@ export default function App() {
             selected={selected}
             onSelect={setSelected}
             onGoTo={(v) => setView(v as View)}
+            onMapReady={onMapReady}
           />
         </div>
       )}
@@ -533,7 +566,12 @@ export default function App() {
       )}
 
       {view === "map" && (
-        <MapView summaries={summaries} gatewayNodeIds={gatewayNodeIds} onShowDetail={showDetail} />
+        <MapView
+          summaries={summaries}
+          gatewayNodeIds={gatewayNodeIds}
+          onShowDetail={showDetail}
+          selectedId={selected}
+        />
       )}
 
       {view === "nodes" && (
@@ -552,7 +590,8 @@ export default function App() {
               }}
             />
           )}
-          <div style={selected ? styles.layout : undefined}>
+          {/* El detalle es el Inspector global: la tabla ocupa todo el ancho */}
+          <div>
             <div style={styles.card}>
               <h2 style={{ marginTop: 0 }}>
                 Nodos <span style={styles.dim}>({filteredSummaries.length} · {onlineCount} online)</span>
@@ -648,19 +687,25 @@ export default function App() {
                 />
               )}
             </div>
-            {selected && (
-              <NodeDetail
-                nodeId={selected}
-                summary={selectedSummary}
-                summaries={summaries}
-                onClose={() => setSelected(null)}
-              />
-            )}
           </div>
         </div>
       )}
       </main>
       )}
+
+      {/* Inspector global (§8.1): un solo cajón para toda la aplicación */}
+      {selected && (
+        <Inspector
+          nodeId={selected}
+          summary={selectedSummary}
+          summaries={summaries}
+          operations={operations.data ?? []}
+          onClose={() => setSelected(null)}
+          onCenter={centerOnMap}
+          onGoTo={(v) => setView(v as View)}
+        />
+      )}
+      <ToastHost />
 
       <StatusBar
         wsStatus={wsStatus}

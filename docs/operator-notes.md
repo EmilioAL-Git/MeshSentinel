@@ -10,6 +10,47 @@ que la lista") valen tanto como los bugs de UX.
 
 ---
 
+## 2026-07-10 · v0.7.2 — el Inspector
+
+### El toast confirma el encolado, no el resultado
+- **Contexto**: acciones rápidas del Inspector ("Pedir metadata", "Leer
+  configuración") con toast de confirmación.
+- **Qué intentaba**: pedir metadata y saber si el nodo respondió.
+- **Fricción**: el toast dice "añadida a la cola"; para saber si TERMINÓ hay
+  que mirar la sección Operaciones del Inspector o la consola de Actividad.
+  El ciclo mental queda abierto.
+- **Impacto**: leve, pero es la acción que más invita a repetir clics
+  ("¿habrá llegado?").
+- **Mejora**: toast de cierre cuando una operación lanzada EN ESTA SESIÓN
+  llega a estado terminal (el evento admin.operation ya llega por WS con
+  operation_id — es solo correlar client-side).
+- **Estado**: pendiente; barato, candidato a la próxima fase.
+
+### Esc cierra el Inspector aunque estés escribiendo en un input
+- **Contexto**: crear una etiqueta desde Organización y pulsar Esc para
+  "cancelar el texto".
+- **Fricción**: se cierra el cajón entero, no el input.
+- **Mejora**: ignorar Esc global cuando el foco está en un input/textarea.
+- **Estado**: pendiente (una línea en el listener).
+
+### Descubrimiento: el anillo de selección + ⌖ cambian la sensación de producto
+- **Observación**: ver el marcador resaltado al abrir el Inspector y el
+  flyTo al pulsar ⌖ es lo que más "consola de operaciones" transmite de
+  toda la fase — más que cualquier panel. La conexión visual
+  inspector↔mapa es identidad. Siguiente paso natural: resaltar también la
+  fila de la tabla y la entrada de actividad del nodo inspeccionado.
+- **Estado**: anotado como dirección de diseño.
+
+### Descubrimiento: la vista Nodos queda para comparar y seleccionar
+- **Observación**: con el Inspector global, ya no se entra en Nodos "a ver
+  un nodo" — se entra a filtrar, comparar columnas y montar selecciones
+  para lotes. Confirma el reparto del diseño (§13: tabla = masivo,
+  inspector = individual). La tabla debería evolucionar hacia eso
+  (columnas configurables, orden) y no hacia el detalle.
+- **Estado**: anotado.
+
+---
+
 ## 2026-07-10 · v0.7.1 — construyendo el Centro de Operaciones
 
 ### El popup del mapa se ha quedado viejo el mismo día
@@ -20,7 +61,8 @@ que la lista") valen tanto como los bugs de UX.
   resolvía (hover = tooltip, clic = inspector directo) pero eso es v0.7.2.
 - **Impacto**: la interacción más frecuente del Centro gasta un clic de más.
 - **Mejora**: marcador → cajón directo; el popup se degrada a tooltip.
-- **Estado**: diseñado (§5.4), pendiente de v0.7.2.
+- **Estado**: **implementado en v0.7.2** (popup eliminado, tooltip de hover,
+  clic = Inspector, marcador seleccionado con anillo).
 
 ### NodeDetail dentro del cajón funciona, pero se nota "prestado"
 - **Contexto**: el cajón de 420 px reutiliza NodeDetail tal cual (decisión
@@ -32,7 +74,9 @@ que la lista") valen tanto como los bugs de UX.
   el cajón promete.
 - **Mejora**: la reorganización prevista (cabecera fija de estado +
   secciones plegables) — es exactamente v0.7.2.
-- **Estado**: diseñado (§8.1), pendiente.
+- **Estado**: **implementado en v0.7.2** (Inspector definitivo: cabecera
+  vital fija, acciones rápidas, secciones plegables persistidas, global en
+  toda la app; NodeDetail eliminado).
 
 ### Descubrimiento: el semáforo con motivos expandidos funciona
 - **Contexto**: primer arranque del Centro con la red degradada del stack dev.
