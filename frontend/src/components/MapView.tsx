@@ -19,8 +19,22 @@ interface Props {
   fill?: boolean;
   /** Nodo abierto en el Inspector: su marcador se resalta con anillo de acento. */
   selectedId?: string | null;
+  /** Nodo en Focus (§7): anillo doble; el resto se atenúa — salvo alertas. */
+  focusId?: string | null;
+  /** Nodos con alerta CRITICAL activa: halo pulsante permanente (nunca se atenúan). */
+  alertNodeIds?: Set<string>;
+  /** Pulsos de una sola vez al llegar eventos (mapa vivo, v0.7.3). */
+  pulses?: MapPulse[];
   /** Expone la instancia de Leaflet (⌖ Centrar del Inspector, flyTo). */
   onMapReady?: (map: L.Map) => void;
+}
+
+export interface MapPulse {
+  key: string;
+  lat: number;
+  lng: number;
+  /** Referencia var(--…) del color del anillo. */
+  color: string;
 }
 
 const COLOR_ONLINE = "var(--ok)";
@@ -31,8 +45,15 @@ const COLOR_GATEWAY = "var(--warn)";
 // a recrear los elementos DOM de todos los marcadores.
 const iconCache = new Map<string, L.DivIcon>();
 
-function nodeIcon(online: boolean, isGateway: boolean, gatewayCount: number, selected: boolean): L.DivIcon {
-  const key = `${online}-${isGateway}-${gatewayCount}-${selected}`;
+function nodeIcon(
+  online: boolean,
+  isGateway: boolean,
+  gatewayCount: number,
+  selected: boolean,
+  focused: boolean,
+  hasAlert: boolean,
+): L.DivIcon {
+  const key = `${online}-${isGateway}-${gatewayCount}-${selected}-${focused}-${hasAlert}`;
   let icon = iconCache.get(key);
   if (!icon) {
     const color = isGateway ? COLOR_GATEWAY : online ? COLOR_ONLINE : COLOR_OFFLINE;
@@ -46,13 +67,18 @@ function nodeIcon(online: boolean, isGateway: boolean, gatewayCount: number, sel
           `border-radius:8px;font-size:9px;line-height:12px;min-width:12px;text-align:center;` +
           `padding:0 2px;border:1px solid var(--bg)">${gatewayCount}</div>`
         : "";
-    // Nodo abierto en el Inspector: anillo de acento (selección = --accent, §14.2)
-    const ring = selected
-      ? `<div style="position:absolute;inset:-6px;border:2px solid var(--accent);border-radius:50%"></div>`
-      : "";
+    // Selección = anillo simple; Focus = anillo doble (§7.3). Ambos --accent.
+    const ring = focused
+      ? `<div style="position:absolute;inset:-6px;border:2px solid var(--accent);border-radius:50%"></div>` +
+        `<div style="position:absolute;inset:-11px;border:1px solid var(--accent);border-radius:50%;opacity:.55"></div>`
+      : selected
+        ? `<div style="position:absolute;inset:-6px;border:2px solid var(--accent);border-radius:50%"></div>`
+        : "";
+    // Alerta CRITICAL: halo pulsante permanente (principio 1)
+    const halo = hasAlert ? `<div class="noc-alert-halo"></div>` : "";
     icon = L.divIcon({
       className: "",
-      html: `<div style="position:relative">${ring}<div style="${shape}background:${color};border:2px solid var(--bg);box-shadow:0 0 4px rgba(0,0,0,.6)"></div>${badge}</div>`,
+      html: `<div style="position:relative">${halo}${ring}<div style="${shape}background:${color};border:2px solid var(--bg);box-shadow:0 0 4px rgba(0,0,0,.6)"></div>${badge}</div>`,
       iconSize: [18, 18],
       iconAnchor: [9, 9],
     });
@@ -65,6 +91,10 @@ interface NodeMarkerProps {
   summary: NodeSummaryOut;
   isGateway: boolean;
   isSelected: boolean;
+  isFocused: boolean;
+  hasAlert: boolean;
+  /** Con Focus activo, el resto de nodos se atenúa — nunca los que tienen alerta. */
+  dimmed: boolean;
   onShowDetail: (nodeId: string) => void;
 }
 
@@ -72,7 +102,7 @@ interface NodeMarkerProps {
 // El popup de Leaflet desapareció: el detalle vive en el Inspector y el
 // hover solo enseña un tooltip mínimo de identificación.
 const NodeMarker = memo(
-  function NodeMarker({ summary, isGateway, isSelected, onShowDetail }: NodeMarkerProps) {
+  function NodeMarker({ summary, isGateway, isSelected, isFocused, hasAlert, dimmed, onShowDetail }: NodeMarkerProps) {
     const { node, last_position: pos, last_device_telemetry: tel } = summary;
     if (!pos) return null;
     const activeLinks = summary.gateway_links.filter((l) => l.active);
@@ -81,7 +111,8 @@ const NodeMarker = memo(
     return (
       <Marker
         position={[pos.latitude, pos.longitude]}
-        icon={nodeIcon(node.online, isGateway, activeLinks.length, isSelected)}
+        icon={nodeIcon(node.online, isGateway, activeLinks.length, isSelected, isFocused, hasAlert)}
+        opacity={dimmed ? 0.45 : 1}
         eventHandlers={{ click: () => onShowDetail(node.node_id) }}
       >
         <Tooltip direction="top" offset={[0, -8]} opacity={1}>
@@ -99,6 +130,9 @@ const NodeMarker = memo(
   (prev, next) =>
     prev.isGateway === next.isGateway &&
     prev.isSelected === next.isSelected &&
+    prev.isFocused === next.isFocused &&
+    prev.hasAlert === next.hasAlert &&
+    prev.dimmed === next.dimmed &&
     prev.onShowDetail === next.onShowDetail &&
     prev.summary.node.online === next.summary.node.online &&
     prev.summary.node.snr === next.summary.node.snr &&
@@ -178,7 +212,39 @@ function FitOnFirstData({ summaries }: { summaries: NodeSummaryOut[] }) {
   return null;
 }
 
-export function MapView({ summaries, gatewayNodeIds, onShowDetail, fill = false, selectedId = null, onMapReady }: Props) {
+/** Pulsos de una sola vez (mapa vivo): marcadores no interactivos con
+ * animación CSS one-shot; el ciclo de vida lo gestiona el llamante. */
+function PulseLayer({ pulses }: { pulses: MapPulse[] }) {
+  return (
+    <>
+      {pulses.map((p) => (
+        <Marker
+          key={p.key}
+          position={[p.lat, p.lng]}
+          interactive={false}
+          icon={L.divIcon({
+            className: "",
+            html: `<div class="noc-pulse-once" style="--pulse-color:${p.color}"></div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 13],
+          })}
+        />
+      ))}
+    </>
+  );
+}
+
+export function MapView({
+  summaries,
+  gatewayNodeIds,
+  onShowDetail,
+  fill = false,
+  selectedId = null,
+  focusId = null,
+  alertNodeIds,
+  pulses,
+  onMapReady,
+}: Props) {
   const withPosition = useMemo(() => summaries.filter((s) => s.last_position), [summaries]);
   const withoutPosition = summaries.length - withPosition.length;
 
@@ -198,16 +264,24 @@ export function MapView({ summaries, gatewayNodeIds, onShowDetail, fill = false,
       <AutoResize />
       <FitOnFirstData summaries={withPosition} />
       <MarkerClusterGroup chunkedLoading maxClusterRadius={50}>
-        {withPosition.map((s) => (
-          <NodeMarker
-            key={s.node.node_id}
-            summary={s}
-            isGateway={gatewayNodeIds.has(s.node.node_id)}
-            isSelected={s.node.node_id === selectedId}
-            onShowDetail={onShowDetail}
-          />
-        ))}
+        {withPosition.map((s) => {
+          const id = s.node.node_id;
+          const hasAlert = alertNodeIds?.has(id) ?? false;
+          return (
+            <NodeMarker
+              key={id}
+              summary={s}
+              isGateway={gatewayNodeIds.has(id)}
+              isSelected={id === selectedId}
+              isFocused={id === focusId}
+              hasAlert={hasAlert}
+              dimmed={focusId != null && id !== focusId && id !== selectedId && !hasAlert}
+              onShowDetail={onShowDetail}
+            />
+          );
+        })}
       </MarkerClusterGroup>
+      {pulses && pulses.length > 0 && <PulseLayer pulses={pulses} />}
     </MapContainer>
   );
 

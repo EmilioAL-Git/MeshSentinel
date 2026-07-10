@@ -34,9 +34,11 @@ import { OperationsView } from "./components/OperationsView";
 import { OpsCenter } from "./components/opscenter/OpsCenter";
 import { ProfilesView } from "./components/ProfilesView";
 import { CommandPalette } from "./components/shell/CommandPalette";
+import { FocusChip, type FocusState } from "./components/shell/FocusChip";
 import { Hud } from "./components/shell/Hud";
 import { StatusBar } from "./components/shell/StatusBar";
-import { ToastHost } from "./components/shell/Toast";
+import { toast, ToastHost } from "./components/shell/Toast";
+import { consumeFinished } from "./opTracker";
 import { styles } from "./styles";
 import { t } from "./tokens";
 
@@ -219,6 +221,12 @@ export default function App() {
     disconnectedAt: null,
   });
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Focus (v0.7 §7): contexto operativo deliberado — distinto de la selección
+  // (inspector abierto). Prioriza mapa/actividad/trabajos/alertas, nunca oculta.
+  const [focus, setFocus] = useState<FocusState | null>(null);
+  const toggleFocus = useCallback((nodeId: string) => {
+    setFocus((f) => (f?.id === nodeId ? null : { id: nodeId, since: Date.now() }));
+  }, []);
   // Perfiles: solo se cargan cuando la paleta los necesita
   const profiles = useQuery({ queryKey: ["profiles"], queryFn: fetchProfiles, enabled: paletteOpen });
   const [selected, setSelected] = useState<string | null>(null);
@@ -252,6 +260,9 @@ export default function App() {
 
     const ws = openEventsSocket((event) => {
       if (!DATA_EVENTS.has(event.event_type)) return;
+      // Cierre del ciclo: toast cuando termina una operación lanzada aquí
+      const finished = consumeFinished(event);
+      if (finished) toast(finished.text, { kind: finished.kind });
       let skipEntry = false;
       if (event.event_type === "gateway.status") {
         const status = String(event.payload.status ?? "");
@@ -352,10 +363,16 @@ export default function App() {
     setSelected(nodeId);
   }, []);
 
-  // Esc cierra el Inspector (la paleta ⌘K corta su propio Escape antes)
+  // Esc cierra el Inspector (la paleta ⌘K corta su propio Escape antes).
+  // Nunca desde un campo de texto: ahí Esc pertenece al input (diario v0.7.2).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelected(null);
+      if (e.key !== "Escape") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) {
+        return;
+      }
+      setSelected(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -386,10 +403,6 @@ export default function App() {
   const selectedSummary =
     filteredSummaries.find((s) => s.node.node_id === selected) ??
     summaries.find((s) => s.node.node_id === selected);
-
-  const activeOps = (operations.data ?? []).filter(
-    (o) => o.status === "pending" || o.status === "queued" || o.status === "running",
-  ).length;
 
   return (
     <div
@@ -451,11 +464,21 @@ export default function App() {
           <span style={{ marginLeft: "auto", fontFamily: t.fontMono, fontSize: "0.75rem" }}>⌘K</span>
         </button>
         <span style={{ marginLeft: "auto" }} />
+        {focus && (
+          <FocusChip
+            focus={focus}
+            label={
+              summaries.find((s) => s.node.node_id === focus.id)?.node.short_name ?? focus.id
+            }
+            onOpen={() => setSelected(focus.id)}
+            onExit={() => setFocus(null)}
+          />
+        )}
         <Hud
           summary={dashboard.data}
           gateways={gateways.data ?? []}
           alerts={alerts.data ?? []}
-          activeOps={activeOps}
+          operations={operations.data ?? []}
           onGoTo={setView}
         />
         <ViewsMenu view={view} onNavigate={setView} />
@@ -513,6 +536,7 @@ export default function App() {
             runningBatch={runningBatch.data}
             activity={activity}
             selected={selected}
+            focusId={focus?.id ?? null}
             onSelect={setSelected}
             onGoTo={(v) => setView(v as View)}
             onMapReady={onMapReady}
@@ -664,6 +688,7 @@ export default function App() {
                 <NodesTable
                   summaries={filteredSummaries}
                   selected={selected}
+                  focusId={focus?.id ?? null}
                   onSelect={setSelected}
                   onToggleFavorite={(id, value) => toggleFavorite.mutate({ id, value })}
                   onToggleIgnored={(id, value) => toggleIgnored.mutate({ id, value })}
@@ -703,6 +728,8 @@ export default function App() {
           onClose={() => setSelected(null)}
           onCenter={centerOnMap}
           onGoTo={(v) => setView(v as View)}
+          focusActive={focus?.id === selected}
+          onToggleFocus={() => toggleFocus(selected)}
         />
       )}
       <ToastHost />

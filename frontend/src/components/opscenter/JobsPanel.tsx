@@ -69,11 +69,13 @@ export function JobsPanel({
   operations,
   summaries,
   runningBatch,
+  focusId,
   onGoTo,
 }: {
   operations: OperationOut[];
   summaries: NodeSummaryOut[];
   runningBatch: BatchDetailOut | undefined;
+  focusId: string | null;
   onGoTo: (view: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -100,12 +102,23 @@ export function JobsPanel({
     return (id: string) => map.get(id) ?? id;
   }, [summaries]);
 
-  const running = operations.filter((o) => o.status === "running");
-  const queued = operations.filter((o) => o.status === "pending" || o.status === "queued");
-  const recent = operations
-    .filter((o) => TERMINAL.has(o.status))
-    .sort((a, b) => ((a.finished_at ?? "") < (b.finished_at ?? "") ? 1 : -1))
-    .slice(0, 5);
+  // Focus (§7.3): los trabajos del objetivo van primero dentro de su sección
+  // y se resaltan — nunca se ocultan los demás.
+  const focusFirst = (list: OperationOut[]) =>
+    focusId == null
+      ? list
+      : [...list].sort((a, b) => Number(b.target_node_id === focusId) - Number(a.target_node_id === focusId));
+  const rowBg = (op: OperationOut) =>
+    focusId != null && op.target_node_id === focusId ? t.accentTint : undefined;
+
+  const running = focusFirst(operations.filter((o) => o.status === "running"));
+  const queued = focusFirst(operations.filter((o) => o.status === "pending" || o.status === "queued"));
+  const recent = focusFirst(
+    operations
+      .filter((o) => TERMINAL.has(o.status))
+      .sort((a, b) => ((a.finished_at ?? "") < (b.finished_at ?? "") ? 1 : -1))
+      .slice(0, 5),
+  );
   const inFlight = running.length + activeBatches.length;
 
   return (
@@ -175,7 +188,7 @@ export function JobsPanel({
             );
           })}
           {running.map((op) => (
-            <div key={op.id} style={rowStyle}>
+            <div key={op.id} style={{ ...rowStyle, background: rowBg(op) }}>
               <span style={{ color: t.accent }}>⚙</span>
               <span style={{ color: t.text }}>#{op.id} {opLabel(op)}</span>
               <span style={{ color: t.textDim, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -189,7 +202,7 @@ export function JobsPanel({
         <Section title={`COLA (${queued.length})`}>
           {queued.length === 0 && <div style={{ ...rowStyle, color: t.textFaint }}>Cola vacía.</div>}
           {queued.slice(0, 6).map((op) => (
-            <div key={op.id} style={rowStyle}>
+            <div key={op.id} style={{ ...rowStyle, background: rowBg(op) }}>
               <span style={{ color: t.textDim }}>⧗</span>
               <span style={{ color: t.text }}>{opLabel(op)}</span>
               <span style={{ color: t.textDim, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -210,7 +223,7 @@ export function JobsPanel({
           {recent.map((op) => {
             const ok = op.status === "succeeded" || op.status === "succeeded_unconfirmed";
             return (
-              <div key={op.id} style={rowStyle}>
+              <div key={op.id} style={{ ...rowStyle, background: rowBg(op) }}>
                 <span style={{ color: ok ? t.ok : t.crit }}>{ok ? "✓" : "✗"}</span>
                 <span style={{ color: t.text }}>{opLabel(op)}</span>
                 <span style={{ color: t.textDim, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

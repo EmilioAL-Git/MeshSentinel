@@ -5,6 +5,8 @@ import { chipStyle } from "../tokens";
 interface Props {
   summaries: NodeSummaryOut[];
   selected: string | null;
+  /** Nodo en Focus (§7.3): su fila se resalta también aquí — sincronía visual. */
+  focusId?: string | null;
   onSelect: (nodeId: string) => void;
   onToggleFavorite: (nodeId: string, value: boolean) => void;
   onToggleIgnored: (nodeId: string, value: boolean) => void;
@@ -25,6 +27,7 @@ function relativeTime(iso: string | null): string {
 export function NodesTable({
   summaries,
   selected,
+  focusId = null,
   onSelect,
   onToggleFavorite,
   onToggleIgnored,
@@ -61,7 +64,13 @@ export function NodesTable({
             key={node.node_id}
             style={{
               ...styles.rowHover,
-              background: selected === node.node_id ? "var(--surface-2)" : undefined,
+              background:
+                focusId === node.node_id
+                  ? "var(--accent-tint)"
+                  : selected === node.node_id
+                    ? "var(--surface-2)"
+                    : undefined,
+              boxShadow: focusId === node.node_id ? "inset 2px 0 0 var(--accent)" : undefined,
               opacity: node.is_ignored ? 0.55 : 1,
             }}
             onClick={() => onSelect(node.node_id)}

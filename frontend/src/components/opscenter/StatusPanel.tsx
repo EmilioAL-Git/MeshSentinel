@@ -88,6 +88,7 @@ export function StatusPanel({
   alerts,
   gateways,
   stats,
+  focusId,
   onOpenNode,
   onGoTo,
 }: {
@@ -95,6 +96,7 @@ export function StatusPanel({
   alerts: AlertOut[];
   gateways: GatewayOut[];
   stats: MultiGatewayStatsOut | undefined;
+  focusId: string | null;
   onOpenNode: (nodeId: string) => void;
   onGoTo: (view: string) => void;
 }) {
@@ -104,17 +106,25 @@ export function StatusPanel({
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["alerts"] }),
   });
 
+  // Focus: sus alertas primero — prioriza, nunca oculta (§7.3)
+  const isFocusAlert = (x: AlertOut) => focusId != null && x.subject_type === "node" && x.subject_id === focusId;
   const active = alerts
     .filter((a) => a.status !== "resolved")
     .sort((a, b) => {
       const rank = (x: AlertOut) => (x.severity === "CRITICAL" ? 0 : x.severity === "WARNING" ? 1 : 2);
-      return rank(a) - rank(b) || (a.fired_at < b.fired_at ? 1 : -1);
+      return (
+        Number(isFocusAlert(b)) - Number(isFocusAlert(a)) ||
+        rank(a) - rank(b) ||
+        (a.fired_at < b.fired_at ? 1 : -1)
+      );
     });
 
   const gwRows = gateways.filter((g) => g.enabled && g.deleted_at == null);
   const gwConnected = gwRows.filter((g) => g.status === "connected").length;
   const statsById = new Map((stats?.gateways ?? []).map((g) => [g.gateway_id, g]));
-  const attention = summary?.critical_nodes ?? [];
+  const attention = [...(summary?.critical_nodes ?? [])].sort(
+    (a, b) => Number(b.node_id === focusId) - Number(a.node_id === focusId),
+  );
   const reasons = summary && summary.status !== "HEALTHY" ? healthReasons(summary, gateways) : [];
 
   return (
@@ -162,6 +172,7 @@ export function StatusPanel({
             <div key={a.id} style={{ ...rowStyle, alignItems: "flex-start" }}>
               <span style={{ color, fontSize: 10, lineHeight: "18px" }}>●</span>
               <span style={{ flex: 1, minWidth: 0 }}>
+                {isFocusAlert(a) && <span style={{ color: t.accent }}>◎ </span>}
                 <span style={{ color: t.text }}>{a.message}</span>{" "}
                 <span style={{ color: t.textFaint, fontSize: 11 }}>
                   {relativeTime(a.fired_at)}
@@ -231,9 +242,10 @@ export function StatusPanel({
         emptyLabel="Ningún nodo requiere atención."
       >
         {attention.slice(0, 6).map((n) => (
-          <div key={n.node_id} style={rowStyle}>
+          <div key={n.node_id} style={{ ...rowStyle, background: n.node_id === focusId ? t.accentTint : undefined }}>
             <span title={n.reasons.join(", ")}>{n.reasons.map((r) => REASON_ICON[r]).join("")}</span>
             <span style={{ color: t.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {n.node_id === focusId && <span style={{ color: t.accent }}>◎ </span>}
               {n.short_name ?? n.node_id}
             </span>
             <span style={{ color: t.textFaint, fontFamily: t.fontMono, fontSize: 11.5 }}>

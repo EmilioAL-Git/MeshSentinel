@@ -22,6 +22,7 @@ import {
 } from "../../api/client";
 import { relativeTime } from "../../time";
 import { chipStyle, t } from "../../tokens";
+import { trackOperations } from "../../opTracker";
 import { BlockAccordion } from "../shell/BlockAccordion";
 import { toast } from "../shell/Toast";
 import { RemoteFlags } from "./RemoteFlags";
@@ -112,6 +113,8 @@ export function Inspector({
   onClose,
   onCenter,
   onGoTo,
+  focusActive,
+  onToggleFocus,
 }: {
   nodeId: string;
   summary: NodeSummaryOut | undefined;
@@ -120,6 +123,9 @@ export function Inspector({
   onClose: () => void;
   onCenter: ((lat: number, lng: number) => void) | null;
   onGoTo: (view: string) => void;
+  /** Focus (§7): true si ESTE nodo es el objetivo actual. */
+  focusActive: boolean;
+  onToggleFocus: () => void;
 }) {
   const queryClient = useQueryClient();
   const invalidate = () => {
@@ -185,13 +191,19 @@ export function Inspector({
   // Acciones rápidas: GETs a 1 clic + toast (§9). Los SETs jamás desde aquí.
   const askMetadata = useMutation({
     mutationFn: () => createOperation({ node_id: nodeId, operation_type: "metadata.get" }),
-    onSuccess: (op) => toast(`metadata.get añadida a la cola (op #${op.id})`),
+    onSuccess: (op) => {
+      trackOperations([op.id]); // toast de cierre cuando termine (opTracker)
+      toast(`metadata.get añadida a la cola (op #${op.id})`);
+    },
     onError: (e) => toast(`No se pudo encolar: ${e.message}`, { kind: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
   });
   const refreshConfig = useMutation({
     mutationFn: () => refreshNodeConfig(nodeId),
-    onSuccess: (r) => toast(`Lectura de configuración encolada (${r.operation_ids.length} operaciones)`),
+    onSuccess: (r) => {
+      trackOperations(r.operation_ids);
+      toast(`Lectura de configuración encolada (${r.operation_ids.length} operaciones)`);
+    },
     onError: (e) => toast(`No se pudo encolar: ${e.message}`, { kind: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
   });
@@ -260,6 +272,22 @@ export function Inspector({
             {n?.role ? ` · ${n.role}` : ""}
           </span>
           <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
+            <button
+              style={{
+                ...iconBtn,
+                color: focusActive ? t.accent : t.textFaint,
+                borderColor: focusActive ? t.accent : t.border,
+                background: focusActive ? t.accentTint : "transparent",
+              }}
+              title={
+                focusActive
+                  ? "Salir de Focus"
+                  : "Enfocar: el mapa, la actividad y los trabajos priorizan este nodo (nada se oculta)"
+              }
+              onClick={onToggleFocus}
+            >
+              ◎
+            </button>
             <button
               style={{ ...iconBtn, color: n?.is_favorite ? t.warn : t.textFaint }}
               title={n?.is_favorite ? "Quitar de favoritos (local)" : "Marcar favorito (local)"}

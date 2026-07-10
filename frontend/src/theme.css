@@ -169,9 +169,56 @@ a {
   animation: noc-pulse 3s ease-in-out infinite;
 }
 
+/* Mapa vivo (v0.7.3): pulso de UNA VEZ al llegar un evento de un nodo —
+   anillo que se expande y desaparece (~1.4 s), discreto, sin rebote.
+   El color lo pone la variable --pulse-color inline. */
+@keyframes noc-pulse-once {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+.noc-pulse-once {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--pulse-color, var(--accent));
+  animation: noc-pulse-once 1.4s ease-out forwards;
+  pointer-events: none;
+}
+
+/* Halo de alerta CRITICAL sobre el marcador: la única animación PERMANENTE
+   del lienzo (principio 1 — nada compite visualmente con una alerta) */
+@keyframes noc-alert-halo {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 9px rgba(229, 72, 77, 0.12);
+  }
+}
+.noc-alert-halo {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  animation: noc-alert-halo 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .noc-pulse {
+  .noc-pulse,
+  .noc-pulse-once {
     animation: none;
+    opacity: 0;
+  }
+  .noc-alert-halo {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.55);
   }
   * {
     transition: none !important;

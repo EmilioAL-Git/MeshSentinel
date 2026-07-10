@@ -10,6 +10,44 @@ que la lista") valen tanto como los bugs de UX.
 
 ---
 
+## 2026-07-10 · v0.7.3 — la consola viva
+
+### Decisión: selección ≠ Focus (sin estados ambiguos)
+- **Contexto**: la petición hablaba de "al seleccionar un nodo… atenuar el
+  resto", pero el diseño (§7.4) separa consulta (Inspector) de Focus
+  (contexto deliberado) exactamente para evitar ambigüedad.
+- **Decisión**: seleccionar = sincronía visual (anillo, filas resaltadas en
+  tabla/actividad); **Focus = ◎ explícito** (Inspector) con atenuado del
+  mapa, secciones priorizadas, chip permanente con minutos y ✕. Las
+  alertas nunca se atenúan ni se reordenan por debajo.
+- **Estado**: implementado; si en el uso real se echa en falta que la
+  selección atenúe, se revisa (es un flag).
+
+### Descubrimiento: el ◎ solo se descubre desde el Inspector
+- **Observación**: Focus se activa únicamente con el botón ◎ de la
+  cabecera del Inspector. Quien no lo pulse nunca sabrá que existe.
+- **Mejora**: acción "Enfocar" en ⌘K y en el futuro menú contextual;
+  quizá un hint la primera vez que se abre el Inspector 3 veces seguidas
+  con el mismo nodo.
+- **Estado**: pendiente.
+
+### Descubrimiento: los pulsos convierten el silencio en información
+- **Observación**: con dos gateways simulados, ver pulsos ámbar/verde
+  aparecer donde está pasando algo cambia la relación con el mapa — y su
+  AUSENCIA también informa (malla muda). El límite anti-tormenta (8 por
+  lote de 1 s, máx. 20 vivos) evita el árbol de Navidad con mallas grandes.
+- **Estado**: implementado; vigilar en malla real si la tasa de malla
+  (node.seen/telemetry) resulta ruidosa y conviene filtrar por categoría.
+
+### Limitación: los clústeres no se atenúan con Focus
+- **Contexto**: el atenuado de Focus se aplica por marcador (opacity);
+  los iconos de clúster de Leaflet no cambian.
+- **Impacto**: con zoom lejano, el efecto de Focus se percibe menos.
+- **Estado**: aceptado por ahora (tocar los iconos de clúster es frágil
+  con react-leaflet-cluster@2.1.0 fijado).
+
+---
+
 ## 2026-07-10 · v0.7.2 — el Inspector
 
 ### El toast confirma el encolado, no el resultado
@@ -24,14 +62,15 @@ que la lista") valen tanto como los bugs de UX.
 - **Mejora**: toast de cierre cuando una operación lanzada EN ESTA SESIÓN
   llega a estado terminal (el evento admin.operation ya llega por WS con
   operation_id — es solo correlar client-side).
-- **Estado**: pendiente; barato, candidato a la próxima fase.
+- **Estado**: **implementado en v0.7.3** (opTracker.ts: registro de sesión
+  + correlación del WS → toast con el resultado real).
 
 ### Esc cierra el Inspector aunque estés escribiendo en un input
 - **Contexto**: crear una etiqueta desde Organización y pulsar Esc para
   "cancelar el texto".
 - **Fricción**: se cierra el cajón entero, no el input.
 - **Mejora**: ignorar Esc global cuando el foco está en un input/textarea.
-- **Estado**: pendiente (una línea en el listener).
+- **Estado**: **implementado en v0.7.3**.
 
 ### Descubrimiento: el anillo de selección + ⌖ cambian la sensación de producto
 - **Observación**: ver el marcador resaltado al abrir el Inspector y el
@@ -39,7 +78,8 @@ que la lista") valen tanto como los bugs de UX.
   toda la fase — más que cualquier panel. La conexión visual
   inspector↔mapa es identidad. Siguiente paso natural: resaltar también la
   fila de la tabla y la entrada de actividad del nodo inspeccionado.
-- **Estado**: anotado como dirección de diseño.
+- **Estado**: **seguido en v0.7.3** (sincronía selección/Focus en tabla,
+  actividad, trabajos y alertas).
 
 ### Descubrimiento: la vista Nodos queda para comparar y seleccionar
 - **Observación**: con el Inspector global, ya no se entra en Nodos "a ver

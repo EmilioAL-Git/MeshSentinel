@@ -1,4 +1,5 @@
 import type L from "leaflet";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityEntry } from "../../activity";
 import type {
   AlertOut,
@@ -11,7 +12,7 @@ import type {
 } from "../../api/client";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { t } from "../../tokens";
-import { MapView } from "../MapView";
+import { MapView, type MapPulse } from "../MapView";
 import { ActivityPanel } from "./ActivityPanel";
 import { ConsoleRail } from "./ConsoleRail";
 import { JobsPanel } from "./JobsPanel";
@@ -53,6 +54,7 @@ export function OpsCenter({
   runningBatch,
   activity,
   selected,
+  focusId,
   onSelect,
   onGoTo,
   onMapReady,
@@ -67,12 +69,65 @@ export function OpsCenter({
   runningBatch: BatchDetailOut | undefined;
   activity: ActivityEntry[];
   selected: string | null;
+  focusId: string | null;
   onSelect: (nodeId: string | null) => void;
   onGoTo: (view: string) => void;
   onMapReady: (map: L.Map) => void;
 }) {
   const [leftOpen, setLeftOpen] = usePersistedState<boolean>("ops.left.open", true);
   const setSelected = onSelect;
+
+  // ── Mapa vivo (v0.7.3): un pulso de una sola vez por evento nuevo ──────────
+  // El feed de actividad ya llega deduplicado y en lotes de 1 s; aquí solo se
+  // detectan las entradas no vistas y se convierten en pulsos efímeros (1.4 s)
+  // sobre la posición del nodo. Nada de esto re-renderiza los marcadores.
+  const positionOf = useMemo(() => {
+    const map = new Map<string, [number, number]>();
+    for (const s of summaries) {
+      if (s.last_position) map.set(s.node.node_id, [s.last_position.latitude, s.last_position.longitude]);
+    }
+    return map;
+  }, [summaries]);
+  const [pulses, setPulses] = useState<MapPulse[]>([]);
+  const seenEntries = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const fresh: MapPulse[] = [];
+    for (const e of activity.slice(0, 12)) {
+      if (seenEntries.current.has(e.id)) continue;
+      seenEntries.current.add(e.id);
+      if (!e.nodeId) continue;
+      const pos = positionOf.get(e.nodeId);
+      if (!pos) continue;
+      const color =
+        e.category === "alerta"
+          ? t.crit
+          : e.severity === "ok"
+            ? t.ok
+            : e.severity === "warn" || e.severity === "error"
+              ? t.warn
+              : t.accent;
+      fresh.push({ key: e.id, lat: pos[0], lng: pos[1], color });
+    }
+    if (seenEntries.current.size > 2000) seenEntries.current.clear();
+    if (fresh.length === 0) return;
+    const batch = fresh.slice(0, 8); // límite anti-tormenta
+    setPulses((prev) => [...prev, ...batch].slice(-20));
+    const timer = window.setTimeout(() => {
+      setPulses((prev) => prev.filter((p) => !batch.some((b) => b.key === p.key)));
+    }, 1_500);
+    return () => window.clearTimeout(timer);
+  }, [activity, positionOf]);
+
+  // Nodos con alerta CRITICAL activa: halo permanente, jamás atenuados
+  const alertNodeIds = useMemo(
+    () =>
+      new Set(
+        alerts
+          .filter((a) => a.status !== "resolved" && a.severity === "CRITICAL" && a.subject_type === "node")
+          .map((a) => a.subject_id),
+      ),
+    [alerts],
+  );
 
   const activeOps = operations.filter(
     (o) => o.status === "pending" || o.status === "queued" || o.status === "running",
@@ -99,6 +154,7 @@ export function OpsCenter({
             alerts={alerts}
             gateways={gateways}
             stats={stats}
+            focusId={focusId}
             onOpenNode={setSelected}
             onGoTo={onGoTo}
           />
@@ -114,6 +170,9 @@ export function OpsCenter({
           onShowDetail={setSelected}
           fill
           selectedId={selected}
+          focusId={focusId}
+          alertNodeIds={alertNodeIds}
+          pulses={pulses}
           onMapReady={onMapReady}
         />
         <button
@@ -133,7 +192,19 @@ export function OpsCenter({
             id: "activity",
             icon: "▤",
             title: "Actividad — qué está ocurriendo ahora",
-            content: <ActivityPanel entries={activity} onOpenNode={setSelected} />,
+            content: (
+              <ActivityPanel
+                entries={activity}
+                focusId={focusId}
+                focusLabel={
+                  focusId
+                    ? (summaries.find((s) => s.node.node_id === focusId)?.node.short_name ?? focusId)
+                    : null
+                }
+                selectedId={selected}
+                onOpenNode={setSelected}
+              />
+            ),
           },
           {
             id: "jobs",
@@ -145,6 +216,7 @@ export function OpsCenter({
                 operations={operations}
                 summaries={summaries}
                 runningBatch={runningBatch}
+                focusId={focusId}
                 onGoTo={onGoTo}
               />
             ),
