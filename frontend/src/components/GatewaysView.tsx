@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import {
   configureGateway,
   connectGateway,
@@ -17,24 +17,22 @@ import {
   type GatewayStatus,
   type TestConnectionResultOut,
 } from "../api/client";
-import { styles } from "../styles";
 
-const input: CSSProperties = {
-  background: "var(--bg)",
-  border: "1px solid var(--border)",
-  color: "var(--text)",
-  borderRadius: 6,
-  padding: "0.3rem 0.5rem",
-};
-const btn: CSSProperties = { ...input, cursor: "pointer" };
+/**
+ * Enlaces (identidad v0.8): las pasarelas dejan de ser tarjetas apiladas y
+ * pasan a ser módulos de un rack — un panel por enlace con luz de estado,
+ * telemetría de cobertura M6.2 y controles inline. La lógica (asistente
+ * Buscar→Probar→Guardar, conectar/desconectar, borrado lógico) es la de M5,
+ * intacta; solo cambia la presentación.
+ */
 
-const STATUS_DOT: Record<string, string> = {
-  connected: "🟢",
-  connecting: "🟡",
-  reconnecting: "🟡",
-  disconnected: "🔴",
-  error: "🔴",
-  unassigned: "🔴",
+const STATUS_COLOR: Record<string, string> = {
+  connected: "var(--ok)",
+  connecting: "var(--warn)",
+  reconnecting: "var(--warn)",
+  disconnected: "var(--crit)",
+  error: "var(--crit)",
+  unassigned: "var(--text-faint)",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -46,10 +44,13 @@ const STATUS_LABEL: Record<string, string> = {
   unassigned: "Sin conexión",
 };
 
-function StatusBadge({ status }: { status: GatewayStatus | string }) {
+function StatusLight({ status }: { status: GatewayStatus | string }) {
+  const color = STATUS_COLOR[status] ?? "var(--crit)";
+  const pulse = status === "connected" || status === "connecting" || status === "reconnecting";
   return (
-    <span>
-      {STATUS_DOT[status] ?? "🔴"} {STATUS_LABEL[status] ?? status}
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color }}>
+      <span className={pulse ? "noc-pulse" : undefined} style={{ fontSize: 9 }}>●</span>
+      <span style={{ fontSize: 12 }}>{STATUS_LABEL[status] ?? status}</span>
     </span>
   );
 }
@@ -68,8 +69,20 @@ const TRANSPORT_LABEL: Record<string, string> = {
   serial: "USB",
   tcp: "TCP",
   http: "HTTP",
-  simulated: "Simulado",
+  simulated: "SIM",
 };
+
+/** Par clave/valor en mono, la unidad de lectura de los módulos del rack. */
+function Field({ k, v, title }: { k: string; v: React.ReactNode; title?: string }) {
+  return (
+    <div title={title} style={{ minWidth: 0 }}>
+      <div className="microlabel">{k}</div>
+      <div className="mono" style={{ fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {v}
+      </div>
+    </div>
+  );
+}
 
 // ── Asistente: Buscar dispositivos → Seleccionar → Probar conexión → Guardar ─
 
@@ -168,12 +181,12 @@ function AddGatewayWizard({
         : simSeed.trim() !== "";
 
   return (
-    <div style={styles.card}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", flexWrap: "wrap" }}>
-        <h3 style={{ margin: 0 }}>Añadir gateway</h3>
+    <div className="panel" style={{ margin: "0.75rem", flexShrink: 0 }}>
+      <div className="panel-head">
+        <span className="panel-title">Nuevo enlace</span>
         {candidates.length > 1 ? (
           <select
-            style={input}
+            className="input"
             value={gatewayId}
             onChange={(e) => {
               onSelectCandidate(e.target.value);
@@ -187,150 +200,163 @@ function AddGatewayWizard({
             ))}
           </select>
         ) : (
-          <span style={styles.mono}>({gatewayId})</span>
+          <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{gatewayId}</span>
         )}
-        <select
-          style={input}
-          value={transportType}
-          onChange={(e) => {
-            setTransportType(e.target.value as "usb" | "tcp" | "simulated");
-            setTestResult(null);
-          }}
-        >
-          <option value="usb">USB</option>
-          <option value="tcp">TCP</option>
-          <option value="simulated">Simulado</option>
-        </select>
-        <button style={{ ...btn, marginLeft: "auto" }} onClick={onCancel}>✕ Cancelar</button>
+        <span className="seg">
+          {(["usb", "tcp", "simulated"] as const).map((tt) => (
+            <button
+              key={tt}
+              className={transportType === tt ? "on" : undefined}
+              onClick={() => {
+                setTransportType(tt);
+                setTestResult(null);
+              }}
+            >
+              {TRANSPORT_LABEL[tt]}
+            </button>
+          ))}
+        </span>
+        <span className="panel-count" />
+        <button className="btn ghost" onClick={onCancel}>✕ Cancelar</button>
       </div>
-
-      {transportType === "simulated" && (
-        <div style={{ margin: "0.8rem 0" }}>
-          <p style={styles.dim}>
-            1. Parámetros de la malla simulada. La semilla propuesta no está usada por ninguna otra
-            pasarela; una <em>semilla compartida</em> igual en varias pasarelas genera nodos comunes
-            (SHRxx) para validar Multi-Gateway.
-          </p>
-          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-            <label>Semilla <input style={{ ...input, width: 80 }} type="number" value={simSeed} onChange={(e) => { setSimSeed(e.target.value); setTestResult(null); }} /></label>
-            <label>Nodos <input style={{ ...input, width: 70 }} type="number" value={simNodeCount} onChange={(e) => { setSimNodeCount(e.target.value); setTestResult(null); }} /></label>
-            <label title="0 = sin nodos compartidos">Semilla compartida <input style={{ ...input, width: 80 }} type="number" value={simSharedSeed} onChange={(e) => { setSimSharedSeed(e.target.value); setTestResult(null); }} /></label>
-            <label>Nodos compartidos <input style={{ ...input, width: 70 }} type="number" value={simSharedNodeCount} onChange={(e) => { setSimSharedNodeCount(e.target.value); setTestResult(null); }} /></label>
-          </div>
-        </div>
-      )}
-
-      {transportType === "tcp" && (
-        <div style={{ margin: "0.8rem 0" }}>
-          <p style={styles.dim}>
-            1. Dirección del nodo en la red (WiFi/Ethernet). Sin búsqueda automática: introduce el
-            host manualmente. El firmware solo admite un cliente TCP a la vez — cierra la app
-            oficial si está conectada a ese nodo.
-          </p>
-          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-            <label>
-              Host{" "}
-              <input
-                style={{ ...input, width: 180 }}
-                placeholder="192.168.1.50 o meshtastic.local"
-                value={tcpHost}
-                onChange={(e) => { setTcpHost(e.target.value); setTestResult(null); }}
-              />
-            </label>
-            <label>
-              Puerto{" "}
-              <input
-                style={{ ...input, width: 80 }}
-                type="number"
-                value={tcpPort}
-                onChange={(e) => { setTcpPort(e.target.value); setTestResult(null); }}
-              />
-            </label>
-          </div>
-        </div>
-      )}
-
-      {transportType === "usb" && (
-      <div style={{ margin: "0.8rem 0" }}>
-        <p style={styles.dim}>1. Buscar dispositivos USB conectados a esta pasarela.</p>
-        <button style={btn} disabled={discover.isPending} onClick={() => discover.mutate()}>
-          {discover.isPending ? "Buscando…" : "🔍 Buscar dispositivos"}
-        </button>
-        {discover.isError && <p style={styles.bad}>{String(discover.error)}</p>}
-        {devices != null && devices.length === 0 && (
-          <p style={styles.dim}>Sin dispositivos detectados. Comprueba el cable o pulsa buscar de nuevo.</p>
-        )}
-        {devices != null && devices.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginTop: "0.5rem" }}>
-            {devices.map((d) => (
-              <label
-                key={d.port}
-                style={{
-                  display: "flex", gap: "0.6rem", alignItems: "center", cursor: "pointer",
-                  border: "1px solid " + (selectedPort === d.port ? "var(--accent)" : "var(--border)"),
-                  borderRadius: 6, padding: "0.4rem 0.6rem",
-                }}
-              >
-                <input
-                  type="radio"
-                  name="device"
-                  checked={selectedPort === d.port}
-                  onChange={() => { setSelectedPort(d.port); setTestResult(null); }}
-                />
-                <span style={styles.mono}>{d.port}</span>
-                <span style={styles.dim}>{d.description ?? "—"}</span>
-                {d.vid && d.pid && <span style={styles.dim}>VID:PID {d.vid}:{d.pid}</span>}
-                {d.serial_number && <span style={styles.dim}>S/N {d.serial_number}</span>}
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
-      )}
-
-      <div style={{ margin: "0.8rem 0" }}>
-        <p style={styles.dim}>2. Probar la conexión antes de guardar.</p>
-        <button style={btn} disabled={!paramsReady || test.isPending} onClick={() => test.mutate()}>
-          {test.isPending ? "Probando…" : "▶ Probar conexión"}
-        </button>
-        {testResult && (
-          testResult.ok ? (
-            <p style={styles.ok}>
-              ✓ Conectado — nodo {testResult.local_short_name ?? testResult.local_node_id}
-              {testResult.local_hw_model ? ` (${testResult.local_hw_model})` : ""}
-              {testResult.local_firmware_version ? ` · fw ${testResult.local_firmware_version}` : ""}
+      <div className="panel-body">
+        {transportType === "simulated" && (
+          <div style={{ marginBottom: "0.8rem" }}>
+            <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
+              1 · Parámetros de la malla simulada. La semilla propuesta no está usada por ninguna otra
+              pasarela; una <em>semilla compartida</em> igual en varias pasarelas genera nodos comunes
+              (SHRxx) para validar Multi-Gateway.
             </p>
-          ) : (
-            <p style={styles.bad}>✗ {testResult.error ?? "Fallo de conexión"}</p>
-          )
+            <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", fontSize: 12 }}>
+              <label>Semilla <input className="input" style={{ width: 80 }} type="number" value={simSeed} onChange={(e) => { setSimSeed(e.target.value); setTestResult(null); }} /></label>
+              <label>Nodos <input className="input" style={{ width: 70 }} type="number" value={simNodeCount} onChange={(e) => { setSimNodeCount(e.target.value); setTestResult(null); }} /></label>
+              <label title="0 = sin nodos compartidos">Semilla compartida <input className="input" style={{ width: 80 }} type="number" value={simSharedSeed} onChange={(e) => { setSimSharedSeed(e.target.value); setTestResult(null); }} /></label>
+              <label>Nodos compartidos <input className="input" style={{ width: 70 }} type="number" value={simSharedNodeCount} onChange={(e) => { setSimSharedNodeCount(e.target.value); setTestResult(null); }} /></label>
+            </div>
+          </div>
         )}
-      </div>
 
-      <div style={{ margin: "0.8rem 0" }}>
-        <p style={styles.dim}>3. Nombre y guardar.</p>
-        <input
-          style={{ ...input, minWidth: 220 }}
-          placeholder="Nombre (p. ej. Casa, Repetidor Norte…)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <button
-          style={{ ...btn, marginLeft: "0.5rem", background: testResult?.ok ? "var(--accent)" : "transparent" }}
-          disabled={!testResult?.ok || !name.trim() || save.isPending}
-          onClick={() => save.mutate()}
-          title={!testResult?.ok ? "Prueba la conexión con éxito antes de guardar" : undefined}
-        >
-          💾 Guardar
-        </button>
-        {save.isError && <p style={styles.bad}>{String(save.error)}</p>}
+        {transportType === "tcp" && (
+          <div style={{ marginBottom: "0.8rem" }}>
+            <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
+              1 · Dirección del nodo en la red (WiFi/Ethernet). Sin búsqueda automática: introduce el
+              host manualmente. El firmware solo admite un cliente TCP a la vez — cierra la app
+              oficial si está conectada a ese nodo.
+            </p>
+            <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", fontSize: 12 }}>
+              <label>
+                Host{" "}
+                <input
+                  className="input"
+                  style={{ width: 190, fontFamily: "var(--font-mono)" }}
+                  placeholder="192.168.1.50 o meshtastic.local"
+                  value={tcpHost}
+                  onChange={(e) => { setTcpHost(e.target.value); setTestResult(null); }}
+                />
+              </label>
+              <label>
+                Puerto{" "}
+                <input
+                  className="input"
+                  style={{ width: 80 }}
+                  type="number"
+                  value={tcpPort}
+                  onChange={(e) => { setTcpPort(e.target.value); setTestResult(null); }}
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {transportType === "usb" && (
+          <div style={{ marginBottom: "0.8rem" }}>
+            <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
+              1 · Buscar dispositivos USB conectados a esta pasarela.
+            </p>
+            <button className="btn" disabled={discover.isPending} onClick={() => discover.mutate()}>
+              {discover.isPending ? "Buscando…" : "⌕ Buscar dispositivos"}
+            </button>
+            {discover.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(discover.error)}</p>}
+            {devices != null && devices.length === 0 && (
+              <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
+                Sin dispositivos detectados. Comprueba el cable o pulsa buscar de nuevo.
+              </p>
+            )}
+            {devices != null && devices.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginTop: "0.5rem" }}>
+                {devices.map((d) => (
+                  <label
+                    key={d.port}
+                    style={{
+                      display: "flex", gap: "0.6rem", alignItems: "center", cursor: "pointer", fontSize: 12,
+                      border: "1px solid " + (selectedPort === d.port ? "var(--accent)" : "var(--border)"),
+                      borderRadius: 3, padding: "0.4rem 0.6rem",
+                      background: selectedPort === d.port ? "var(--accent-tint)" : "transparent",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="device"
+                      checked={selectedPort === d.port}
+                      onChange={() => { setSelectedPort(d.port); setTestResult(null); }}
+                    />
+                    <span className="mono">{d.port}</span>
+                    <span style={{ color: "var(--text-dim)" }}>{d.description ?? "—"}</span>
+                    {d.vid && d.pid && <span style={{ color: "var(--text-faint)" }}>VID:PID {d.vid}:{d.pid}</span>}
+                    {d.serial_number && <span style={{ color: "var(--text-faint)" }}>S/N {d.serial_number}</span>}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ marginBottom: "0.8rem" }}>
+          <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>2 · Probar la conexión antes de guardar.</p>
+          <button className="btn" disabled={!paramsReady || test.isPending} onClick={() => test.mutate()}>
+            {test.isPending ? "Probando…" : "▶ Probar conexión"}
+          </button>
+          {testResult && (
+            testResult.ok ? (
+              <p style={{ color: "var(--ok)", fontSize: 12 }}>
+                ✓ Conectado — nodo {testResult.local_short_name ?? testResult.local_node_id}
+                {testResult.local_hw_model ? ` (${testResult.local_hw_model})` : ""}
+                {testResult.local_firmware_version ? ` · fw ${testResult.local_firmware_version}` : ""}
+              </p>
+            ) : (
+              <p style={{ color: "var(--crit)", fontSize: 12 }}>✗ {testResult.error ?? "Fallo de conexión"}</p>
+            )
+          )}
+        </div>
+
+        <div>
+          <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>3 · Nombre y guardar.</p>
+          <input
+            className="input"
+            style={{ minWidth: 220 }}
+            placeholder="Nombre (p. ej. Casa, Repetidor Norte…)"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button
+            className={`btn${testResult?.ok ? " primary" : ""}`}
+            style={{ marginLeft: "0.5rem" }}
+            disabled={!testResult?.ok || !name.trim() || save.isPending}
+            onClick={() => save.mutate()}
+            title={!testResult?.ok ? "Prueba la conexión con éxito antes de guardar" : undefined}
+          >
+            Guardar enlace
+          </button>
+          {save.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(save.error)}</p>}
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Tarjeta de un gateway ya reportado (gestionado o no) ─────────────────────
+// ── Módulo del rack: un gateway ya reportado (gestionado o no) ───────────────
 
-function GatewayCard({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayStatsOut }) {
+function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayStatsOut }) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [editName, setEditName] = useState(gateway.name ?? "");
@@ -353,122 +379,126 @@ function GatewayCard({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayS
     onSuccess: invalidate,
   });
 
+  const statusColor = STATUS_COLOR[gateway.status] ?? "var(--crit)";
+
   return (
-    <div style={{ ...styles.card, marginBottom: "0.6rem" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", cursor: "pointer" }} onClick={() => setExpanded((v) => !v)}>
-        <strong>{gateway.name ?? gateway.gateway_id}</strong>
-        <span style={styles.dim}>{TRANSPORT_LABEL[gateway.transport] ?? gateway.transport}</span>
-        <StatusBadge status={gateway.status} />
-        {!gateway.managed && <span style={{ color: "var(--warn)" }}>sin configurar</span>}
-        {gateway.managed && !gateway.enabled && <span style={styles.dim}>deshabilitado</span>}
-        <span style={{ marginLeft: "auto", ...styles.dim, fontSize: "0.8rem" }}>{expanded ? "▲" : "▼"}</span>
+    <div className="panel" style={{ boxShadow: `inset 3px 0 0 ${gateway.enabled ? statusColor : "var(--border)"}` }}>
+      <div
+        className="panel-head"
+        style={{ cursor: "pointer" }}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="panel-title" style={{ color: "var(--text)" }}>
+          {gateway.name ?? gateway.gateway_id}
+        </span>
+        <span className="chip">{TRANSPORT_LABEL[gateway.transport] ?? gateway.transport}</span>
+        <StatusLight status={gateway.status} />
+        {!gateway.managed && <span className="chip" style={{ color: "var(--warn)", borderColor: "var(--warn)" }}>sin configurar</span>}
+        {gateway.managed && !gateway.enabled && <span className="chip">deshabilitado</span>}
+        <span className="panel-count">{gateway.gateway_id} {expanded ? "▲" : "▼"}</span>
       </div>
 
-      {/* Cobertura de esta pasarela (M6.2, node_gateway_links) */}
-      {stats && (
-        <div style={{ display: "flex", gap: "1.2rem", flexWrap: "wrap", marginTop: "0.4rem", fontSize: "0.85rem", ...styles.dim }}>
-          <span title="Nodos con escucha activa por esta pasarela">
-            Nodos visibles: <strong style={{ color: "var(--text)" }}>{stats.nodes_visible}</strong>
-          </span>
-          <span title="Nodos que solo esta pasarela oye ahora mismo">
-            Exclusivos: <strong style={{ color: "var(--text)" }}>{stats.nodes_exclusive}</strong>
-          </span>
-          <span title="Nodos que también oye otra pasarela">
-            Compartidos: <strong style={{ color: "var(--text)" }}>{stats.nodes_shared}</strong>
-          </span>
-          <span title="Nodos cuya pasarela primaria es esta">
-            Primaria de: <strong style={{ color: "var(--text)" }}>{stats.primary_for}</strong>
-          </span>
-          <span>Última actividad: {relativeTime(stats.last_heard_at)}</span>
-        </div>
-      )}
-
-      {!gateway.managed && (
-        <div style={{ marginTop: "0.6rem" }}>
-          <p style={styles.dim}>
-            Pasarela detectada por heartbeat (configuración de <span style={styles.mono}>.env</span>), aún sin
-            gestionar desde la aplicación.
-          </p>
-          <button style={btn} disabled={doImport.isPending} onClick={() => doImport.mutate()}>
-            ⬆ Importar configuración actual
-          </button>
-          {doImport.isError && <p style={styles.bad}>{String(doImport.error)}</p>}
-        </div>
-      )}
-
-      {expanded && gateway.managed && (
-        <div style={{ marginTop: "0.8rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-          <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", fontSize: "0.9rem" }}>
-            <span>Nodo local: <span style={styles.mono}>{gateway.local_node_id ?? "—"}</span></span>
-            <span>Nombre corto: {gateway.local_short_name ?? "—"}</span>
-            <span>Nombre largo: {gateway.local_long_name ?? "—"}</span>
-            <span>Hardware: {gateway.local_hw_model ?? "—"}</span>
-            <span>Firmware: {gateway.local_firmware_version ?? "—"}</span>
+      <div className="panel-body">
+        {/* Cobertura de esta pasarela (M6.2, node_gateway_links) */}
+        {stats && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: "0.6rem", marginBottom: expanded || !gateway.managed ? "0.75rem" : 0 }}>
+            <Field k="Visibles" v={stats.nodes_visible} title="Nodos con escucha activa por esta pasarela" />
+            <Field k="Exclusivos" v={stats.nodes_exclusive} title="Nodos que solo esta pasarela oye ahora mismo" />
+            <Field k="Compartidos" v={stats.nodes_shared} title="Nodos que también oye otra pasarela" />
+            <Field k="Primaria de" v={stats.primary_for} title="Nodos cuya pasarela primaria es esta" />
+            <Field k="Actividad" v={relativeTime(stats.last_heard_at)} />
           </div>
-          <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", fontSize: "0.85rem", ...styles.dim }}>
-            <span>Última conexión: {relativeTime(gateway.last_connected_at)}</span>
-            <span>Última desconexión: {relativeTime(gateway.last_disconnected_at)}</span>
-            <span>
-              Último error: {gateway.last_error ? `${gateway.last_error} (${relativeTime(gateway.last_error_at)})` : "—"}
-            </span>
-          </div>
+        )}
 
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
-            <input style={input} value={editName} onChange={(e) => setEditName(e.target.value)} />
-            <input
-              style={{ ...input, width: 70 }}
-              type="number"
-              value={editPriority}
-              onChange={(e) => setEditPriority(e.target.value)}
-              title="Prioridad (reservado para autoselección en Multi-Gateway)"
-            />
-            <button style={btn} disabled={doSaveEdit.isPending} onClick={() => doSaveEdit.mutate()}>
-              Guardar cambios
-            </button>
-            <span style={{ marginLeft: "auto", display: "flex", gap: "0.4rem" }}>
-              {gateway.status === "connected" || gateway.status === "connecting" || gateway.status === "reconnecting" ? (
-                <button style={btn} disabled={doDisconnect.isPending} onClick={() => doDisconnect.mutate()}>
-                  Desconectar
-                </button>
-              ) : (
-                <button style={btn} disabled={doConnect.isPending} onClick={() => doConnect.mutate()}>
-                  Conectar
-                </button>
-              )}
-              <button
-                style={btn}
-                disabled={doToggleEnabled.isPending}
-                onClick={() => doToggleEnabled.mutate(!gateway.enabled)}
-              >
-                {gateway.enabled ? "Deshabilitar" : "Habilitar"}
-              </button>
-              {deleteArmed ? (
-                <button style={{ ...btn, background: "var(--crit)" }} onClick={() => doDelete.mutate()}>
-                  ¿Eliminar «{gateway.name}»?
-                </button>
-              ) : (
-                <button style={btn} onClick={() => setDeleteArmed(true)}>
-                  Eliminar
-                </button>
-              )}
-            </span>
-          </div>
-          {(doConnect.isError || doDisconnect.isError || doDelete.isError || doSaveEdit.isError) && (
-            <p style={styles.bad}>
-              {String(doConnect.error ?? doDisconnect.error ?? doDelete.error ?? doSaveEdit.error)}
+        {!gateway.managed && (
+          <div>
+            <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
+              Pasarela detectada por heartbeat (configuración de <span className="mono">.env</span>), aún sin
+              gestionar desde la aplicación.
             </p>
-          )}
-        </div>
-      )}
+            <button className="btn" disabled={doImport.isPending} onClick={() => doImport.mutate()}>
+              ⬆ Importar configuración actual
+            </button>
+            {doImport.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(doImport.error)}</p>}
+          </div>
+        )}
+
+        {expanded && gateway.managed && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "0.6rem" }}>
+              <Field k="Nodo local" v={gateway.local_node_id ?? "—"} />
+              <Field k="Nombre corto" v={gateway.local_short_name ?? "—"} />
+              <Field k="Nombre largo" v={gateway.local_long_name ?? "—"} />
+              <Field k="Hardware" v={gateway.local_hw_model ?? "—"} />
+              <Field k="Firmware" v={gateway.local_firmware_version ?? "—"} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.6rem" }}>
+              <Field k="Última conexión" v={relativeTime(gateway.last_connected_at)} />
+              <Field k="Última desconexión" v={relativeTime(gateway.last_disconnected_at)} />
+              <Field
+                k="Último error"
+                v={gateway.last_error ? `${gateway.last_error} (${relativeTime(gateway.last_error_at)})` : "—"}
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+              <input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} />
+              <input
+                className="input"
+                style={{ width: 70 }}
+                type="number"
+                value={editPriority}
+                onChange={(e) => setEditPriority(e.target.value)}
+                title="Prioridad (reservado para autoselección en Multi-Gateway)"
+              />
+              <button className="btn" disabled={doSaveEdit.isPending} onClick={() => doSaveEdit.mutate()}>
+                Guardar cambios
+              </button>
+              <span style={{ marginLeft: "auto", display: "flex", gap: "0.4rem" }}>
+                {gateway.status === "connected" || gateway.status === "connecting" || gateway.status === "reconnecting" ? (
+                  <button className="btn" disabled={doDisconnect.isPending} onClick={() => doDisconnect.mutate()}>
+                    Desconectar
+                  </button>
+                ) : (
+                  <button className="btn" disabled={doConnect.isPending} onClick={() => doConnect.mutate()}>
+                    Conectar
+                  </button>
+                )}
+                <button
+                  className="btn"
+                  disabled={doToggleEnabled.isPending}
+                  onClick={() => doToggleEnabled.mutate(!gateway.enabled)}
+                >
+                  {gateway.enabled ? "Deshabilitar" : "Habilitar"}
+                </button>
+                {deleteArmed ? (
+                  <button className="btn danger" onClick={() => doDelete.mutate()}>
+                    ¿Eliminar «{gateway.name}»?
+                  </button>
+                ) : (
+                  <button className="btn" onClick={() => setDeleteArmed(true)}>
+                    Eliminar
+                  </button>
+                )}
+              </span>
+            </div>
+            {(doConnect.isError || doDisconnect.isError || doDelete.isError || doSaveEdit.isError) && (
+              <p style={{ color: "var(--crit)", fontSize: 12, margin: 0 }}>
+                {String(doConnect.error ?? doDisconnect.error ?? doDelete.error ?? doSaveEdit.error)}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-// ── Vista principal ──────────────────────────────────────────────────────────
+// ── Workspace ────────────────────────────────────────────────────────────────
 
 export function GatewaysView() {
   // include_deleted: una pasarela eliminada (borrado lógico) sigue siendo un
-  // candidato válido para "+ Añadir gateway" — el proceso puede seguir vivo,
+  // candidato válido para "+ Añadir enlace" — el proceso puede seguir vivo,
   // solo se retiró de la gestión activa (ver ADR 0021 §6).
   const gateways = useQuery({
     queryKey: ["gateways", "all"],
@@ -489,26 +519,18 @@ export function GatewaysView() {
   // un selector explícito en vez de auto-elegir el primero.
   const candidates = all.filter((g) => !g.managed || g.deleted_at != null).map((g) => g.gateway_id);
   const statsById = new Map((stats.data?.gateways ?? []).map((g) => [g.gateway_id, g]));
-
-  if (wizardFor) {
-    return (
-      <AddGatewayWizard
-        gatewayId={wizardFor}
-        candidates={candidates}
-        gateways={all}
-        onSelectCandidate={setWizardFor}
-        onCancel={() => setWizardFor(null)}
-        onSaved={() => setWizardFor(null)}
-      />
-    );
-  }
+  const connected = list.filter((g) => g.status === "connected").length;
 
   return (
-    <div>
-      <div style={{ ...styles.card, display: "flex", alignItems: "center", gap: "0.8rem" }}>
-        <h2 style={{ margin: 0 }}>Gateways</h2>
+    <div className="ws">
+      <div className="toolbar">
+        <span className="microlabel">Enlaces de malla</span>
+        <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          {connected}/{list.length} conectados
+        </span>
+        <span style={{ marginLeft: "auto" }} />
         <button
-          style={{ ...btn, marginLeft: "auto", background: candidates.length > 0 ? "var(--accent)" : "transparent" }}
+          className={`btn${candidates.length > 0 ? " primary" : ""}`}
           disabled={candidates.length === 0}
           onClick={() => candidates.length > 0 && setWizardFor(candidates[0])}
           title={
@@ -517,23 +539,47 @@ export function GatewaysView() {
               : "Todos los procesos de pasarela detectados ya están configurados"
           }
         >
-          + Añadir gateway
+          + Añadir enlace
         </button>
       </div>
 
-      {gateways.isLoading && <p style={styles.dim}>Cargando…</p>}
-      {list.length === 0 && !gateways.isLoading && (
-        <p style={styles.dim}>Ninguna pasarela ha reportado actividad todavía.</p>
-      )}
-      {list.map((g) => (
-        <GatewayCard key={g.gateway_id} gateway={g} stats={statsById.get(g.gateway_id)} />
-      ))}
+      {wizardFor ? (
+        <div className="ws-scroll">
+          <AddGatewayWizard
+            gatewayId={wizardFor}
+            candidates={candidates}
+            gateways={all}
+            onSelectCandidate={setWizardFor}
+            onCancel={() => setWizardFor(null)}
+            onSaved={() => setWizardFor(null)}
+          />
+        </div>
+      ) : (
+        <div className="ws-scroll" style={{ padding: "0.75rem" }}>
+          {gateways.isLoading && <div className="empty">Cargando…</div>}
+          {list.length === 0 && !gateways.isLoading && (
+            <div className="empty">Ninguna pasarela ha reportado actividad todavía.</div>
+          )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(430px, 1fr))",
+              gap: "0.75rem",
+              alignItems: "start",
+            }}
+          >
+            {list.map((g) => (
+              <GatewayModule key={g.gateway_id} gateway={g} stats={statsById.get(g.gateway_id)} />
+            ))}
+          </div>
 
-      {deleted.length > 0 && (
-        <p style={{ ...styles.dim, fontSize: "0.85rem" }}>
-          Eliminados: {deleted.map((g) => g.name ?? g.gateway_id).join(", ")} — usa «+ Añadir gateway» para
-          volver a configurar el mismo proceso.
-        </p>
+          {deleted.length > 0 && (
+            <p style={{ color: "var(--text-faint)", fontSize: 12 }}>
+              Eliminados: {deleted.map((g) => g.name ?? g.gateway_id).join(", ")} — usa «+ Añadir enlace»
+              para volver a configurar el mismo proceso.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

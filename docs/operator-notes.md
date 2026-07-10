@@ -229,3 +229,29 @@ que la lista") valen tanto como los bugs de UX.
 - **Fricción**: para correlar con logs los segundos ayudarían; se evitó un
   tick por segundo.
 - **Estado**: pendiente de ver si algún flujo real los echa de menos.
+
+## v0.8.0 — identidad "consola" (rediseño global de presentación)
+
+### Los tiles claros de OpenStreetMap rompen la identidad oscura del Centro
+- **Contexto**: con todo el chasis oscuro, el mapa claro es ahora el único
+  elemento que no parece del producto (antes lo disimulaban las tarjetas).
+- **Mejora**: tiles oscuros (decisión pendiente del usuario: CDN externo
+  tipo CartoDB dark vs self-host).
+- **Estado**: pendiente — ya estaba anotado en v0.7.4, ahora es MÁS urgente.
+
+### Config y Perfiles siguen siendo formularios re-cromados, no instrumentos
+- **Contexto**: v0.8.0 los envolvió en el chasis (legacy-chrome) pero su
+  estructura interna (selects + tarjetas apiladas) es de la era anterior.
+- **Mejora**: Config como workspace de dos columnas (árbol de secciones /
+  editor con diff en vivo); Perfiles como comparador lado a lado.
+- **Estado**: pendiente — candidatos naturales a v0.8.1.
+
+### El riel deja el id de vista "nodes" con etiqueta "Flota"
+- **Contexto**: renombrar el id rompería persistencia/enlaces internos;
+  se mantuvo el id histórico con vocabulario nuevo solo en la UI.
+- **Estado**: aceptado, no es fricción del operador.
+
+### Descubrimiento: la barra de armado de lotes solo existe con selección
+- **Contexto**: en la era anterior la botonera de selección ocupaba sitio
+  siempre; ahora aparece bajo el roster al armar el primer nodo, con el
+  recuento en los KPIs. Menos ruido en el 95 % del tiempo.

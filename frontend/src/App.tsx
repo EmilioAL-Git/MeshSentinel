@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ACTIVITY_LIMIT, DASHBOARD_ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
+import { ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
 import {
   fetchAlerts,
   fetchBatch,
@@ -23,23 +23,20 @@ import {
 import { ActivityConsole } from "./components/ActivityConsole";
 import { AlertsView } from "./components/AlertsView";
 import { ConfigEditor } from "./components/ConfigEditor";
-import { Dashboard } from "./components/Dashboard";
+import { FleetView } from "./components/fleet/FleetView";
 import { GatewaysView } from "./components/GatewaysView";
 import { Inspector } from "./components/inspector/Inspector";
 import { BatchWizard } from "./components/jobs/BatchWizard";
 import { JobsView } from "./components/jobs/JobsView";
-import { MapView } from "./components/MapView";
-import { NodeFiltersBar } from "./components/NodeFiltersBar";
-import { NodesTable } from "./components/NodesTable";
 import { OpsCenter } from "./components/opscenter/OpsCenter";
 import { ProfilesView } from "./components/ProfilesView";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { FocusChip, type FocusState } from "./components/shell/FocusChip";
 import { Hud } from "./components/shell/Hud";
+import { NavRail } from "./components/shell/NavRail";
 import { StatusBar } from "./components/shell/StatusBar";
 import { toast, ToastHost } from "./components/shell/Toast";
 import { consumeFinished } from "./opTracker";
-import { styles } from "./styles";
 import { t } from "./tokens";
 
 const DATA_EVENTS = new Set([
@@ -55,127 +52,45 @@ const DATA_EVENTS = new Set([
 
 type View =
   | "ops"
-  | "dashboard"
   | "nodes"
-  | "map"
-  | "alerts"
   | "jobs"
+  | "alerts"
   | "config"
   | "profiles"
   | "activity"
   | "gateways";
 
-// Vistas de la aplicación: el Centro de Operaciones es la principal; el resto
-// son especializadas (menú Vistas ▾ y acciones "Ir a" de ⌘K). El Dashboard
-// clásico queda como red de seguridad hasta que el Centro lo absorba del todo.
-const VIEWS: { id: View; label: string }[] = [
-  { id: "ops", label: "Centro de Operaciones" },
-  { id: "jobs", label: "Trabajos" },
-  { id: "nodes", label: "Nodos" },
-  { id: "map", label: "Mapa" },
-  { id: "alerts", label: "Alertas" },
-  { id: "config", label: "Configuración" },
-  { id: "profiles", label: "Perfiles" },
-  { id: "activity", label: "Actividad" },
-  { id: "gateways", label: "Gateways" },
-  { id: "dashboard", label: "Dashboard clásico" },
+/**
+ * Workspaces (identidad v0.8): no hay "páginas" — el riel de navegación
+ * cambia de instrumento sin abandonar el chasis (cabecera + barra de
+ * estado siempre presentes). El Dashboard clásico y la vista Mapa suelta
+ * han muerto: el Centro de Operaciones ES el mapa y ES el dashboard.
+ */
+const VIEWS: { id: View; label: string; icon: string }[] = [
+  { id: "ops", label: "Centro", icon: "◉" },
+  { id: "nodes", label: "Flota", icon: "⬡" },
+  { id: "jobs", label: "Trabajos", icon: "▶" },
+  { id: "alerts", label: "Alertas", icon: "⚠" },
+  { id: "profiles", label: "Perfiles", icon: "⧉" },
+  { id: "config", label: "Config", icon: "⚙" },
+  { id: "activity", label: "Registro", icon: "▤" },
+  { id: "gateways", label: "Enlaces", icon: "⛭" },
 ];
 
-/** Ids de vista históricos (componentes/documentos antiguos): ambos son ahora Trabajos. */
+/** Ids históricos (componentes/documentos antiguos): siguen navegando bien. */
 function resolveView(v: string): View {
-  return v === "operations" || v === "batches" ? "jobs" : (v as View);
-}
-
-const selBtn = {
-  background: "transparent",
-  color: "var(--text)",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  padding: "0.2rem 0.7rem",
-  cursor: "pointer",
-  fontSize: "0.85rem",
-} as const;
-
-/** Menú "Vistas ▾": sustituye a las 10 pestañas — el Centro es la pantalla
- * principal y el resto se visita puntualmente (v0.7 §13). */
-function ViewsMenu({ view, onNavigate }: { view: View; onNavigate: (v: View) => void }) {
-  const [open, setOpen] = useState(false);
-  const current = VIEWS.find((v) => v.id === view);
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{
-          background: view === "ops" ? "transparent" : t.accentTint,
-          color: view === "ops" ? t.textDim : t.accent,
-          border: `1px solid ${view === "ops" ? t.border : t.accent}`,
-          borderRadius: 6,
-          padding: "0.3rem 0.8rem",
-          cursor: "pointer",
-          fontSize: "0.85rem",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {view === "ops" ? "Vistas ▾" : `${current?.label ?? ""} ▾`}
-      </button>
-      {open && (
-        <>
-          <div style={{ position: "fixed", inset: 0, zIndex: 940 }} onClick={() => setOpen(false)} />
-          <div
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              right: 0,
-              zIndex: 950,
-              background: t.surface,
-              border: `1px solid ${t.border}`,
-              borderRadius: 6,
-              boxShadow: "0 8px 28px rgba(0, 0, 0, 0.5)",
-              minWidth: 210,
-              padding: "0.3rem 0",
-            }}
-          >
-            {VIEWS.map((v, i) => (
-              <div key={v.id}>
-                {(i === 1 || v.id === "dashboard") && (
-                  <div style={{ borderTop: `1px solid ${t.borderSubtle}`, margin: "0.25rem 0" }} />
-                )}
-                <button
-                  onClick={() => {
-                    onNavigate(v.id);
-                    setOpen(false);
-                  }}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "left",
-                    background: v.id === view ? t.accentTint : "transparent",
-                    border: "none",
-                    borderLeft: `2px solid ${v.id === view ? t.accent : "transparent"}`,
-                    color: v.id === view ? t.accent : t.text,
-                    padding: "0.35rem 0.9rem",
-                    cursor: "pointer",
-                    fontSize: "0.85rem",
-                  }}
-                >
-                  {v.label}
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
+  if (v === "operations" || v === "batches") return "jobs";
+  if (v === "dashboard" || v === "map") return "ops";
+  return v as View;
 }
 
 export default function App() {
   const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, refetchInterval: 15_000 });
-  // Query base (sin ignorados): la usan Mapa, Dashboard, Operaciones y el feed
+  // Query base (sin ignorados): la usan Mapa, Centro y el feed
   const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes(), refetchInterval: 30_000 });
   const [filters, setFilters] = useState<NodeFilterParams>({});
-  // Query filtrada para la vista Nodos (búsqueda avanzada M1.2)
+  // Query filtrada para la Flota (búsqueda avanzada M1.2)
   const filteredNodes = useQuery({
     queryKey: ["nodes", filters],
     queryFn: () => fetchNodes(filters),
@@ -194,8 +109,7 @@ export default function App() {
     queryFn: () => fetchAlerts(undefined, 100),
     refetchInterval: 30_000,
   });
-  // Soporte del shell v0.7 (HUD + barra inferior): cola/actividad admin y lote
-  // en curso. Las claves coinciden con las que ya invalida el handler del WS.
+  // Soporte del shell (HUD + barra inferior + insignias del riel)
   const operations = useQuery({
     queryKey: ["operations", "shell"],
     queryFn: () => fetchOperations(undefined, 200),
@@ -225,7 +139,6 @@ export default function App() {
   });
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Focus (v0.7 §7): contexto operativo deliberado — distinto de la selección
-  // (inspector abierto). Prioriza mapa/actividad/trabajos/alertas, nunca oculta.
   const [focus, setFocus] = useState<FocusState | null>(null);
   const toggleFocus = useCallback((nodeId: string) => {
     setFocus((f) => (f?.id === nodeId ? null : { id: nodeId, since: Date.now() }));
@@ -330,8 +243,6 @@ export default function App() {
 
   const summaries = nodes.data ?? [];
   const filteredSummaries = filteredNodes.data ?? [];
-  const onlineCount = filteredSummaries.filter((s) => s.node.online).length;
-  const favorites = summaries.filter((s) => s.node.is_favorite);
   const hwModels = useMemo(
     () => [...new Set(summaries.map((s) => s.node.hw_model).filter((h): h is string => h != null))].sort(),
     [summaries],
@@ -416,6 +327,21 @@ export default function App() {
     filteredSummaries.find((s) => s.node.node_id === selected) ??
     summaries.find((s) => s.node.node_id === selected);
 
+  // Insignias vivas del riel
+  const activeAlertCount = (alerts.data ?? []).filter((a) => a.status !== "resolved").length;
+  const hasCritAlert = (alerts.data ?? []).some(
+    (a) => a.status !== "resolved" && a.severity === "CRITICAL",
+  );
+  const activeOpsCount = (operations.data ?? []).filter(
+    (o) => o.status === "pending" || o.status === "queued" || o.status === "running",
+  ).length;
+  const railItems = VIEWS.map((v) => ({
+    ...v,
+    badge: v.id === "alerts" ? activeAlertCount : v.id === "jobs" ? activeOpsCount : undefined,
+    badgeCrit: v.id === "alerts" && hasCritAlert,
+  }));
+  const currentView = VIEWS.find((v) => v.id === view);
+
   return (
     <div
       style={{
@@ -423,22 +349,22 @@ export default function App() {
         flexDirection: "column",
         height: "100vh",
         overflow: "hidden",
-        background: t.bg,
+        background: "var(--chassis)",
         color: t.text,
         fontFamily: t.fontUi,
       }}
     >
-      {/* Cabecera del shell (§3.1): identidad + ⌘K + HUD + Vistas ▾.
-          El logo vuelve siempre al Centro de Operaciones. */}
+      {/* Cabecera del chasis: marca + workspace actual + ⌘K + Focus + HUD.
+          La navegación vive en el riel; aquí solo identidad y constantes. */}
       <header
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "1rem",
+          gap: "0.9rem",
           height: "var(--header-height)",
-          padding: "0 1rem",
-          background: t.surface,
-          borderBottom: `1px solid ${t.border}`,
+          padding: "0 0.9rem",
+          background: "var(--chassis)",
+          borderBottom: `1px solid ${t.borderSubtle}`,
           flexShrink: 0,
         }}
       >
@@ -447,33 +373,36 @@ export default function App() {
           title="Centro de Operaciones"
           style={{
             margin: 0,
-            fontSize: "1.02rem",
-            letterSpacing: "0.02em",
+            fontSize: "0.92rem",
+            fontWeight: 650,
+            letterSpacing: "0.14em",
             whiteSpace: "nowrap",
             cursor: "pointer",
+            textTransform: "uppercase",
           }}
         >
           ⌬ MeshSentinel
         </h1>
+        <span
+          className="mono"
+          style={{ color: t.textFaint, fontSize: 11, letterSpacing: "0.1em", whiteSpace: "nowrap" }}
+        >
+          ／ {currentView?.label.toUpperCase()}
+        </span>
         <button
           onClick={() => setPaletteOpen(true)}
           title="Búsqueda global (Ctrl+K / ⌘K)"
+          className="btn ghost"
           style={{
-            background: t.bg,
-            color: t.textDim,
-            border: `1px solid ${t.border}`,
-            borderRadius: 6,
-            padding: "0.28rem 0.9rem",
-            cursor: "pointer",
-            fontSize: "0.85rem",
             display: "inline-flex",
             alignItems: "center",
             gap: "0.5rem",
-            minWidth: 210,
+            minWidth: 190,
+            border: `1px solid ${t.borderSubtle}`,
           }}
         >
-          <span>🔍 Buscar…</span>
-          <span style={{ marginLeft: "auto", fontFamily: t.fontMono, fontSize: "0.75rem" }}>⌘K</span>
+          <span>⌕ Buscar…</span>
+          <span className="mono" style={{ marginLeft: "auto", fontSize: "0.72rem", color: t.textFaint }}>⌘K</span>
         </button>
         <span style={{ marginLeft: "auto" }} />
         {focus && (
@@ -491,9 +420,8 @@ export default function App() {
           gateways={gateways.data ?? []}
           alerts={alerts.data ?? []}
           operations={operations.data ?? []}
-          onGoTo={setView}
+          onGoTo={(v) => setView(resolveView(v))}
         />
-        <ViewsMenu view={view} onNavigate={setView} />
       </header>
 
       {/* WS caído = estado de primera clase (§11.2): aviso fino, nunca silencio */}
@@ -534,89 +462,123 @@ export default function App() {
         }}
       />
 
-      {/* Pantalla principal: Centro de Operaciones, a viewport completo */}
-      {view === "ops" && (
-        <div style={{ flex: 1, minHeight: 0 }}>
-          <OpsCenter
-            summaries={summaries}
-            gatewayNodeIds={gatewayNodeIds}
-            summary={dashboard.data}
-            alerts={alerts.data ?? []}
-            gateways={gateways.data ?? []}
-            stats={gatewayStats.data}
-            operations={operations.data ?? []}
-            runningBatch={runningBatch.data}
-            activity={activity}
-            selected={selected}
-            focusId={focus?.id ?? null}
-            onSelect={setSelected}
-            onGoTo={(v) => setView(resolveView(v))}
-            onMapReady={onMapReady}
-          />
+      {/* Cuerpo: riel de navegación + workspace activo, todo a sangre */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+        <NavRail items={railItems} active={view} onNavigate={(v) => setView(resolveView(v))} />
+
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+          {view === "ops" && (
+            <OpsCenter
+              summaries={summaries}
+              gatewayNodeIds={gatewayNodeIds}
+              summary={dashboard.data}
+              alerts={alerts.data ?? []}
+              gateways={gateways.data ?? []}
+              stats={gatewayStats.data}
+              operations={operations.data ?? []}
+              runningBatch={runningBatch.data}
+              activity={activity}
+              selected={selected}
+              focusId={focus?.id ?? null}
+              onSelect={setSelected}
+              onGoTo={(v) => setView(resolveView(v))}
+              onMapReady={onMapReady}
+            />
+          )}
+
+          {view === "nodes" && (
+            <FleetView
+              summaries={filteredSummaries}
+              allSummaries={summaries}
+              loading={filteredNodes.isLoading}
+              error={filteredNodes.isError}
+              filters={filters}
+              onFiltersChange={setFilters}
+              tags={tags.data ?? []}
+              groups={groups.data ?? []}
+              gateways={gateways.data ?? []}
+              hwModels={hwModels}
+              selected={selected}
+              focusId={focus?.id ?? null}
+              onSelect={setSelected}
+              onToggleFavorite={(id, value) => toggleFavorite.mutate({ id, value })}
+              onToggleIgnored={(id, value) => toggleIgnored.mutate({ id, value })}
+              checkedIds={checkedIds}
+              onCheckedChange={setCheckedIds}
+              onCreateBatch={() => setWizardOpen(true)}
+            />
+          )}
+
+          {view === "activity" && (
+            <ActivityConsole
+              entries={activity}
+              summaries={summaries}
+              gateways={gateways.data ?? []}
+              onClear={() => setActivity([])}
+            />
+          )}
+
+          {view === "gateways" && <GatewaysView />}
+
+          {view === "alerts" && <AlertsView onOpenNode={setSelected} />}
+
+          {view === "jobs" && (
+            <div className="ws">
+              <div className="ws-scroll legacy-chrome" style={{ padding: "0.9rem" }}>
+                <JobsView
+                  summaries={summaries}
+                  focusId={focus?.id ?? null}
+                  openBatchId={openBatchId}
+                  onOpenNode={setSelected}
+                  onLocate={locateNode}
+                />
+              </div>
+            </div>
+          )}
+
+          {view === "config" && (
+            <div className="ws">
+              <div className="ws-scroll legacy-chrome" style={{ padding: "0.9rem" }}>
+                <ConfigEditor summaries={summaries} />
+              </div>
+            </div>
+          )}
+
+          {view === "profiles" && (
+            <div className="ws">
+              <div className="ws-scroll legacy-chrome" style={{ padding: "0.9rem" }}>
+                <ProfilesView
+                  summaries={summaries}
+                  onOpenBatch={(batchId) => {
+                    setOpenBatchId(batchId);
+                    setView("jobs");
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
-      {/* Vistas especializadas: contenedor con scroll propio */}
-      {view !== "ops" && (
-      <main style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "1.25rem 1.5rem" }}>
-      {view === "dashboard" && (
-        <Dashboard
-          summary={dashboard.data}
-          loading={dashboard.isLoading}
-          activity={activity.slice(0, DASHBOARD_ACTIVITY_LIMIT)}
-          favorites={favorites}
-          onNavigate={setView}
-          onShowDetail={showDetail}
-        />
-      )}
-
-      {view === "activity" && (
-        <ActivityConsole
-          entries={activity}
-          summaries={summaries}
-          gateways={gateways.data ?? []}
-          onClear={() => setActivity([])}
-        />
-      )}
-
-      {view === "gateways" && <GatewaysView />}
-
-      {view === "alerts" && <AlertsView />}
-
-      {view === "jobs" && (
-        <JobsView
-          summaries={summaries}
-          focusId={focus?.id ?? null}
-          openBatchId={openBatchId}
-          onOpenNode={setSelected}
-          onLocate={locateNode}
-        />
-      )}
-
-      {view === "config" && <ConfigEditor summaries={summaries} />}
-
-      {view === "profiles" && (
-        <ProfilesView
-          summaries={summaries}
-          onOpenBatch={(batchId) => {
-            setOpenBatchId(batchId);
-            setView("jobs");
+      {/* Asistente de lote (M2): superpuesto al workspace, nunca una "página" */}
+      {wizardOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 960,
+            background: "rgba(4, 6, 10, 0.72)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            padding: "4vh 2vw",
+            overflowY: "auto",
           }}
-        />
-      )}
-
-      {view === "map" && (
-        <MapView
-          summaries={summaries}
-          gatewayNodeIds={gatewayNodeIds}
-          onShowDetail={showDetail}
-          selectedId={selected}
-        />
-      )}
-
-      {view === "nodes" && (
-        <div>
-          {wizardOpen && (
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setWizardOpen(false);
+          }}
+        >
+          <div className="legacy-chrome" style={{ width: "min(920px, 96vw)" }}>
             <BatchWizard
               selectedIds={[...checkedIds]}
               summaries={summaries}
@@ -629,109 +591,8 @@ export default function App() {
                 }
               }}
             />
-          )}
-          {/* El detalle es el Inspector global: la tabla ocupa todo el ancho */}
-          <div>
-            <div style={styles.card}>
-              <h2 style={{ marginTop: 0 }}>
-                Nodos <span style={styles.dim}>({filteredSummaries.length} · {onlineCount} online)</span>
-              </h2>
-              <NodeFiltersBar
-                filters={filters}
-                onChange={setFilters}
-                tags={tags.data ?? []}
-                groups={groups.data ?? []}
-                gateways={gateways.data ?? []}
-                hwModels={hwModels}
-              />
-              {/* Barra de selección para batches (M2) */}
-              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", marginBottom: "0.6rem" }}>
-                <span>
-                  Seleccionados: <strong>{checkedIds.size}</strong>
-                </span>
-                <button
-                  style={selBtn}
-                  onClick={() =>
-                    setCheckedIds(new Set([...checkedIds, ...filteredSummaries.map((s) => s.node.node_id)]))
-                  }
-                >
-                  + visibles
-                </button>
-                <button
-                  style={selBtn}
-                  onClick={() => {
-                    const visible = filteredSummaries.map((s) => s.node.node_id);
-                    const next = new Set(checkedIds);
-                    for (const id of visible) {
-                      if (next.has(id)) next.delete(id);
-                      else next.add(id);
-                    }
-                    setCheckedIds(next);
-                  }}
-                >
-                  Invertir
-                </button>
-                <button
-                  style={selBtn}
-                  onClick={() =>
-                    setCheckedIds(
-                      new Set([
-                        ...checkedIds,
-                        ...summaries.filter((s) => s.node.is_favorite).map((s) => s.node.node_id),
-                      ]),
-                    )
-                  }
-                >
-                  + favoritos
-                </button>
-                <button style={selBtn} onClick={() => setCheckedIds(new Set())} disabled={checkedIds.size === 0}>
-                  Limpiar
-                </button>
-                <button
-                  style={{ ...selBtn, background: checkedIds.size > 0 ? "var(--accent)" : "transparent" }}
-                  disabled={checkedIds.size === 0}
-                  onClick={() => setWizardOpen(true)}
-                >
-                  Crear batch ({checkedIds.size})
-                </button>
-              </div>
-              {filteredNodes.isLoading && <p>Cargando…</p>}
-              {filteredNodes.isError && <p style={styles.bad}>Error consultando la API</p>}
-              {filteredSummaries.length === 0 && !filteredNodes.isLoading && (
-                <p style={styles.dim}>Ningún nodo coincide con los filtros actuales.</p>
-              )}
-              {filteredSummaries.length > 0 && (
-                <NodesTable
-                  summaries={filteredSummaries}
-                  selected={selected}
-                  focusId={focus?.id ?? null}
-                  onSelect={setSelected}
-                  onToggleFavorite={(id, value) => toggleFavorite.mutate({ id, value })}
-                  onToggleIgnored={(id, value) => toggleIgnored.mutate({ id, value })}
-                  checkedIds={checkedIds}
-                  onToggleChecked={(id) => {
-                    const next = new Set(checkedIds);
-                    if (next.has(id)) next.delete(id);
-                    else next.add(id);
-                    setCheckedIds(next);
-                  }}
-                  onToggleCheckAll={() => {
-                    const visible = filteredSummaries.map((s) => s.node.node_id);
-                    const allChecked = visible.every((id) => checkedIds.has(id));
-                    const next = new Set(checkedIds);
-                    for (const id of visible) {
-                      if (allChecked) next.delete(id);
-                      else next.add(id);
-                    }
-                    setCheckedIds(next);
-                  }}
-                />
-              )}
-            </div>
           </div>
         </div>
-      )}
-      </main>
       )}
 
       {/* Inspector global (§8.1): un solo cajón para toda la aplicación */}
@@ -758,7 +619,7 @@ export default function App() {
         alerts={alerts.data ?? []}
         operations={operations.data ?? []}
         runningBatch={runningBatch.data}
-        onGoTo={setView}
+        onGoTo={(v) => setView(resolveView(v))}
       />
     </div>
   );

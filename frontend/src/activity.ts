@@ -1,9 +1,7 @@
 import type { NocEvent } from "./api/client";
 
-/** Buffer de la consola de actividad (vista Actividad). El Dashboard muestra
- * solo las primeras entradas. */
+/** Buffer del registro de actividad (vista Registro). */
 export const ACTIVITY_LIMIT = 500;
-export const DASHBOARD_ACTIVITY_LIMIT = 25;
 
 export type ActivityCategory = "operacion" | "batch" | "pasarela" | "alerta" | "malla";
 

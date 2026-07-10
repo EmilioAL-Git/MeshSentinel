@@ -1,0 +1,497 @@
+/*
+ * Lenguaje visual "consola" de MeshSentinel (identidad v0.8).
+ *
+ * Principio: la aplicación no tiene páginas — tiene UN instrumento con
+ * workspaces intercambiables. Nada de tarjetas flotando sobre un fondo con
+ * padding: paneles con cabecera técnica (micro-etiqueta mayúscula + contador
+ * mono) encajados a sangre entre la cabecera y la barra de estado.
+ * Complementa a theme.css (tokens); aquí viven las CLASES del sistema.
+ */
+
+/* ── Chasis ──────────────────────────────────────────────────────────────── */
+
+/* El fondo del shell es más profundo que las superficies: los paneles se leen
+   como módulos montados en un bastidor, no como divs sobre una página. */
+:root {
+  --chassis: #07090d;
+  --grid-line: rgba(139, 150, 165, 0.045);
+}
+
+/* Retícula técnica sutil del workspace: perceptible en capturas, invisible
+   como ruido en el uso diario. */
+.ws {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 31px, var(--grid-line) 31px 32px),
+    repeating-linear-gradient(90deg, transparent 0 31px, var(--grid-line) 31px 32px),
+    var(--chassis);
+}
+
+/* Workspaces compuestos: fila de paneles a sangre, con separación de 1px de
+   chasis entre ellos (juntas del bastidor, no "gap" de layout web). */
+.ws-cols {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 1px;
+}
+.ws-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ── Panel: la unidad universal ──────────────────────────────────────────── */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.panel-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: 30px;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  user-select: none;
+}
+.panel-title {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.panel-title::before {
+  content: "▮ ";
+  color: var(--text-faint);
+  font-size: 9px;
+}
+.panel-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.6rem 0.75rem;
+}
+.panel-body.flush {
+  padding: 0;
+}
+
+/* Micro-etiqueta reutilizable fuera de cabeceras de panel */
+.microlabel {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ── Barra de herramientas de workspace ──────────────────────────────────── */
+
+.toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.75rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.toolbar .sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-subtle);
+  margin: 2px 0.25rem;
+}
+
+/* ── Controles ───────────────────────────────────────────────────────────── */
+
+.btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0.28rem 0.7rem;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 120ms, background 120ms;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--text-faint);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn.primary {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn.danger {
+  background: var(--crit-tint);
+  border-color: var(--crit);
+  color: var(--crit);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+.btn.ghost:hover:not(:disabled) {
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.input,
+select.input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0.28rem 0.5rem;
+  font: inherit;
+  font-size: 12px;
+}
+.input::placeholder {
+  color: var(--text-faint);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Control segmentado: sustituye a los <select> de filtro sueltos */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.seg button {
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 0.26rem 0.65rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg button:last-child {
+  border-right: none;
+}
+.seg button.on {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* Chip de estado/etiqueta */
+.chip {
+  display: inline-block;
+  border-radius: 3px;
+  padding: 0.05rem 0.45rem;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+/* ── Roster (Flota): filas de datos densas, no <table> ───────────────────── */
+
+.roster-head,
+.roster-row {
+  display: grid;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0 0.75rem;
+}
+.roster-head {
+  height: 26px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  user-select: none;
+}
+.roster-row {
+  min-height: 34px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  font-size: 12px;
+}
+.roster-row:hover {
+  background: var(--surface-2);
+}
+.roster-row.sel {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.roster-row.focus {
+  background: var(--accent-tint);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.roster-row.dim {
+  opacity: 0.5;
+}
+
+/* Medidor horizontal (batería): barra fina con valor mono al lado */
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.meter .track {
+  width: 44px;
+  height: 5px;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.meter .fill {
+  height: 100%;
+  border-radius: 1px;
+}
+
+/* Barras de señal (SNR) estilo instrumento */
+.sigbars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+.sigbars i {
+  width: 3px;
+  background: var(--border);
+  border-radius: 1px;
+}
+.sigbars i.on {
+  background: var(--ok);
+}
+.sigbars.weak i.on {
+  background: var(--warn);
+}
+
+/* Glifo de presencia */
+.presence {
+  font-size: 10px;
+}
+.presence.on {
+  color: var(--ok);
+}
+.presence.off {
+  color: var(--text-faint);
+}
+
+/* ── Riel de navegación (shell) ──────────────────────────────────────────── */
+
+.navrail {
+  flex-shrink: 0;
+  width: 52px;
+  background: var(--chassis);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0.4rem 0;
+  z-index: 850;
+}
+.navrail button {
+  position: relative;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 17px;
+  line-height: 1;
+  padding: 0.62rem 0;
+  cursor: pointer;
+  transition: color 120ms;
+}
+.navrail button:hover {
+  color: var(--text);
+}
+.navrail button.on {
+  color: var(--text);
+}
+.navrail button.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--accent);
+}
+.navrail .badge {
+  position: absolute;
+  top: 3px;
+  right: 8px;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--warn);
+  color: #0b0e14;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+}
+.navrail .badge.crit {
+  background: var(--crit);
+  color: #fff;
+}
+.navrail .navlabel {
+  display: block;
+  font-size: 7.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 3px;
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* ── Log de actividad estilo terminal ────────────────────────────────────── */
+
+.termlog {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.termlog .line {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.1rem 0.75rem;
+  border-left: 2px solid transparent;
+  white-space: nowrap;
+}
+.termlog .line:hover {
+  background: var(--surface-2);
+}
+.termlog .line .ts {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.termlog .line .src {
+  color: var(--text-faint);
+  flex-shrink: 0;
+  min-width: 4.5em;
+}
+.termlog .line .msg {
+  white-space: normal;
+  color: var(--text);
+}
+
+/* ── KPI de workspace (fila de valores grandes en mono) ──────────────────── */
+
+.kpis {
+  display: flex;
+  gap: 1px;
+  background: var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.kpi {
+  flex: 1;
+  background: var(--surface);
+  padding: 0.5rem 0.75rem 0.45rem;
+  min-width: 0;
+}
+.kpi .v {
+  font-family: var(--font-mono);
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--text);
+}
+.kpi .k {
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* ── Re-cromado de workspaces heredados (Trabajos/Config/Perfiles) ───────────
+   Sus títulos h2/h3 dejan de ser titulares de página web y pasan a ser
+   rótulos técnicos de panel, sin reescribir los componentes. */
+.legacy-chrome h2 {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.legacy-chrome h2::before {
+  content: "▮ ";
+  color: var(--text-faint);
+  font-size: 9px;
+}
+.legacy-chrome h3 {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.legacy-chrome button {
+  border-radius: 3px;
+}
+.legacy-chrome input,
+.legacy-chrome select {
+  border-radius: 3px;
+}
+
+/* Estado vacío coherente en todos los workspaces */
+.empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 1rem 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .navrail button {
+    transition: none;
+  }
+}
