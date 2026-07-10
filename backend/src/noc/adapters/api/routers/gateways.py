@@ -7,6 +7,7 @@ las acciones que implican al proceso gateway (`discover`, `test-connection`,
 existente (ADR 0003) y correla las respuestas de descubrimiento/prueba.
 """
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -14,8 +15,14 @@ from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.api.schemas import GatewayOut
-from noc.adapters.persistence.repositories import SqlGatewayRepository
+from noc.adapters.persistence.repositories import (
+    SqlGatewayRepository,
+    SqlNodeGatewayLinkRepository,
+    SqlNodeRepository,
+)
+from noc.application.gateway_stats import GatewayStats, compute_multi_gateway_stats
 from noc.application.gateways.service import GatewayService
+from noc.config import get_settings
 
 router = APIRouter(prefix="/gateways", tags=["gateways"])
 
@@ -67,6 +74,52 @@ class GatewayUpdateIn(BaseModel):
 async def list_gateways(session: SessionDep, include_deleted: bool = Query(False)) -> list[GatewayOut]:
     gateways = await SqlGatewayRepository(session).list_all(include_deleted)
     return [GatewayOut.from_entity(g) for g in gateways]
+
+
+class GatewayStatsOut(BaseModel):
+    gateway_id: str
+    name: str | None
+    status: str
+    nodes_visible: int
+    nodes_exclusive: int
+    nodes_shared: int
+    primary_for: int
+    last_heard_at: datetime | None
+
+    @classmethod
+    def from_entity(cls, s: GatewayStats) -> "GatewayStatsOut":
+        return cls(**{f: getattr(s, f) for f in cls.model_fields})
+
+
+class MultiGatewayStatsOut(BaseModel):
+    generated_at: datetime
+    nodes_observed: int
+    nodes_shared: int
+    redundancy_percent: float
+    gateways: list[GatewayStatsOut]
+
+
+# Registrada ANTES de GET /gateways/{gateway_id}: "stats" no es un gateway_id.
+@router.get("/stats", response_model=MultiGatewayStatsOut)
+async def gateway_stats(session: SessionDep) -> MultiGatewayStatsOut:
+    """Métricas Multi-Gateway (M6.2): nodos visibles/exclusivos/compartidos y
+    última actividad por pasarela, más redundancia global. Los nodos ignorados
+    quedan fuera, igual que en el resto de agregados del NOC (M1.2)."""
+    settings = get_settings()
+    stats = compute_multi_gateway_stats(
+        links=await SqlNodeGatewayLinkRepository(session).list_all(),
+        gateways=await SqlGatewayRepository(session).list_all(),
+        nodes=await SqlNodeRepository(session).list_all(),
+        offline_threshold_seconds=settings.node_offline_after_seconds,
+        now=datetime.now(timezone.utc),
+    )
+    return MultiGatewayStatsOut(
+        generated_at=stats.generated_at,
+        nodes_observed=stats.nodes_observed,
+        nodes_shared=stats.nodes_shared,
+        redundancy_percent=stats.redundancy_percent,
+        gateways=[GatewayStatsOut.from_entity(g) for g in stats.gateways],
+    )
 
 
 @router.get("/{gateway_id}", response_model=GatewayOut)

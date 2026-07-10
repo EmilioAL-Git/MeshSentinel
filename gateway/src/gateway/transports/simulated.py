@@ -51,6 +51,14 @@ class SimulatedTransport(Transport):
         self._settings = settings
         self._rng = random.Random(settings.sim_seed)
         self._nodes = self._build_mesh(settings.sim_node_count)
+        # M6.2: nodos compartidos entre procesos gateway — misma semilla común
+        # => mismos node_id en todas las instancias que la configuren. Van
+        # DESPUÉS de los exclusivos: el nodo local (self._nodes[0]) debe ser
+        # exclusivo de esta pasarela, nunca un compartido.
+        if settings.sim_shared_seed:
+            self._nodes += self._build_shared_nodes(
+                settings.sim_shared_seed, settings.sim_shared_node_count
+            )
         self._closed = asyncio.Event()
 
     def _build_mesh(self, count: int) -> list[SimNode]:
@@ -70,6 +78,35 @@ class SimulatedTransport(Transport):
                     battery=self._rng.uniform(40, 100),
                     has_gps=self._rng.random() > 0.25,
                     rng=random.Random(self._rng.random()),
+                )
+            )
+        return nodes
+
+    def _build_shared_nodes(self, shared_seed: int, count: int) -> list[SimNode]:
+        """Nodos deterministas por `shared_seed`, independientes de `sim_seed`:
+        la identidad y la posición base salen SOLO de la semilla común, para
+        que todas las pasarelas que la compartan vean el mismo nodo lógico.
+        La calidad de señal (SNR/RSSI/hops de node.seen) sigue saliendo del
+        rng por nodo, distinto en cada proceso — como en una malla real, cada
+        pasarela oye al mismo nodo con señal diferente."""
+        shared_rng = random.Random(shared_seed)
+        gateway_rng = random.Random(f"{shared_seed}:{self._settings.gateway_id}")
+        nodes = []
+        for i in range(count):
+            num = shared_rng.randrange(0x10000000, 0xFFFFFFFF)
+            nodes.append(
+                SimNode(
+                    node_id=f"!{num:08x}",
+                    node_num=num,
+                    short_name=f"SHR{i:02d}",
+                    long_name=f"Nodo compartido {i:02d}",
+                    hw_model=shared_rng.choice(HW_MODELS),
+                    role=shared_rng.choice(ROLES),
+                    lat=self._settings.sim_center_lat + shared_rng.uniform(-0.05, 0.05),
+                    lon=self._settings.sim_center_lon + shared_rng.uniform(-0.05, 0.05),
+                    battery=shared_rng.uniform(40, 100),
+                    has_gps=shared_rng.random() > 0.25,
+                    rng=random.Random(gateway_rng.random()),
                 )
             )
         return nodes

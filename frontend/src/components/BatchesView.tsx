@@ -382,6 +382,13 @@ function BatchMonitor({
     return s ? displayName(s.node) : id;
   };
 
+  // Reparto del lote entre pasarelas (M6.2): derivado de las operaciones
+  const gatewayCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const op of ops.data ?? []) counts.set(op.gateway_id, (counts.get(op.gateway_id) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [ops.data]);
+
   if (detail.isLoading || !detail.data) return <div style={styles.card}>Cargando batch #{batchId}…</div>;
   const b = detail.data;
   const p = b.progress;
@@ -433,6 +440,16 @@ function BatchMonitor({
           <span>ETA: {b.status === "running" ? fmtSeconds(p.eta_seconds) : "—"}</span>
           <span>Transcurrido: {fmtSeconds(p.elapsed_seconds)}</span>
         </div>
+        {gatewayCounts.length > 1 && (
+          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginTop: "0.5rem", ...styles.dim }}>
+            <span>Reparto por pasarela:</span>
+            {gatewayCounts.map(([gw, count]) => (
+              <span key={gw} style={styles.mono}>
+                {gw}: {count} ops
+              </span>
+            ))}
+          </div>
+        )}
         <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
           {Object.entries(p.counts).map(([status, count]) => (
             <button
@@ -454,6 +471,7 @@ function BatchMonitor({
           <thead>
             <tr>
               <th style={styles.th}>Nodo</th>
+              <th style={styles.th}>Pasarela</th>
               <th style={styles.th}>Estado</th>
               <th style={styles.th}>Intentos</th>
               <th style={styles.th}>Duración</th>
@@ -469,6 +487,7 @@ function BatchMonitor({
                   onClick={() => setExpanded(expanded === op.id ? null : op.id)}
                 >
                   <td style={{ ...styles.td, ...styles.mono }}>{nodeName(op.target_node_id)}</td>
+                  <td style={{ ...styles.td, ...styles.mono }}>{op.gateway_id}</td>
                   <td style={styles.td}><StatusChip status={op.status} /></td>
                   <td style={styles.td}>{op.attempts}/{op.max_attempts}</td>
                   <td style={styles.td}>{op.duration_ms != null ? `${op.duration_ms} ms` : "—"}</td>
@@ -476,7 +495,7 @@ function BatchMonitor({
                 </tr>
                 {expanded === op.id && (
                   <tr key={`${op.id}-d`}>
-                    <td style={styles.td} colSpan={5}>
+                    <td style={styles.td} colSpan={6}>
                       <pre style={{ ...styles.mono, whiteSpace: "pre-wrap", margin: 0 }}>
                         {JSON.stringify(op.result ?? op.params, null, 2)}
                       </pre>

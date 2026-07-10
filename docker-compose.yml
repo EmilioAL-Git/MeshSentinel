@@ -61,6 +61,9 @@ services:
       MESHTASTIC_RECONNECT_MAX_DELAY: ${MESHTASTIC_RECONNECT_MAX_DELAY:-300}
       GATEWAY_TCP_HOST: ${GATEWAY_TCP_HOST:-}
       GATEWAY_TCP_PORT: ${GATEWAY_TCP_PORT:-4403}
+      GATEWAY_SIM_SEED: ${GATEWAY_SIM_SEED:-42}
+      GATEWAY_SIM_SHARED_SEED: ${GATEWAY_SIM_SHARED_SEED:-0}
+      GATEWAY_SIM_SHARED_NODE_COUNT: ${GATEWAY_SIM_SHARED_NODE_COUNT:-4}
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
     depends_on:
@@ -72,6 +75,24 @@ services:
     # devices:
     #   - "/dev/ttyACM0:/dev/ttyACM0"
     restart: unless-stopped
+
+  # Segunda pasarela simulada para validar Multi-Gateway (M6.2): semilla
+  # exclusiva distinta + la MISMA semilla compartida => nodos SHRxx idénticos
+  # oídos por ambas pasarelas. Descomentar para levantarla:
+  # gateway-2:
+  #   build: ./gateway
+  #   environment:
+  #     GATEWAY_ID: gw-02
+  #     GATEWAY_TRANSPORT: simulated
+  #     GATEWAY_SIM_SEED: 1042
+  #     GATEWAY_SIM_SHARED_SEED: ${GATEWAY_SIM_SHARED_SEED:-7}
+  #     GATEWAY_SIM_SHARED_NODE_COUNT: ${GATEWAY_SIM_SHARED_NODE_COUNT:-4}
+  #     GATEWAY_REDIS_URL: redis://redis:6379/0
+  #     GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   restart: unless-stopped
 
   frontend:
     build: ./frontend

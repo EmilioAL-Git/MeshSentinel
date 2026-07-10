@@ -8,7 +8,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GATEWAY_", env_file=".env", extra="ignore")
 
-    gateway_id: str = "gw-01"
+    # OJO: con env_prefix, pydantic-settings resolvería "GATEWAY_GATEWAY_ID";
+    # el alias explícito hace funcionar GATEWAY_ID, que es lo que documentan
+    # .env.example y docker-compose desde Fase 0. Bug latente hasta M6.2:
+    # con un solo proceso el default "gw-01" coincidía y nadie lo notó.
+    gateway_id: str = Field(default="gw-01", validation_alias=AliasChoices("GATEWAY_ID"))
     log_level: str = "INFO"
 
     transport: Literal["usb", "tcp", "http", "simulated"] = "simulated"
@@ -52,6 +56,13 @@ class Settings(BaseSettings):
     # Transporte simulado (ADR 0007)
     sim_node_count: int = 12
     sim_seed: int = 42
+    # M6.2 (Multi-Gateway): nodos "compartidos" deterministas por semilla
+    # común — dos procesos gateway con el MISMO sim_shared_seed generan
+    # exactamente los mismos nodos compartidos (mismos node_id) además de sus
+    # nodos exclusivos de sim_seed, poblando node_gateway_links con solape
+    # real. 0 = sin nodos compartidos (comportamiento previo, por defecto).
+    sim_shared_seed: int = 0
+    sim_shared_node_count: int = 4
     sim_telemetry_interval_seconds: int = 15
     sim_center_lat: float = 40.4168
     sim_center_lon: float = -3.7038

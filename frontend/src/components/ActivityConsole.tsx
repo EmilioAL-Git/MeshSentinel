@@ -178,6 +178,22 @@ export function ActivityConsole({
                 >
                   {CATEGORY_LABEL[e.category]}
                 </span>
+                {e.gatewayId && e.gatewayId !== "system" && (
+                  <span
+                    title={`Pasarela de origen: ${e.gatewayId}`}
+                    style={{
+                      ...styles.mono,
+                      border: "1px solid #30363d",
+                      borderRadius: 12,
+                      padding: "0 0.4rem",
+                      fontSize: "0.7rem",
+                      whiteSpace: "nowrap",
+                      color: "#8b949e",
+                    }}
+                  >
+                    {e.gatewayId}
+                  </span>
+                )}
                 <span style={{ color: SEVERITY_COLOR[e.severity], fontSize: "0.9rem" }}>{e.text}</span>
               </li>
             ))}

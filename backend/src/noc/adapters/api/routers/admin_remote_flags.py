@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.admin.batches import PlannedOperation
+from noc.application.admin.gateway_routing import select_gateway_for_node
 from noc.application.admin.registry import validate_operation
 from noc.application.admin.remote_flag_sync import (
     RemoteFlagKnown,
@@ -25,6 +26,7 @@ from noc.application.admin.remote_flag_sync import (
     to_planned_operations,
 )
 from noc.application.admin.remote_flags import AdminOperationRemoteFlagStateReader
+from noc.config import get_settings
 
 router = APIRouter(prefix="/admin", tags=["admin-remote-flags"])
 
@@ -106,7 +108,10 @@ async def queue_remote_flag(
     target = await node_repo.get(node_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Node not found in registry")
-    if not target.gateway_id:
+    gateway_id = await select_gateway_for_node(
+        session, node_id, get_settings(), fallback_gateway_id=target.gateway_id
+    )
+    if not gateway_id:
         raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
     subject = await node_repo.get(body.subject_node_id)
     if subject is None:
@@ -118,7 +123,7 @@ async def queue_remote_flag(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    planned = [PlannedOperation(node_id, target.gateway_id, op_type, flag_params)]
+    planned = [PlannedOperation(node_id, gateway_id, op_type, flag_params)]
     if body.send_contact:
         contact_params = validate_operation(
             "contact.add",
@@ -132,7 +137,7 @@ async def queue_remote_flag(
         )
         # La ficha de contacto va primero: el nodo destino debe conocer al
         # sujeto antes de que el favorite/ignored lo referencie (ADR 0019 §4).
-        planned.insert(0, PlannedOperation(node_id, target.gateway_id, "contact.add", contact_params))
+        planned.insert(0, PlannedOperation(node_id, gateway_id, "contact.add", contact_params))
 
     verb = "Marcar" if body.action == "set" else "Quitar"
     name = (
@@ -157,13 +162,19 @@ async def queue_remote_flag(
 
 
 async def _resolve_target(node_id: str, session: SessionDep):
+    """Devuelve (nodo destino, pasarela de enrutado). La pasarela se decide
+    con la selección M6.2 (mejor enlace activo + pasarela conectada), con la
+    caché nodes.gateway_id como fallback mono-pasarela."""
     node_repo = SqlNodeRepository(session)
     target = await node_repo.get(node_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Node not found in registry")
-    if not target.gateway_id:
+    gateway_id = await select_gateway_for_node(
+        session, node_id, get_settings(), fallback_gateway_id=target.gateway_id
+    )
+    if not gateway_id:
         raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
-    return target
+    return target, gateway_id
 
 
 async def _contact_data_for_plan(session: SessionDep, plan: RemoteFlagSyncPlan) -> dict[str, dict[str, Any]]:
@@ -190,14 +201,14 @@ async def sync_remote_flags(
     acción pedida por sujeto) contra el último estado CONFIRMADO conocido y
     encola en un único lote solo las operaciones necesarias — nunca reenvía
     lo ya confirmado."""
-    target = await _resolve_target(node_id, session)
+    target, gateway_id = await _resolve_target(node_id, session)
     reader = AdminOperationRemoteFlagStateReader(session)
     plan = await compute_sync_plan(reader, node_id, body.flag_type, send_contact=body.send_contact)
     if not plan.items:
         return RemoteFlagSyncOut(batch_id=None, operation_type=f"{body.flag_type}.sync", node_ids=[], items=0)
 
     contact_data = await _contact_data_for_plan(session, plan)
-    planned = to_planned_operations(plan, target.gateway_id, contact_data)
+    planned = to_planned_operations(plan, gateway_id, contact_data)
     batch = await request.app.state.batches.create_planned(
         name=f"Sincronizar {body.flag_type} remoto: {target.short_name or target.node_id}",
         operation_type=f"{body.flag_type}.sync",
@@ -218,13 +229,13 @@ async def resend_pending_remote_flags(
 ) -> RemoteFlagSyncOut:
     """Reenvío mecánico (M4.2): reemite exclusivamente lo Pendiente o en Error,
     tal cual la última acción pedida — nunca toca lo Confirmado."""
-    target = await _resolve_target(node_id, session)
+    target, gateway_id = await _resolve_target(node_id, session)
     reader = AdminOperationRemoteFlagStateReader(session)
     plan = await compute_resend_plan(reader, node_id, body.flag_type)
     if not plan.items:
         return RemoteFlagSyncOut(batch_id=None, operation_type=f"{body.flag_type}.resend", node_ids=[], items=0)
 
-    planned = to_planned_operations(plan, target.gateway_id)
+    planned = to_planned_operations(plan, gateway_id)
     batch = await request.app.state.batches.create_planned(
         name=f"Reenviar pendientes {body.flag_type} remoto: {target.short_name or target.node_id}",
         operation_type=f"{body.flag_type}.resend",

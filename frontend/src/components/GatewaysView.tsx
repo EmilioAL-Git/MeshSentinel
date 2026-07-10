@@ -7,11 +7,13 @@ import {
   disconnectGateway,
   discoverDevices,
   fetchGateways,
+  fetchGatewayStats,
   importGateway,
   testGatewayConnection,
   updateGateway,
   type DeviceOut,
   type GatewayOut,
+  type GatewayStatsOut,
   type GatewayStatus,
   type TestConnectionResultOut,
 } from "../api/client";
@@ -71,20 +73,58 @@ const TRANSPORT_LABEL: Record<string, string> = {
 
 // ── Asistente: Buscar dispositivos → Seleccionar → Probar conexión → Guardar ─
 
+/** Propone una semilla exclusiva no usada por ninguna pasarela simulada ya
+ * configurada (M6.2): dos procesos con la misma semilla generan la MISMA
+ * malla ficticia y se pisan. */
+function suggestSeed(gateways: GatewayOut[]): number {
+  const used = new Set(
+    gateways
+      .map((g) => Number(g.connection_params?.seed))
+      .filter((s) => Number.isFinite(s)),
+  );
+  used.add(42); // valor por defecto del proceso: evitar chocar con .env
+  let seed = 43;
+  while (used.has(seed)) seed += 1;
+  return seed;
+}
+
 function AddGatewayWizard({
   gatewayId,
+  candidates,
+  gateways,
+  onSelectCandidate,
   onCancel,
   onSaved,
 }: {
   gatewayId: string;
+  candidates: string[];
+  gateways: GatewayOut[];
+  onSelectCandidate: (id: string) => void;
   onCancel: () => void;
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [transportType, setTransportType] = useState<"usb" | "simulated">("usb");
   const [devices, setDevices] = useState<DeviceOut[] | null>(null);
   const [selectedPort, setSelectedPort] = useState("");
+  const [simSeed, setSimSeed] = useState(String(suggestSeed(gateways)));
+  const [simNodeCount, setSimNodeCount] = useState("12");
+  const [simSharedSeed, setSimSharedSeed] = useState("0");
+  const [simSharedNodeCount, setSimSharedNodeCount] = useState("4");
   const [testResult, setTestResult] = useState<TestConnectionResultOut | null>(null);
   const [name, setName] = useState("");
+
+  const connectionParams = (): Record<string, unknown> =>
+    transportType === "usb"
+      ? selectedPort
+        ? { device: selectedPort }
+        : {}
+      : {
+          seed: Number(simSeed) || 42,
+          node_count: Number(simNodeCount) || 12,
+          shared_seed: Number(simSharedSeed) || 0,
+          shared_node_count: Number(simSharedNodeCount) || 4,
+        };
 
   const discover = useMutation({
     mutationFn: () => discoverDevices(gatewayId),
@@ -97,8 +137,8 @@ function AddGatewayWizard({
   const test = useMutation({
     mutationFn: () =>
       testGatewayConnection(gatewayId, {
-        transport_type: "usb",
-        connection_params: selectedPort ? { device: selectedPort } : {},
+        transport_type: transportType,
+        connection_params: connectionParams(),
       }),
     onSuccess: (result) => {
       setTestResult(result);
@@ -110,8 +150,8 @@ function AddGatewayWizard({
     mutationFn: () =>
       configureGateway(gatewayId, {
         name: name || gatewayId,
-        transport_type: "usb",
-        connection_params: selectedPort ? { device: selectedPort } : {},
+        transport_type: transportType,
+        connection_params: connectionParams(),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["gateways"] });
@@ -119,13 +159,61 @@ function AddGatewayWizard({
     },
   });
 
+  const paramsReady = transportType === "usb" ? selectedPort !== "" : simSeed.trim() !== "";
+
   return (
     <div style={styles.card}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.8rem" }}>
-        <h3 style={{ margin: 0 }}>Añadir gateway ({gatewayId})</h3>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", flexWrap: "wrap" }}>
+        <h3 style={{ margin: 0 }}>Añadir gateway</h3>
+        {candidates.length > 1 ? (
+          <select
+            style={input}
+            value={gatewayId}
+            onChange={(e) => {
+              onSelectCandidate(e.target.value);
+              setDevices(null);
+              setTestResult(null);
+            }}
+            title="Hay varios procesos de pasarela sin configurar: elige cuál"
+          >
+            {candidates.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        ) : (
+          <span style={styles.mono}>({gatewayId})</span>
+        )}
+        <select
+          style={input}
+          value={transportType}
+          onChange={(e) => {
+            setTransportType(e.target.value as "usb" | "simulated");
+            setTestResult(null);
+          }}
+        >
+          <option value="usb">USB</option>
+          <option value="simulated">Simulado</option>
+        </select>
         <button style={{ ...btn, marginLeft: "auto" }} onClick={onCancel}>✕ Cancelar</button>
       </div>
 
+      {transportType === "simulated" && (
+        <div style={{ margin: "0.8rem 0" }}>
+          <p style={styles.dim}>
+            1. Parámetros de la malla simulada. La semilla propuesta no está usada por ninguna otra
+            pasarela; una <em>semilla compartida</em> igual en varias pasarelas genera nodos comunes
+            (SHRxx) para validar Multi-Gateway.
+          </p>
+          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+            <label>Semilla <input style={{ ...input, width: 80 }} type="number" value={simSeed} onChange={(e) => { setSimSeed(e.target.value); setTestResult(null); }} /></label>
+            <label>Nodos <input style={{ ...input, width: 70 }} type="number" value={simNodeCount} onChange={(e) => { setSimNodeCount(e.target.value); setTestResult(null); }} /></label>
+            <label title="0 = sin nodos compartidos">Semilla compartida <input style={{ ...input, width: 80 }} type="number" value={simSharedSeed} onChange={(e) => { setSimSharedSeed(e.target.value); setTestResult(null); }} /></label>
+            <label>Nodos compartidos <input style={{ ...input, width: 70 }} type="number" value={simSharedNodeCount} onChange={(e) => { setSimSharedNodeCount(e.target.value); setTestResult(null); }} /></label>
+          </div>
+        </div>
+      )}
+
+      {transportType === "usb" && (
       <div style={{ margin: "0.8rem 0" }}>
         <p style={styles.dim}>1. Buscar dispositivos USB conectados a esta pasarela.</p>
         <button style={btn} disabled={discover.isPending} onClick={() => discover.mutate()}>
@@ -161,10 +249,11 @@ function AddGatewayWizard({
           </div>
         )}
       </div>
+      )}
 
       <div style={{ margin: "0.8rem 0" }}>
         <p style={styles.dim}>2. Probar la conexión antes de guardar.</p>
-        <button style={btn} disabled={!selectedPort || test.isPending} onClick={() => test.mutate()}>
+        <button style={btn} disabled={!paramsReady || test.isPending} onClick={() => test.mutate()}>
           {test.isPending ? "Probando…" : "▶ Probar conexión"}
         </button>
         {testResult && (
@@ -204,7 +293,7 @@ function AddGatewayWizard({
 
 // ── Tarjeta de un gateway ya reportado (gestionado o no) ─────────────────────
 
-function GatewayCard({ gateway }: { gateway: GatewayOut }) {
+function GatewayCard({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayStatsOut }) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [editName, setEditName] = useState(gateway.name ?? "");
@@ -237,6 +326,25 @@ function GatewayCard({ gateway }: { gateway: GatewayOut }) {
         {gateway.managed && !gateway.enabled && <span style={styles.dim}>deshabilitado</span>}
         <span style={{ marginLeft: "auto", ...styles.dim, fontSize: "0.8rem" }}>{expanded ? "▲" : "▼"}</span>
       </div>
+
+      {/* Cobertura de esta pasarela (M6.2, node_gateway_links) */}
+      {stats && (
+        <div style={{ display: "flex", gap: "1.2rem", flexWrap: "wrap", marginTop: "0.4rem", fontSize: "0.85rem", ...styles.dim }}>
+          <span title="Nodos con escucha activa por esta pasarela">
+            Nodos visibles: <strong style={{ color: "#e6edf3" }}>{stats.nodes_visible}</strong>
+          </span>
+          <span title="Nodos que solo esta pasarela oye ahora mismo">
+            Exclusivos: <strong style={{ color: "#e6edf3" }}>{stats.nodes_exclusive}</strong>
+          </span>
+          <span title="Nodos que también oye otra pasarela">
+            Compartidos: <strong style={{ color: "#e6edf3" }}>{stats.nodes_shared}</strong>
+          </span>
+          <span title="Nodos cuya pasarela primaria es esta">
+            Primaria de: <strong style={{ color: "#e6edf3" }}>{stats.primary_for}</strong>
+          </span>
+          <span>Última actividad: {relativeTime(stats.last_heard_at)}</span>
+        </div>
+      )}
 
       {!gateway.managed && (
         <div style={{ marginTop: "0.6rem" }}>
@@ -330,17 +438,28 @@ export function GatewaysView() {
     queryFn: () => fetchGateways(true),
     refetchInterval: 15_000,
   });
+  const stats = useQuery({
+    queryKey: ["gateway-stats"],
+    queryFn: fetchGatewayStats,
+    refetchInterval: 15_000,
+  });
   const [wizardFor, setWizardFor] = useState<string | null>(null);
 
   const all = gateways.data ?? [];
   const list = all.filter((g) => g.deleted_at == null);
   const deleted = all.filter((g) => g.deleted_at != null);
-  const unmanagedCandidate = all.find((g) => !g.managed || g.deleted_at != null)?.gateway_id ?? null;
+  // M6.2: con varios procesos sin configurar a la vez, el asistente ofrece
+  // un selector explícito en vez de auto-elegir el primero.
+  const candidates = all.filter((g) => !g.managed || g.deleted_at != null).map((g) => g.gateway_id);
+  const statsById = new Map((stats.data?.gateways ?? []).map((g) => [g.gateway_id, g]));
 
   if (wizardFor) {
     return (
       <AddGatewayWizard
         gatewayId={wizardFor}
+        candidates={candidates}
+        gateways={all}
+        onSelectCandidate={setWizardFor}
         onCancel={() => setWizardFor(null)}
         onSaved={() => setWizardFor(null)}
       />
@@ -352,11 +471,11 @@ export function GatewaysView() {
       <div style={{ ...styles.card, display: "flex", alignItems: "center", gap: "0.8rem" }}>
         <h2 style={{ margin: 0 }}>Gateways</h2>
         <button
-          style={{ ...btn, marginLeft: "auto", background: unmanagedCandidate ? "#1f6feb" : "transparent" }}
-          disabled={!unmanagedCandidate}
-          onClick={() => unmanagedCandidate && setWizardFor(unmanagedCandidate)}
+          style={{ ...btn, marginLeft: "auto", background: candidates.length > 0 ? "#1f6feb" : "transparent" }}
+          disabled={candidates.length === 0}
+          onClick={() => candidates.length > 0 && setWizardFor(candidates[0])}
           title={
-            unmanagedCandidate
+            candidates.length > 0
               ? undefined
               : "Todos los procesos de pasarela detectados ya están configurados"
           }
@@ -370,7 +489,7 @@ export function GatewaysView() {
         <p style={styles.dim}>Ninguna pasarela ha reportado actividad todavía.</p>
       )}
       {list.map((g) => (
-        <GatewayCard key={g.gateway_id} gateway={g} />
+        <GatewayCard key={g.gateway_id} gateway={g} stats={statsById.get(g.gateway_id)} />
       ))}
 
       {deleted.length > 0 && (

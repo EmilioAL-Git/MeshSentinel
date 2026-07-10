@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from noc.application.dashboard import is_stale
 from noc.domain.nodes.entities import (
     GatewayInfo,
     Node,
@@ -83,15 +84,56 @@ class TagOut(BaseModel):
         return cls(id=t.id or 0, name=t.name, color=t.color)
 
 
+class NodeGatewayLinkOut(BaseModel):
+    node_id: str
+    gateway_id: str
+    rssi: int | None
+    snr: float | None
+    hops_away: int | None
+    via_mqtt: bool
+    first_heard_at: datetime | None
+    last_heard_at: datetime | None
+    # M6.2: un enlace es "activo" con el mismo umbral que online/offline;
+    # los enlaces stale se conservan (histórico de quién llegó a oír al nodo)
+    # pero no cuentan para redundancia ni enrutado.
+    active: bool = False
+    # True si esta pasarela es la primaria actual del nodo (nodes.gateway_id)
+    primary: bool = False
+
+    @classmethod
+    def from_entity(
+        cls,
+        link: NodeGatewayLink,
+        offline_threshold: int | None = None,
+        primary_gateway_id: str | None = None,
+    ) -> "NodeGatewayLinkOut":
+        data = {
+            f: getattr(link, f) for f in cls.model_fields if f not in ("active", "primary")
+        }
+        active = (
+            offline_threshold is not None
+            and link.last_heard_at is not None
+            and not is_stale(link.last_heard_at, offline_threshold)
+        )
+        return cls(**data, active=active, primary=link.gateway_id == primary_gateway_id)
+
+
 class NodeSummaryOut(BaseModel):
     node: NodeOut
     last_position: PositionOut | None
     last_device_telemetry: TelemetryOut | None
     tags: list[TagOut]
     group_ids: list[int]
+    # M6.2: observaciones por pasarela (todas; `active` distingue las vigentes)
+    gateway_links: list[NodeGatewayLinkOut] = []
 
     @classmethod
-    def from_entity(cls, s: NodeSummary, online_threshold: int) -> "NodeSummaryOut":
+    def from_entity(
+        cls,
+        s: NodeSummary,
+        online_threshold: int,
+        gateway_links: list[NodeGatewayLink] | None = None,
+    ) -> "NodeSummaryOut":
         return cls(
             node=NodeOut.from_entity(s.node, online_threshold),
             last_position=PositionOut.from_entity(s.last_position) if s.last_position else None,
@@ -100,6 +142,10 @@ class NodeSummaryOut(BaseModel):
             ),
             tags=[TagOut.from_entity(t) for t in s.tags],
             group_ids=s.group_ids,
+            gateway_links=[
+                NodeGatewayLinkOut.from_entity(link, online_threshold, s.node.gateway_id)
+                for link in (gateway_links or [])
+            ],
         )
 
 
@@ -132,16 +178,3 @@ class GatewayOut(BaseModel):
         return cls(**{f: getattr(g, f) for f in cls.model_fields})
 
 
-class NodeGatewayLinkOut(BaseModel):
-    node_id: str
-    gateway_id: str
-    rssi: int | None
-    snr: float | None
-    hops_away: int | None
-    via_mqtt: bool
-    first_heard_at: datetime | None
-    last_heard_at: datetime | None
-
-    @classmethod
-    def from_entity(cls, link: NodeGatewayLink) -> "NodeGatewayLinkOut":
-        return cls(**{f: getattr(link, f) for f in cls.model_fields})

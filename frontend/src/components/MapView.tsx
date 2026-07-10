@@ -3,7 +3,7 @@ import "leaflet/dist/leaflet.css";
 import { memo, useEffect, useMemo, useRef } from "react";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
-import type { NodeSummaryOut } from "../api/client";
+import { activeGatewayCount, type NodeSummaryOut } from "../api/client";
 import { styles } from "../styles";
 
 interface Props {
@@ -20,17 +20,24 @@ const COLOR_GATEWAY = "#d29922";
 // a recrear los elementos DOM de todos los marcadores.
 const iconCache = new Map<string, L.DivIcon>();
 
-function nodeIcon(online: boolean, isGateway: boolean): L.DivIcon {
-  const key = `${online}-${isGateway}`;
+function nodeIcon(online: boolean, isGateway: boolean, gatewayCount: number): L.DivIcon {
+  const key = `${online}-${isGateway}-${gatewayCount}`;
   let icon = iconCache.get(key);
   if (!icon) {
     const color = isGateway ? COLOR_GATEWAY : online ? COLOR_ONLINE : COLOR_OFFLINE;
     const shape = isGateway
       ? `width:16px;height:16px;transform:rotate(45deg);border-radius:3px;`
       : `width:14px;height:14px;border-radius:50%;`;
+    // Badge de redundancia (M6.2): nº de pasarelas que oyen al nodo ahora
+    const badge =
+      gatewayCount > 1
+        ? `<div style="position:absolute;top:-7px;right:-7px;background:#1f6feb;color:#fff;` +
+          `border-radius:8px;font-size:9px;line-height:12px;min-width:12px;text-align:center;` +
+          `padding:0 2px;border:1px solid #0d1117">${gatewayCount}</div>`
+        : "";
     icon = L.divIcon({
       className: "",
-      html: `<div style="${shape}background:${color};border:2px solid #0d1117;box-shadow:0 0 4px rgba(0,0,0,.6)"></div>`,
+      html: `<div style="position:relative"><div style="${shape}background:${color};border:2px solid #0d1117;box-shadow:0 0 4px rgba(0,0,0,.6)"></div>${badge}</div>`,
       iconSize: [18, 18],
       iconAnchor: [9, 9],
     });
@@ -57,8 +64,12 @@ const NodeMarker = memo(
   function NodeMarker({ summary, isGateway, onShowDetail }: NodeMarkerProps) {
     const { node, last_position: pos, last_device_telemetry: tel } = summary;
     if (!pos) return null;
+    const activeLinks = summary.gateway_links.filter((l) => l.active);
     return (
-      <Marker position={[pos.latitude, pos.longitude]} icon={nodeIcon(node.online, isGateway)}>
+      <Marker
+        position={[pos.latitude, pos.longitude]}
+        icon={nodeIcon(node.online, isGateway, activeLinks.length)}
+      >
         <Popup>
           <div style={{ minWidth: 200, fontSize: "0.85rem" }}>
             {node.is_favorite && <span style={{ color: "#e3b341" }}>★ </span>}
@@ -78,6 +89,21 @@ const NodeMarker = memo(
                   </td>
                 </tr>
                 <tr><td>SNR</td><td>{node.snr != null ? `${node.snr} dB` : "—"}</td></tr>
+                <tr>
+                  <td>Pasarelas</td>
+                  <td>
+                    {activeLinks.length === 0
+                      ? node.gateway_id ?? "—"
+                      : activeLinks.map((l) => (
+                          <div key={l.gateway_id} style={{ fontFamily: "monospace" }}>
+                            {l.primary ? "◆ " : ""}
+                            {l.gateway_id}
+                            {l.snr != null ? ` · ${l.snr} dB` : ""}
+                            {l.hops_away != null ? ` · ${l.hops_away} saltos` : ""}
+                          </div>
+                        ))}
+                  </td>
+                </tr>
                 <tr>
                   <td>Coords</td>
                   <td style={{ fontFamily: "monospace" }}>
@@ -106,7 +132,9 @@ const NodeMarker = memo(
     prev.summary.last_position?.latitude === next.summary.last_position?.latitude &&
     prev.summary.last_position?.longitude === next.summary.last_position?.longitude &&
     prev.summary.last_device_telemetry?.battery_level ===
-      next.summary.last_device_telemetry?.battery_level,
+      next.summary.last_device_telemetry?.battery_level &&
+    activeGatewayCount(prev.summary) === activeGatewayCount(next.summary) &&
+    prev.summary.node.gateway_id === next.summary.node.gateway_id,
 );
 
 /** Encuadra el mapa a los marcadores solo en la primera carga de datos. */
@@ -164,7 +192,9 @@ export function MapView({ summaries, gatewayNodeIds, onShowDetail }: Props) {
       <div style={{ ...styles.dim, marginTop: "0.5rem", fontSize: "0.8rem" }}>
         <span style={{ color: COLOR_ONLINE }}>●</span> online&nbsp;&nbsp;
         <span style={{ color: COLOR_OFFLINE }}>●</span> offline&nbsp;&nbsp;
-        <span style={{ color: COLOR_GATEWAY }}>◆</span> pasarela
+        <span style={{ color: COLOR_GATEWAY }}>◆</span> pasarela&nbsp;&nbsp;
+        <span style={{ background: "#1f6feb", color: "#fff", borderRadius: 8, padding: "0 4px", fontSize: "0.7rem" }}>n</span>{" "}
+        oído por n pasarelas
       </div>
     </div>
   );

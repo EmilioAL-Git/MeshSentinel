@@ -17,6 +17,7 @@ from noc.adapters.api.deps import SessionDep
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
+from noc.application.admin.gateway_routing import select_gateway_for_node
 from noc.application.admin.registry import OPERATIONS, validate_operation
 from noc.config import get_settings
 from noc.domain.admin.entities import AdminOperation
@@ -111,13 +112,18 @@ async def create_operation(body: OperationIn, session: SessionDep) -> OperationO
     node = await SqlNodeRepository(session).get(body.node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found in registry")
-    if not node.gateway_id:
+    # M6.2: mejor pasarela en el momento de encolar (fijada de por vida de la
+    # operación; con una sola pasarela equivale a nodes.gateway_id).
+    gateway_id = await select_gateway_for_node(
+        session, body.node_id, settings, fallback_gateway_id=node.gateway_id
+    )
+    if not gateway_id:
         raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
 
     op = await SqlAdminOperationRepository(session).create(
         AdminOperation(
             target_node_id=body.node_id,
-            gateway_id=node.gateway_id,
+            gateway_id=gateway_id,
             operation_type=body.operation_type,
             params=params,
             timeout_seconds=body.timeout_seconds or settings.admin_default_timeout_seconds,
@@ -175,10 +181,17 @@ async def retry_operation(op_id: int, session: SessionDep) -> OperationOut:
             raise HTTPException(status_code=404, detail="Operation not found")
         if op.status not in ("failed", "timeout", "cancelled"):
             raise HTTPException(status_code=409, detail=f"Cannot retry operation in status '{op.status}'")
+        # M6.2 (diseño §6): el reintento MANUAL del operador es el único punto
+        # donde se re-evalúa la pasarela — la cobertura pudo cambiar desde que
+        # la operación se encoló. Sin candidato válido, conserva la original.
+        gateway_id = await select_gateway_for_node(
+            session, op.target_node_id, get_settings(), fallback_gateway_id=op.gateway_id
+        )
         op = await repo.update_fields(
             op_id,
             {
                 "status": "pending",
+                "gateway_id": gateway_id or op.gateway_id,
                 "attempts": 0,
                 "next_attempt_at": None,
                 "error": None,

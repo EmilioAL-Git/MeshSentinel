@@ -80,12 +80,32 @@ export interface GroupOut {
   member_count: number;
 }
 
+/** Observación de un nodo por una pasarela concreta (node_gateway_links, M6.1/M6.2). */
+export interface NodeGatewayLinkOut {
+  node_id: string;
+  gateway_id: string;
+  rssi: number | null;
+  snr: number | null;
+  hops_away: number | null;
+  via_mqtt: boolean;
+  first_heard_at: string | null;
+  last_heard_at: string | null;
+  active: boolean;
+  primary: boolean;
+}
+
 export interface NodeSummaryOut {
   node: NodeOut;
   last_position: PositionOut | null;
   last_device_telemetry: TelemetryOut | null;
   tags: TagOut[];
   group_ids: number[];
+  gateway_links: NodeGatewayLinkOut[];
+}
+
+/** Nº de pasarelas que oyen al nodo ahora mismo (enlaces activos). */
+export function activeGatewayCount(s: NodeSummaryOut): number {
+  return s.gateway_links.filter((l) => l.active).length;
 }
 
 export interface NodeFilterParams {
@@ -149,8 +169,33 @@ export const fetchNodePositions = (id: string, limit = 50) =>
   get<PositionOut[]>(`/nodes/${encodeURIComponent(id)}/positions?limit=${limit}`);
 export const fetchNodeTelemetry = (id: string, limit = 50) =>
   get<TelemetryOut[]>(`/nodes/${encodeURIComponent(id)}/telemetry?limit=${limit}`);
+export const fetchNodeGateways = (id: string) =>
+  get<NodeGatewayLinkOut[]>(`/nodes/${encodeURIComponent(id)}/gateways`);
 export const fetchGateways = (includeDeleted = false) =>
   get<GatewayOut[]>(`/gateways${includeDeleted ? "?include_deleted=true" : ""}`);
+
+// ── Estadísticas Multi-Gateway (M6.2) ────────────────────────────────────────
+
+export interface GatewayStatsOut {
+  gateway_id: string;
+  name: string | null;
+  status: string;
+  nodes_visible: number;
+  nodes_exclusive: number;
+  nodes_shared: number;
+  primary_for: number;
+  last_heard_at: string | null;
+}
+
+export interface MultiGatewayStatsOut {
+  generated_at: string;
+  nodes_observed: number;
+  nodes_shared: number;
+  redundancy_percent: number;
+  gateways: GatewayStatsOut[];
+}
+
+export const fetchGatewayStats = () => get<MultiGatewayStatsOut>("/gateways/stats");
 
 // ── Gestión de gateways (M5) ─────────────────────────────────────────────────
 

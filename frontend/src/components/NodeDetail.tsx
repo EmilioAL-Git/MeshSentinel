@@ -7,6 +7,7 @@ import {
   fetchGroups,
   fetchKnownRemoteFlags,
   fetchNode,
+  fetchNodeGateways,
   fetchNodePositions,
   fetchNodeTelemetry,
   fetchTags,
@@ -223,6 +224,11 @@ export function NodeDetail({ nodeId, summary, summaries = [], onClose }: Props) 
     queryFn: () => fetchNodePositions(nodeId, 10),
     refetchInterval: 15_000,
   });
+  const gatewayLinks = useQuery({
+    queryKey: ["node-gateways", nodeId],
+    queryFn: () => fetchNodeGateways(nodeId),
+    refetchInterval: 15_000,
+  });
   const allTags = useQuery({ queryKey: ["tags"], queryFn: fetchTags });
   const allGroups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
 
@@ -308,11 +314,54 @@ export function NodeDetail({ nodeId, summary, summaries = [], onClose }: Props) 
           <Row label="Rol" value={n.role} />
           <Row label="SNR / RSSI" value={`${n.snr ?? "—"} dB / ${n.rssi ?? "—"} dBm`} />
           <Row label="Saltos" value={n.hops_away} />
-          <Row label="Pasarela" value={n.gateway_id} />
+          <Row label="Pasarela primaria" value={n.gateway_id} />
           <Row label="Primera vez visto" value={n.first_seen_at ? new Date(n.first_seen_at).toLocaleString() : null} />
           <Row label="Última vez visto" value={n.last_seen_at ? new Date(n.last_seen_at).toLocaleString() : null} />
         </tbody>
       </table>
+
+      <h3>Observaciones por pasarela</h3>
+      {(gatewayLinks.data ?? []).length === 0 ? (
+        <p style={styles.dim}>Ninguna pasarela ha registrado todavía una recepción directa de este nodo.</p>
+      ) : (
+        <table style={styles.table}>
+          <thead>
+            <tr>
+              <th style={styles.th}>Pasarela</th>
+              <th style={styles.th}>SNR</th>
+              <th style={styles.th}>RSSI</th>
+              <th style={styles.th}>Saltos</th>
+              <th style={styles.th}>Última escucha</th>
+              <th style={styles.th}>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(gatewayLinks.data ?? []).map((l) => (
+              <tr key={l.gateway_id} style={{ opacity: l.active ? 1 : 0.55 }}>
+                <td style={{ ...styles.td, ...styles.mono }}>
+                  {l.gateway_id}
+                  {l.primary && (
+                    <span title="Pasarela primaria del nodo" style={{ color: "#e3b341", marginLeft: 6 }}>
+                      ◆ primaria
+                    </span>
+                  )}
+                </td>
+                <td style={styles.td}>{l.snr != null ? `${l.snr} dB` : "—"}</td>
+                <td style={styles.td}>{l.rssi != null ? `${l.rssi} dBm` : "—"}</td>
+                <td style={styles.td}>{l.hops_away ?? "—"}</td>
+                <td style={styles.td}>{l.last_heard_at ? new Date(l.last_heard_at).toLocaleString() : "—"}</td>
+                <td style={styles.td}>
+                  {l.active ? (
+                    <span style={styles.badgeOnline}>activo</span>
+                  ) : (
+                    <span style={styles.badgeOffline}>sin escucha reciente</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       <h3>Telemetría</h3>
       {lastTel ? (

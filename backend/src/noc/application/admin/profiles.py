@@ -32,6 +32,7 @@ from noc.application.admin.config_schema import (
     values_equal,
 )
 from noc.application.admin.config_state import SectionState, load_section_states
+from noc.application.admin.gateway_routing import select_gateways_for_nodes
 from noc.config import Settings
 from noc.domain.admin.entities import ConfigProfile, ConfigProfileVersion
 
@@ -331,10 +332,12 @@ class ProfileService:
 
         async with self._session_factory() as session:
             node_repo = SqlNodeRepository(session)
-            gateways = {
+            fallbacks = {
                 p.node_id: (await node_repo.get(p.node_id)).gateway_id  # type: ignore[union-attr]
                 for p in preview.eligible
             }
+            # M6.2: cada nodo del lote viaja por su mejor pasarela actual
+            gateways = await select_gateways_for_nodes(session, fallbacks, self._settings)
 
         planned: list[PlannedOperation] = []
         for plan in preview.eligible:

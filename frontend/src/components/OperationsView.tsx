@@ -286,6 +286,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
                 <th style={styles.th}>#</th>
                 <th style={styles.th}>Nodo</th>
                 <th style={styles.th}>Operación</th>
+                <th style={styles.th}>Pasarela</th>
                 <th style={styles.th}>Estado</th>
                 <th style={styles.th}>Intentos</th>
                 <th style={styles.th}>Duración</th>
@@ -307,6 +308,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
                       {op.operation_type}
                       {typeof op.params.section === "string" ? `:${op.params.section}` : ""}
                     </td>
+                    <td style={{ ...styles.td, ...styles.mono }}>{op.gateway_id}</td>
                     <td style={styles.td}>
                       <span
                         style={{
@@ -345,7 +347,7 @@ export function OperationsView({ summaries }: { summaries: NodeSummaryOut[] }) {
                   </tr>
                   {expanded === op.id && (
                     <tr key={`${op.id}-detail`}>
-                      <td style={styles.td} colSpan={8}>
+                      <td style={styles.td} colSpan={9}>
                         {op.error && <p style={styles.bad}>Error: {op.error}</p>}
                         {op.status === "succeeded_unconfirmed" && ACK_ONLY_NO_VERIFY.has(op.operation_type) && (
                           <p style={{ ...styles.dim, fontSize: "0.85rem" }}>{ACK_ONLY_NOTE}</p>

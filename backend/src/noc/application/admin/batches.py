@@ -23,6 +23,7 @@ from noc.adapters.persistence.admin_repositories import (
 )
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
+from noc.application.admin.gateway_routing import select_gateways_for_nodes
 from noc.application.admin.registry import OPERATIONS, validate_operation
 from noc.application.dashboard import ensure_utc
 from noc.application.node_filters import NodeFilters, apply_filters
@@ -182,15 +183,22 @@ class BatchService:
 
         async with self._session_factory() as session:
             node_repo = SqlNodeRepository(session)
-            planned: list[PlannedOperation] = []
+            fallbacks: dict[str, str | None] = {}
             for node_id in dict.fromkeys(node_ids):  # dedupe conservando orden
                 node = await node_repo.get(node_id)
                 if node is None:
                     raise ValueError(f"Node {node_id} not found in registry")
-                if not node.gateway_id:
+                fallbacks[node_id] = node.gateway_id
+            # M6.2: reparto automático — cada operación viaja por la mejor
+            # pasarela PARA ESE NODO (enlace activo + pasarela conectada),
+            # con nodes.gateway_id como fallback (equivalente mono-pasarela).
+            selected = await select_gateways_for_nodes(session, fallbacks, self._settings)
+            planned: list[PlannedOperation] = []
+            for node_id, gateway_id in selected.items():
+                if not gateway_id:
                     raise ValueError(f"Node {node_id} has no known gateway (run preview first)")
                 planned.append(
-                    PlannedOperation(node_id, node.gateway_id, operation_type, normalized)
+                    PlannedOperation(node_id, gateway_id, operation_type, normalized)
                 )
 
         return await self.create_planned(

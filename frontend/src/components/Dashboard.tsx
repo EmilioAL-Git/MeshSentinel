@@ -1,5 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
 import type { CSSProperties, ReactNode } from "react";
-import type { CriticalNodeOut, CriticalReason, DashboardSummaryOut, NodeSummaryOut } from "../api/client";
+import {
+  fetchGatewayStats,
+  type CriticalNodeOut,
+  type CriticalReason,
+  type DashboardSummaryOut,
+  type NodeSummaryOut,
+} from "../api/client";
 import { styles } from "../styles";
 import type { ActivityEntry } from "../activity";
 
@@ -82,6 +89,14 @@ function CriticalRow({ node, onShowDetail }: { node: CriticalNodeOut; onShowDeta
 }
 
 export function Dashboard({ summary, loading, activity, favorites, onNavigate, onShowDetail }: Props) {
+  // Multi-Gateway (M6.2): solo interesa consultarlo/mostrarlo con ≥2 pasarelas
+  const multiGateway = summary != null && summary.gateways_total >= 2;
+  const gwStats = useQuery({
+    queryKey: ["gateway-stats"],
+    queryFn: fetchGatewayStats,
+    refetchInterval: 30_000,
+    enabled: multiGateway,
+  });
   if (loading || !summary) {
     return <div style={styles.card}>Cargando resumen de la red…</div>;
   }
@@ -166,6 +181,50 @@ export function Dashboard({ summary, loading, activity, favorites, onNavigate, o
         <Card label="Silencio medio" value={fmtSeconds(summary.avg_seconds_since_last_seen)} />
         <Card label="Eventos última hora" value={summary.events_last_hour} />
       </div>
+
+      {/* Cobertura Multi-Gateway (M6.2): visible solo con ≥2 pasarelas */}
+      {multiGateway && gwStats.data && (
+        <div style={styles.card}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "1rem", flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0 }}>Cobertura Multi-Gateway</h2>
+            <span style={styles.dim}>
+              {gwStats.data.nodes_observed} nodos observados · {gwStats.data.nodes_shared} con cobertura
+              redundante ({gwStats.data.redundancy_percent}%)
+            </span>
+          </div>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Pasarela</th>
+                <th style={styles.th}>Estado</th>
+                <th style={styles.th}>Nodos visibles</th>
+                <th style={styles.th}>Exclusivos</th>
+                <th style={styles.th}>Compartidos</th>
+                <th style={styles.th}>Primaria de</th>
+                <th style={styles.th}>Última actividad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gwStats.data.gateways.map((g) => (
+                <tr key={g.gateway_id}>
+                  <td style={styles.td}>
+                    <strong>{g.name ?? g.gateway_id}</strong>{" "}
+                    <span style={{ ...styles.dim, ...styles.mono }}>{g.gateway_id}</span>
+                  </td>
+                  <td style={styles.td}>
+                    <span style={g.status === "connected" ? styles.ok : styles.bad}>●</span> {g.status}
+                  </td>
+                  <td style={styles.td}>{g.nodes_visible}</td>
+                  <td style={styles.td}>{g.nodes_exclusive}</td>
+                  <td style={styles.td}>{g.nodes_shared}</td>
+                  <td style={styles.td}>{g.primary_for}</td>
+                  <td style={styles.td}>{relativeTime(g.last_heard_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div style={styles.layout}>
         {/* Nodos críticos */}

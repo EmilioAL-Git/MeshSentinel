@@ -46,6 +46,10 @@ async def list_nodes(
 ) -> list[NodeSummaryOut]:
     threshold = get_settings().node_offline_after_seconds
     summaries = await SqlNodeRepository(session).list_summaries()
+    # M6.2: observaciones por pasarela adjuntas al resumen (una sola consulta)
+    links_by_node = await SqlNodeGatewayLinkRepository(session).list_for_nodes(
+        [s.node.node_id for s in summaries]
+    )
     filtered = apply_filters(
         summaries,
         NodeFilters(
@@ -62,7 +66,10 @@ async def list_nodes(
         ),
         threshold,
     )
-    return [NodeSummaryOut.from_entity(s, threshold) for s in filtered]
+    return [
+        NodeSummaryOut.from_entity(s, threshold, links_by_node.get(s.node.node_id))
+        for s in filtered
+    ]
 
 
 @router.put("/{node_id}/favorite", response_model=NodeOut)
@@ -117,10 +124,12 @@ async def node_gateways(node_id: str, session: SessionDep) -> list[NodeGatewayLi
     resto del sistema): expone TODAS las pasarelas que han oído a este nodo,
     orden por recepción más reciente.
     """
-    if await SqlNodeRepository(session).get(node_id) is None:
+    node = await SqlNodeRepository(session).get(node_id)
+    if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
     links = await SqlNodeGatewayLinkRepository(session).list_for_node(node_id)
-    return [NodeGatewayLinkOut.from_entity(link) for link in links]
+    threshold = get_settings().node_offline_after_seconds
+    return [NodeGatewayLinkOut.from_entity(link, threshold, node.gateway_id) for link in links]
 
 
 @router.get("/{node_id}/telemetry", response_model=list[TelemetryOut])

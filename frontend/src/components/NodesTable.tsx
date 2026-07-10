@@ -1,4 +1,4 @@
-import type { NodeSummaryOut } from "../api/client";
+import { activeGatewayCount, type NodeSummaryOut } from "../api/client";
 import { styles } from "../styles";
 
 interface Props {
@@ -46,12 +46,16 @@ export function NodesTable({
           <th style={styles.th}>Estado</th>
           <th style={styles.th}>Batería</th>
           <th style={styles.th}>SNR</th>
+          <th style={styles.th}>Pasarela</th>
           <th style={styles.th}>Visto</th>
           <th style={styles.th}></th>
         </tr>
       </thead>
       <tbody>
-        {summaries.map(({ node, last_device_telemetry, tags }) => (
+        {summaries.map((summary) => {
+          const { node, last_device_telemetry, tags } = summary;
+          const gwCount = activeGatewayCount(summary);
+          return (
           <tr
             key={node.node_id}
             style={{
@@ -116,6 +120,24 @@ export function NodesTable({
                 : "—"}
             </td>
             <td style={styles.td}>{node.snr != null ? `${node.snr} dB` : "—"}</td>
+            <td style={styles.td}>
+              <span style={styles.mono}>{node.gateway_id ?? "—"}</span>
+              {gwCount > 1 && (
+                <span
+                  title={`Oído ahora mismo por ${gwCount} pasarelas — detalle en el panel del nodo`}
+                  style={{
+                    background: "#1f6feb",
+                    color: "#fff",
+                    borderRadius: 10,
+                    padding: "0 0.4rem",
+                    marginLeft: 6,
+                    fontSize: "0.72rem",
+                  }}
+                >
+                  🛰 {gwCount}
+                </span>
+              )}
+            </td>
             <td style={styles.td}>{relativeTime(node.last_seen_at)}</td>
             <td style={styles.td}>
               <span
@@ -130,7 +152,8 @@ export function NodesTable({
               </span>
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );

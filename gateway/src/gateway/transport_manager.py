@@ -23,7 +23,14 @@ _PARAM_FIELDS: dict[str, dict[str, str]] = {
     "usb": {"device": "usb_device"},
     "tcp": {"host": "tcp_host", "port": "tcp_port"},
     "http": {"url": "http_url"},
-    "simulated": {},
+    # M6.2: la malla simulada se configura desde la app (seed por instancia,
+    # shared_seed común para generar nodos compartidos entre pasarelas)
+    "simulated": {
+        "seed": "sim_seed",
+        "node_count": "sim_node_count",
+        "shared_seed": "sim_shared_seed",
+        "shared_node_count": "sim_shared_node_count",
+    },
 }
 
 

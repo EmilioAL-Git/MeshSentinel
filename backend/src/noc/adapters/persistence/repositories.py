@@ -133,6 +133,10 @@ class SqlNodeRepository:
         await self._session.flush()
         return _node_entity(model)
 
+    async def list_all(self) -> list[Node]:
+        rows = await self._session.scalars(select(NodeModel))
+        return [_node_entity(r) for r in rows]
+
     async def list_summaries(self) -> list[NodeSummary]:
         nodes = (await self._session.scalars(select(NodeModel).order_by(NodeModel.last_seen_at.desc()))).all()
 
@@ -255,6 +259,27 @@ class SqlNodeGatewayLinkRepository:
             select(NodeGatewayLinkModel)
             .where(NodeGatewayLinkModel.node_id == node_id)
             .order_by(NodeGatewayLinkModel.last_heard_at.desc())
+        )
+        return [_to_entity(r, NodeGatewayLink) for r in rows]
+
+    async def list_for_nodes(self, node_ids: list[str]) -> dict[str, list[NodeGatewayLink]]:
+        """Enlaces de varios nodos en una sola consulta (M6.2: enrutado de
+        lotes y listado de nodos sin N+1)."""
+        if not node_ids:
+            return {}
+        rows = await self._session.scalars(
+            select(NodeGatewayLinkModel)
+            .where(NodeGatewayLinkModel.node_id.in_(node_ids))
+            .order_by(NodeGatewayLinkModel.last_heard_at.desc())
+        )
+        out: dict[str, list[NodeGatewayLink]] = {}
+        for r in rows:
+            out.setdefault(r.node_id, []).append(_to_entity(r, NodeGatewayLink))
+        return out
+
+    async def list_all(self) -> list[NodeGatewayLink]:
+        rows = await self._session.scalars(
+            select(NodeGatewayLinkModel).order_by(NodeGatewayLinkModel.last_heard_at.desc())
         )
         return [_to_entity(r, NodeGatewayLink) for r in rows]
 
