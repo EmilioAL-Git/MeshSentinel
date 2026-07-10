@@ -10,6 +10,40 @@ que la lista") valen tanto como los bugs de UX.
 
 ---
 
+## 2026-07-10 · v0.7.4 — el Centro de Trabajos
+
+### Descubrimiento: "requiere intervención" es la sección que ordena el turno
+- **Observación**: al organizar por pregunta del operador en vez de por
+  tabla, la sección REQUIEREN INTERVENCIÓN se convierte en la lista de
+  tareas real del día — es lo primero que se mira, antes que el historial.
+  Confirma que el criterio "diseñar alrededor de las preguntas" funciona;
+  candidata a subir también como bloque del panel izquierdo del Centro si
+  el uso real lo confirma.
+- **Estado**: anotado como dirección.
+
+### El reparto por pasarela se calcula de las últimas 500 operaciones
+- **Contexto**: las barras por gateway de los lotes activos derivan de las
+  ops cargadas (limit 500), no de un agregado del backend.
+- **Fricción**: con lotes >500 operaciones el reparto se quedaría corto
+  (hoy imposible: los lotes reales son de decenas).
+- **Mejora**: agregado por pasarela en BatchDetailOut cuando toque backend.
+- **Estado**: pendiente (fuera de v0.7, junto al conteo agregado de cola).
+
+### El flash de transición hace visible el rate limit
+- **Observación**: con el destello al cambiar de estado se VE el ritmo del
+  scheduler (60 op/min, 1 en vuelo por pasarela) — la cola "gotea" hacia
+  en-ejecución. Antes ese comportamiento solo se conocía leyendo docs.
+  Efecto secundario educativo no buscado.
+- **Estado**: implementado.
+
+### La vista Perfiles quedó como la última "de la era anterior"
+- **Contexto**: con Operaciones y Batches fusionadas, Perfiles (824
+  líneas, formularios apilados) es la vista que más desentona, seguida de
+  Configuración y la tabla de Nodos.
+- **Estado**: pendiente — candidata principal de la siguiente fase.
+
+---
+
 ## 2026-07-10 · v0.7.3 — la consola viva
 
 ### Decisión: selección ≠ Focus (sin estados ambiguos)
@@ -152,7 +186,9 @@ que la lista") valen tanto como los bugs de UX.
 - **Impacto**: la auditoría de "qué pasó anoche" sigue exigiendo dos vistas.
 - **Mejora**: la fusión en la vista Trabajos (§13) sube de prioridad tras
   probar el panel.
-- **Estado**: diseñado, previsto para la fase de vistas especializadas.
+- **Estado**: **implementado en v0.7.4** (Centro de Trabajos: lotes y
+  operaciones en la misma línea temporal; vistas Operaciones y Batches
+  eliminadas).
 
 ---
 

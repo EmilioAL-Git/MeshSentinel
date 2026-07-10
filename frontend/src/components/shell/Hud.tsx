@@ -67,7 +67,7 @@ export function Hud({
   gateways: GatewayOut[];
   alerts: AlertOut[];
   operations: OperationOut[];
-  onGoTo: (view: "ops" | "nodes" | "gateways" | "alerts" | "operations") => void;
+  onGoTo: (view: "ops" | "nodes" | "gateways" | "alerts" | "jobs") => void;
 }) {
   const enabled = gateways.filter((g) => g.enabled && g.deleted_at == null);
   const down = enabled.filter((g) => g.status !== "connected");
@@ -132,7 +132,7 @@ export function Hud({
       />
       <Item
         title="Operaciones de administración remota"
-        onClick={() => onGoTo("operations")}
+        onClick={() => onGoTo("jobs")}
         value={<>▶ {running + queued}</>}
         sub={running + queued === 0 ? "inactivo" : `${running} activa(s) · ${queued} en cola`}
       />

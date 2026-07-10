@@ -22,15 +22,15 @@ import {
 } from "./api/client";
 import { ActivityConsole } from "./components/ActivityConsole";
 import { AlertsView } from "./components/AlertsView";
-import { BatchesView, BatchWizard } from "./components/BatchesView";
 import { ConfigEditor } from "./components/ConfigEditor";
 import { Dashboard } from "./components/Dashboard";
 import { GatewaysView } from "./components/GatewaysView";
 import { Inspector } from "./components/inspector/Inspector";
+import { BatchWizard } from "./components/jobs/BatchWizard";
+import { JobsView } from "./components/jobs/JobsView";
 import { MapView } from "./components/MapView";
 import { NodeFiltersBar } from "./components/NodeFiltersBar";
 import { NodesTable } from "./components/NodesTable";
-import { OperationsView } from "./components/OperationsView";
 import { OpsCenter } from "./components/opscenter/OpsCenter";
 import { ProfilesView } from "./components/ProfilesView";
 import { CommandPalette } from "./components/shell/CommandPalette";
@@ -59,10 +59,9 @@ type View =
   | "nodes"
   | "map"
   | "alerts"
-  | "operations"
+  | "jobs"
   | "config"
   | "profiles"
-  | "batches"
   | "activity"
   | "gateways";
 
@@ -71,17 +70,21 @@ type View =
 // clásico queda como red de seguridad hasta que el Centro lo absorba del todo.
 const VIEWS: { id: View; label: string }[] = [
   { id: "ops", label: "Centro de Operaciones" },
+  { id: "jobs", label: "Trabajos" },
   { id: "nodes", label: "Nodos" },
   { id: "map", label: "Mapa" },
   { id: "alerts", label: "Alertas" },
-  { id: "operations", label: "Operaciones" },
-  { id: "batches", label: "Batches" },
   { id: "config", label: "Configuración" },
   { id: "profiles", label: "Perfiles" },
   { id: "activity", label: "Actividad" },
   { id: "gateways", label: "Gateways" },
   { id: "dashboard", label: "Dashboard clásico" },
 ];
+
+/** Ids de vista históricos (componentes/documentos antiguos): ambos son ahora Trabajos. */
+function resolveView(v: string): View {
+  return v === "operations" || v === "batches" ? "jobs" : (v as View);
+}
 
 const selBtn = {
   background: "transparent",
@@ -399,6 +402,15 @@ export default function App() {
       return "ops";
     });
   }, []);
+  // "Localizar en el mapa" desde cualquier lista (Trabajos, etc.)
+  const locateNode = useCallback(
+    (nodeId: string) => {
+      const pos = (nodes.data ?? []).find((s) => s.node.node_id === nodeId)?.last_position;
+      if (pos) centerOnMap(pos.latitude, pos.longitude);
+      else toast("El nodo no tiene posición conocida", { kind: "error" });
+    },
+    [nodes.data, centerOnMap],
+  );
 
   const selectedSummary =
     filteredSummaries.find((s) => s.node.node_id === selected) ??
@@ -510,7 +522,7 @@ export default function App() {
         groups={groups.data ?? []}
         profiles={profiles.data ?? []}
         views={VIEWS}
-        onNavigate={(v) => setView(v as View)}
+        onNavigate={(v) => setView(resolveView(v))}
         onOpenNode={showDetail}
         onFilterTag={(tagName) => {
           setFilters({ tag: tagName });
@@ -538,7 +550,7 @@ export default function App() {
             selected={selected}
             focusId={focus?.id ?? null}
             onSelect={setSelected}
-            onGoTo={(v) => setView(v as View)}
+            onGoTo={(v) => setView(resolveView(v))}
             onMapReady={onMapReady}
           />
         </div>
@@ -571,7 +583,15 @@ export default function App() {
 
       {view === "alerts" && <AlertsView />}
 
-      {view === "operations" && <OperationsView summaries={summaries} />}
+      {view === "jobs" && (
+        <JobsView
+          summaries={summaries}
+          focusId={focus?.id ?? null}
+          openBatchId={openBatchId}
+          onOpenNode={setSelected}
+          onLocate={locateNode}
+        />
+      )}
 
       {view === "config" && <ConfigEditor summaries={summaries} />}
 
@@ -580,13 +600,9 @@ export default function App() {
           summaries={summaries}
           onOpenBatch={(batchId) => {
             setOpenBatchId(batchId);
-            setView("batches");
+            setView("jobs");
           }}
         />
-      )}
-
-      {view === "batches" && (
-        <BatchesView summaries={summaries} openBatchId={openBatchId} onOpenBatch={setOpenBatchId} />
       )}
 
       {view === "map" && (
@@ -609,7 +625,7 @@ export default function App() {
                 if (batchId != null) {
                   setCheckedIds(new Set());
                   setOpenBatchId(batchId);
-                  setView("batches");
+                  setView("jobs");
                 }
               }}
             />
@@ -727,7 +743,7 @@ export default function App() {
           operations={operations.data ?? []}
           onClose={() => setSelected(null)}
           onCenter={centerOnMap}
-          onGoTo={(v) => setView(v as View)}
+          onGoTo={(v) => setView(resolveView(v))}
           focusActive={focus?.id === selected}
           onToggleFocus={() => toggleFocus(selected)}
         />

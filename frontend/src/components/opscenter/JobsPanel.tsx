@@ -13,6 +13,10 @@ import {
 } from "../../api/client";
 import { relativeTime } from "../../time";
 import { chipStyle, t } from "../../tokens";
+import {
+  RETRYABLE_OP_STATUSES as RETRYABLE,
+  TERMINAL_OP_STATUSES as TERMINAL,
+} from "../jobs/status";
 
 /**
  * Panel Trabajos del Centro de Operaciones (v0.7 §6.4): el pipeline admin en
@@ -47,9 +51,6 @@ const smallBtn: CSSProperties = {
   fontSize: 11,
   padding: "0 0.45rem",
 };
-
-const RETRYABLE = new Set(["failed", "timeout", "verify_failed", "cancelled"]);
-const TERMINAL = new Set(["succeeded", "succeeded_unconfirmed", "verify_failed", "failed", "timeout", "cancelled"]);
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -136,7 +137,7 @@ export function JobsPanel({
         {inFlight > 0 && <span style={{ ...chipStyle(t.accent), fontSize: 10.5 }}>▶ {inFlight}</span>}
         <button
           style={{ ...smallBtn, marginLeft: "auto" }}
-          onClick={() => onGoTo("operations")}
+          onClick={() => onGoTo("jobs")}
           title="Cola e historial completos (vista Operaciones)"
         >
           Ver historial →

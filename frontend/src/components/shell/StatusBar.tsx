@@ -88,7 +88,7 @@ export function StatusBar({
   alerts: AlertOut[];
   operations: OperationOut[];
   runningBatch: BatchDetailOut | undefined;
-  onGoTo: (view: "nodes" | "gateways" | "alerts" | "operations" | "batches") => void;
+  onGoTo: (view: "nodes" | "gateways" | "alerts" | "jobs") => void;
 }) {
   const [utc, setUtc] = usePersistedState<boolean>("statusbar.utc", true);
   const [now, setNow] = useState(() => new Date());
@@ -143,12 +143,12 @@ export function StatusBar({
       <Segment title="Alertas activas" onClick={() => onGoTo("alerts")}>
         <span style={{ color: alertColor }}>⚠ {active.length}</span>
       </Segment>
-      <Segment title="Operaciones en cola (pendientes + encoladas)" onClick={() => onGoTo("operations")}>
+      <Segment title="Operaciones en cola (pendientes + encoladas)" onClick={() => onGoTo("jobs")}>
         ⧗ {queuedCount}
       </Segment>
       <Segment
         title="Operaciones ejecutándose y lote activo"
-        onClick={() => onGoTo(runningBatch ? "batches" : "operations")}
+        onClick={() => onGoTo("jobs")}
       >
         ▶ {runningCount} op
         {runningBatch && (

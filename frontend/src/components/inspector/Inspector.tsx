@@ -23,6 +23,11 @@ import {
 import { relativeTime } from "../../time";
 import { chipStyle, t } from "../../tokens";
 import { trackOperations } from "../../opTracker";
+import {
+  OP_STATUS_COLOR,
+  OP_STATUS_LABEL,
+  RETRYABLE_OP_STATUSES as RETRYABLE,
+} from "../jobs/status";
 import { BlockAccordion } from "../shell/BlockAccordion";
 import { toast } from "../shell/Toast";
 import { RemoteFlags } from "./RemoteFlags";
@@ -35,20 +40,6 @@ import { RemoteFlags } from "./RemoteFlags";
  * secciones plegables con persistencia para minimizar scroll.
  * Sustituye por completo al NodeDetail heredado.
  */
-
-const OP_STATUS_COLOR: Record<string, string> = {
-  pending: t.textDim,
-  queued: t.accent,
-  running: t.accent,
-  succeeded: t.ok,
-  succeeded_unconfirmed: t.warn,
-  verify_failed: t.crit,
-  failed: t.crit,
-  timeout: t.warn,
-  cancelled: t.textFaint,
-};
-
-const RETRYABLE = new Set(["failed", "timeout", "verify_failed", "cancelled"]);
 
 const iconBtn: CSSProperties = {
   background: "transparent",
@@ -413,7 +404,7 @@ export function Inspector({
               style={{ background: "none", border: "none", color: t.accent, cursor: "pointer", fontSize: 12, padding: 0 }}
               onClick={(e) => {
                 e.stopPropagation();
-                onGoTo("operations");
+                onGoTo("jobs");
               }}
             >
               Ver todas →
@@ -428,7 +419,12 @@ export function Inspector({
                 {op.operation_type}
                 {typeof op.params.section === "string" ? `:${op.params.section}` : ""}
               </span>
-              <span style={{ ...chipStyle(OP_STATUS_COLOR[op.status] ?? t.textDim), fontSize: 10.5 }}>{op.status}</span>
+              <span
+                style={{ ...chipStyle(OP_STATUS_COLOR[op.status] ?? t.textDim), fontSize: 10.5 }}
+                title={`estado técnico: ${op.status}`}
+              >
+                {OP_STATUS_LABEL[op.status] ?? op.status}
+              </span>
               {RETRYABLE.has(op.status) && (
                 <button style={iconBtn} title="Reintentar (re-evalúa la pasarela)" onClick={() => doRetry.mutate(op.id)}>
                   ↻

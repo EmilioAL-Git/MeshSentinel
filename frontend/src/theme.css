@@ -210,6 +210,35 @@ a {
   pointer-events: none;
 }
 
+/* Centro de Trabajos (v0.7.4): dos columnas en escritorio ancho —
+   izquierda lo vivo (activos/cola/intervención), derecha el historial —
+   y una sola columna por debajo de 1280 px (tablet/portátil estrecho). */
+.jobs-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1279px) {
+  .jobs-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Transición de estado de un trabajo: destello de UNA VEZ del fondo —
+   evidente sin ser brusco (≤1.2 s, sin rebote) */
+@keyframes noc-flash {
+  0% {
+    background-color: rgba(76, 141, 255, 0.22);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.noc-flash {
+  animation: noc-flash 1.2s ease-out forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .noc-pulse,
   .noc-pulse-once {
@@ -219,6 +248,9 @@ a {
   .noc-alert-halo {
     animation: none;
     box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.55);
+  }
+  .noc-flash {
+    animation: none;
   }
   * {
     transition: none !important;
