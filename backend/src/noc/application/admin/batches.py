@@ -23,7 +23,7 @@ from noc.adapters.persistence.admin_repositories import (
 )
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
-from noc.application.admin.gateway_routing import select_gateways_for_nodes
+from noc.application.admin.gateway_routing import resolve_gateways_for_nodes
 from noc.application.admin.registry import OPERATIONS, validate_operation
 from noc.application.dashboard import ensure_utc
 from noc.application.node_filters import NodeFilters, apply_filters
@@ -66,6 +66,7 @@ class PlannedOperation:
     gateway_id: str
     operation_type: str
     params: dict[str, Any]
+    gateway_note: str | None = None
 
 
 @dataclass(slots=True)
@@ -171,6 +172,8 @@ class BatchService:
         node_ids: list[str],
         scope_description: dict[str, Any] | None,
         created_by: str = "admin",
+        forced_gateway_id: str | None = None,
+        use_preference: bool = True,
     ) -> AdminBatch:
         spec = OPERATIONS.get(operation_type)
         if spec is None:
@@ -182,23 +185,24 @@ class BatchService:
         normalized = validate_operation(operation_type, params)
 
         async with self._session_factory() as session:
-            node_repo = SqlNodeRepository(session)
-            fallbacks: dict[str, str | None] = {}
-            for node_id in dict.fromkeys(node_ids):  # dedupe conservando orden
-                node = await node_repo.get(node_id)
-                if node is None:
-                    raise ValueError(f"Node {node_id} not found in registry")
-                fallbacks[node_id] = node.gateway_id
-            # M6.2: reparto automático — cada operación viaja por la mejor
-            # pasarela PARA ESE NODO (enlace activo + pasarela conectada),
-            # con nodes.gateway_id como fallback (equivalente mono-pasarela).
-            selected = await select_gateways_for_nodes(session, fallbacks, self._settings)
+            unique_ids = list(dict.fromkeys(node_ids))  # dedupe conservando orden
+            found = {n.node_id for n in await SqlNodeRepository(session).list_for_ids(unique_ids)}
+            missing = [nid for nid in unique_ids if nid not in found]
+            if missing:
+                raise ValueError(f"Node {missing[0]} not found in registry")
+            # Selección inteligente de gateway (4 niveles) — cada operación
+            # viaja por la pasarela forzada/preferida/automática PARA ESE
+            # NODO, nunca una única pasarela para todo el lote.
+            resolved = await resolve_gateways_for_nodes(
+                session, unique_ids, self._settings,
+                forced_gateway_id=forced_gateway_id, use_preference=use_preference,
+            )
             planned: list[PlannedOperation] = []
-            for node_id, gateway_id in selected.items():
-                if not gateway_id:
+            for node_id, resolution in resolved.items():
+                if not resolution.gateway_id:
                     raise ValueError(f"Node {node_id} has no known gateway (run preview first)")
                 planned.append(
-                    PlannedOperation(node_id, gateway_id, operation_type, normalized)
+                    PlannedOperation(node_id, resolution.gateway_id, operation_type, normalized, resolution.note)
                 )
 
         return await self.create_planned(
@@ -250,6 +254,7 @@ class BatchService:
                         timeout_seconds=self._settings.admin_default_timeout_seconds,
                         max_attempts=self._settings.admin_max_attempts,
                         created_by=created_by,
+                        gateway_note=op.gateway_note,
                     )
                 )
         logger.info(

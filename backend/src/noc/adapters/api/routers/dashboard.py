@@ -51,6 +51,11 @@ class DashboardSummaryOut(BaseModel):
     avg_battery_percent: float | None
     avg_seconds_since_last_seen: float | None
     events_last_hour: int
+    avg_snr: float | None
+    avg_rssi: float | None
+    avg_channel_utilization: float | None
+    avg_temperature_c: float | None
+    avg_pressure_hpa: float | None
     critical_nodes: list[CriticalNodeOut]
     gateways: list[GatewayOut]
     thresholds: ThresholdsOut
@@ -71,6 +76,11 @@ class DashboardSummaryOut(BaseModel):
             avg_battery_percent=s.avg_battery_percent,
             avg_seconds_since_last_seen=s.avg_seconds_since_last_seen,
             events_last_hour=s.events_last_hour,
+            avg_snr=s.avg_snr,
+            avg_rssi=s.avg_rssi,
+            avg_channel_utilization=s.avg_channel_utilization,
+            avg_temperature_c=s.avg_temperature_c,
+            avg_pressure_hpa=s.avg_pressure_hpa,
             critical_nodes=[CriticalNodeOut.from_entity(c) for c in s.critical_nodes],
             gateways=[GatewayOut.from_entity(g) for g in s.gateways],
             thresholds=ThresholdsOut.from_entity(s.thresholds),

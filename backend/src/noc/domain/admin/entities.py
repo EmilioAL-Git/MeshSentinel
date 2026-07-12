@@ -108,6 +108,11 @@ class AdminOperation:
     started_at: datetime | None = None
     finished_at: datetime | None = None
     duration_ms: int | None = None
+    # Selección inteligente de gateway: motivo legible cuando la pasarela
+    # resuelta NO fue la preferida (nodo o grupo) porque no estaba operativa
+    # en el momento de encolar — nunca se reintenta solo por esto (Nivel 1-4,
+    # `application/admin/gateway_routing.py:resolve_gateway`).
+    gateway_note: str | None = None
 
     @property
     def is_terminal(self) -> bool:

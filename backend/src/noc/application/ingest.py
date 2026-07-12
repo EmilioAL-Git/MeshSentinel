@@ -18,6 +18,8 @@ from noc.adapters.persistence.repositories import (
     SqlPositionRepository,
     SqlTelemetryRepository,
 )
+from noc.application import activity_events
+from noc.application.activity import activity
 from noc.application.dashboard import is_stale
 from noc.application.gateway_link_selection import GatewayLinkCandidate, select_primary_link
 from noc.domain.nodes.entities import GatewayInfo, Node, NodeGatewayLink, Position, Telemetry
@@ -25,6 +27,16 @@ from noc.domain.nodes.entities import GatewayInfo, Node, NodeGatewayLink, Positi
 logger = logging.getLogger("noc.ingest")
 
 SUPPORTED_SCHEMA_VERSION = 1
+
+# Actividad 2.0 Fase 1: un uptime que retrocede más de esto respecto al último
+# registro de kind=device se narra como reinicio, no como telemetría normal
+REBOOT_UPTIME_DELTA_SECONDS = 60
+
+
+def _node_label(node: Node | None, fallback: str) -> str:
+    if node is not None and node.short_name:
+        return node.short_name
+    return fallback
 
 
 def _parse_ts(value: str | None) -> datetime:
@@ -76,9 +88,13 @@ class IngestService:
                     case "gateway.status":
                         await self._on_gateway_status(session, payload, gateway_id, received_at)
                     case "message.received":
-                        await SqlNodeRepository(session).touch_last_seen(
-                            payload["from_node_id"], gateway_id, received_at
-                        )
+                        await self._on_message(session, payload, gateway_id, received_at)
+                    case "neighbors.seen":
+                        await self._on_neighbors(session, payload, gateway_id, received_at)
+                    case "traceroute.completed":
+                        await self._on_traceroute(session, payload, gateway_id, received_at)
+                    case "waypoint.shared":
+                        await self._on_waypoint(session, payload, gateway_id, received_at)
                     case _:
                         logger.debug("Ignoring event_type=%s", event_type)
         except Exception:
@@ -88,6 +104,8 @@ class IngestService:
         self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
     ) -> None:
         node_id = p["node_id"]
+        node_repo = SqlNodeRepository(session)
+        existing = await node_repo.get(node_id)
         node = Node(
             node_id=node_id,
             node_num=p.get("node_num"),
@@ -98,7 +116,8 @@ class IngestService:
             role=p.get("role"),
             public_key=p.get("public_key"),
         )
-        await SqlNodeRepository(session).upsert_from_sighting(node, ts)
+        updated = await node_repo.upsert_from_sighting(node, ts)
+        await self._narrate_node_seen(existing, updated, p, gateway_id)
 
         if not gateway_id:
             # Sin gateway_id no hay a qué pasarela atribuir el enlace; el
@@ -119,6 +138,40 @@ class IngestService:
             )
         )
         await self._recompute_gateway_cache(session, node_id, ts)
+
+    async def _narrate_node_seen(
+        self,
+        existing: Node | None,
+        updated: Node,
+        p: dict[str, Any],
+        gateway_id: str | None,
+    ) -> None:
+        """Registro por paquete: un NODEINFO_APP genera SIEMPRE su entrada
+        ("Información del nodo"), haya o no novedad — más un hecho ADICIONAL
+        (nunca en su lugar) cuando el nodo es nuevo o cambia de identidad.
+        Los avistamientos del snapshot de NodeDB (`last_heard` presente) se
+        excluyen de ambos: pueden ser muy antiguos y no son tráfico
+        circulando ahora mismo."""
+        if p.get("last_heard"):
+            return
+        label = _node_label(updated, updated.node_id)
+        await activity.emit_activity(
+            activity_events.render_node_info(updated.node_id, label, p, gateway_id)
+        )
+
+        if existing is None:
+            fact = activity_events.render_new_node(
+                updated.node_id, label, updated.hw_model, updated.firmware_version, gateway_id
+            )
+        elif p.get("short_name") is not None and p["short_name"] != existing.short_name:
+            # Cubre también la primera identificación de un nodo descubierto
+            # antes por telemetría/posición (existing.short_name aún None)
+            fact = activity_events.render_identity_changed(
+                updated.node_id, existing.short_name or existing.node_id, p["short_name"], gateway_id
+            )
+        else:
+            return
+        await activity.emit_activity(fact)
 
     async def _recompute_gateway_cache(self, session: AsyncSession, node_id: str, ts: datetime) -> None:
         """Recalcula la pasarela primaria de `nodes` (M6.1, §1.3/§3 del diseño).
@@ -168,7 +221,8 @@ class IngestService:
     async def _on_position(
         self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
     ) -> None:
-        await SqlNodeRepository(session).touch_last_seen(p["node_id"], gateway_id, ts)
+        node_repo = SqlNodeRepository(session)
+        await node_repo.touch_last_seen(p["node_id"], gateway_id, ts)
         position_time = p.get("position_time")
         await SqlPositionRepository(session).add(
             Position(
@@ -183,12 +237,31 @@ class IngestService:
                 gateway_id=gateway_id,
             )
         )
+        label = _node_label(await node_repo.get(p["node_id"]), p["node_id"])
+        await activity.emit_activity(
+            activity_events.render_position(p["node_id"], label, p, gateway_id)
+        )
 
     async def _on_telemetry(
         self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
     ) -> None:
-        await SqlNodeRepository(session).touch_last_seen(p["node_id"], gateway_id, ts)
-        await SqlTelemetryRepository(session).add(
+        node_repo = SqlNodeRepository(session)
+        telemetry_repo = SqlTelemetryRepository(session)
+        await node_repo.touch_last_seen(p["node_id"], gateway_id, ts)
+
+        # Reinicio (Fase 1 §4): comparar el uptime nuevo con el del registro
+        # de kind=device inmediatamente ANTERIOR a insertar la fila nueva
+        rebooted = False
+        new_uptime = p.get("uptime_seconds")
+        if p["kind"] == "device" and new_uptime is not None:
+            previous = await telemetry_repo.list_for_node(p["node_id"], 1, "device")
+            prev_uptime = previous[0].uptime_seconds if previous else None
+            rebooted = (
+                prev_uptime is not None
+                and prev_uptime - new_uptime > REBOOT_UPTIME_DELTA_SECONDS
+            )
+
+        await telemetry_repo.add(
             Telemetry(
                 node_id=p["node_id"],
                 kind=p["kind"],
@@ -203,6 +276,76 @@ class IngestService:
                 received_at=ts,
                 gateway_id=gateway_id,
             )
+        )
+
+        # Registro por paquete: la entrada describe SOLO el paquete que llegó
+        # (un kind = una entrada, nunca fusionada con otros kinds del nodo).
+        # El reinicio es un hecho ADICIONAL, nunca sustituye a la entrada.
+        label = _node_label(await node_repo.get(p["node_id"]), p["node_id"])
+        packet_event = activity_events.render_telemetry_packet(
+            p["kind"], p["node_id"], label, p, gateway_id
+        )
+        if packet_event is not None:
+            await activity.emit_activity(packet_event)
+        if rebooted:
+            await activity.emit_activity(
+                activity_events.render_reboot(p["node_id"], label, new_uptime, gateway_id)
+            )
+
+    async def _on_message(
+        self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
+    ) -> None:
+        node_repo = SqlNodeRepository(session)
+        from_id = p["from_node_id"]
+        await node_repo.touch_last_seen(from_id, gateway_id, ts)
+        label = _node_label(await node_repo.get(from_id), from_id)
+        to_id = p.get("to_node_id")
+        to_label = _node_label(await node_repo.get(to_id), to_id) if to_id else None
+        await activity.emit_activity(
+            activity_events.render_message(from_id, label, p, to_label, gateway_id)
+        )
+
+    async def _on_neighbors(
+        self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
+    ) -> None:
+        """NEIGHBORINFO_APP: solo narrativa puntual en esta fase — la
+        topología persistida (`node_neighbors`) sigue siendo el diseño
+        aparte de `motor-de-reglas-y-topologia.md` §2."""
+        node_repo = SqlNodeRepository(session)
+        node_id = p["node_id"]
+        await node_repo.touch_last_seen(node_id, gateway_id, ts)
+        label = _node_label(await node_repo.get(node_id), node_id)
+        neighbor_labels = [
+            (_node_label(await node_repo.get(n["neighbor_id"]), n["neighbor_id"]), n.get("snr"))
+            for n in p.get("neighbors") or []
+        ]
+        await activity.emit_activity(
+            activity_events.render_neighbor_info(node_id, label, neighbor_labels, gateway_id, p)
+        )
+
+    async def _on_traceroute(
+        self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
+    ) -> None:
+        node_repo = SqlNodeRepository(session)
+        node_id = p["node_id"]
+        await node_repo.touch_last_seen(node_id, gateway_id, ts)
+        label = _node_label(await node_repo.get(node_id), node_id)
+        route_labels = [
+            _node_label(await node_repo.get(hop_id), hop_id) for hop_id in p.get("route") or []
+        ]
+        await activity.emit_activity(
+            activity_events.render_traceroute(node_id, label, route_labels, gateway_id, p)
+        )
+
+    async def _on_waypoint(
+        self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
+    ) -> None:
+        node_repo = SqlNodeRepository(session)
+        node_id = p["node_id"]
+        await node_repo.touch_last_seen(node_id, gateway_id, ts)
+        label = _node_label(await node_repo.get(node_id), node_id)
+        await activity.emit_activity(
+            activity_events.render_waypoint(node_id, label, p, gateway_id)
         )
 
     async def _on_gateway_status(
@@ -227,6 +370,17 @@ class IngestService:
                 local_firmware_version=p.get("local_firmware_version"),
             )
         )
+        # Diario operativo (Actividad 2.0 Fase 1): narrar SOLO transiciones de
+        # estado, nunca el heartbeat periódico — y al instante, sin esperar a
+        # que la regla gateway_disconnected confirme la caída con su margen.
+        new_status = p.get("status", "unknown")
+        if previous is None or previous.status != new_status:
+            event = activity_events.render_gateway_status(
+                gateway_id, info.name, new_status, p.get("transport"), p.get("detail")
+            )
+            if event is not None:
+                await activity.emit_activity(event)
+
         # Reconciliación (ADR 0021 §5): el proceso probablemente acaba de
         # (re)arrancar con la config de .env, perdiendo la gestionada — se
         # reenvía el comando de conexión (Redis, no toca esta transacción).

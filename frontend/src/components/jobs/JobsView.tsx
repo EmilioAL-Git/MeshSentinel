@@ -16,7 +16,9 @@ import {
 } from "../../api/client";
 import { relativeTime } from "../../time";
 import { chipStyle, t } from "../../tokens";
+import { scopeOperationsToGroup, useGroupNodeIds } from "../../context/GroupContext";
 import { NodeSelect } from "../NodeSelect";
+import { GroupScopeBanner } from "../shell/GroupScopeBanner";
 import { toast } from "../shell/Toast";
 import { NewOperationForm } from "./NewOperationForm";
 import {
@@ -448,8 +450,30 @@ export function JobsView({
     if (openBatchId != null) setExpandedBatch(openBatchId);
   }, [openBatchId]);
 
-  const allOps = useMemo(() => operations.data ?? [], [operations.data]);
-  const allBatches = useMemo(() => batches.data ?? [], [batches.data]);
+  const rawOps = useMemo(() => operations.data ?? [], [operations.data]);
+  const rawBatches = useMemo(() => batches.data ?? [], [batches.data]);
+
+  // Grupo activo ("Grupo como contexto global"): reduce el universo de
+  // trabajos ANTES de los filtros locales (nodo/tipo/pasarela) — un lote
+  // sigue visible si al menos una de sus ops apunta a un nodo del grupo,
+  // pero `opsByBatch` (abajo) sigue construyéndose sobre `rawOps` para no
+  // falsear su progreso real.
+  const groupNodeIds = useGroupNodeIds(summaries);
+  const allOps = useMemo(() => scopeOperationsToGroup(rawOps, groupNodeIds), [rawOps, groupNodeIds]);
+  const groupBatchIds = useMemo(() => {
+    if (groupNodeIds == null) return null;
+    const ids = new Set<number>();
+    for (const op of rawOps) {
+      if (op.batch_id != null && op.target_node_id != null && groupNodeIds.has(op.target_node_id)) {
+        ids.add(op.batch_id);
+      }
+    }
+    return ids;
+  }, [rawOps, groupNodeIds]);
+  const allBatches = useMemo(
+    () => (groupBatchIds == null ? rawBatches : rawBatches.filter((b) => groupBatchIds.has(b.id))),
+    [rawBatches, groupBatchIds],
+  );
 
   const opTypes = useMemo(() => [...new Set(allOps.map((o) => o.operation_type))].sort(), [allOps]);
   const gwIds = useMemo(() => [...new Set(allOps.map((o) => o.gateway_id))].sort(), [allOps]);
@@ -493,22 +517,41 @@ export function JobsView({
   const flash = (key: string) => flashed.has(key);
 
   // ── Clasificación por pregunta del operador ────────────────────────────────
-  const activeBatches = allBatches.filter((b) => b.status === "running" || b.status === "paused");
-  const activeBatchIds = new Set(activeBatches.map((b) => b.id));
+  // Memoizados: con miles de operaciones, recorrer `allOps`/`allBatches` en
+  // cada render (incl. los que no tocan ni ops ni filtros) deja de ser
+  // gratis. `needsAttention`/`recent` (abajo) dependen de `Date.now()` y NO
+  // se memoizan: como ese valor cambia en cada render de todas formas,
+  // envolverlos en useMemo no evitaría ningún recálculo real — estabilizar
+  // eso exigiría un temporizador propio, complejidad que esta fase evita
+  // explícitamente a cambio de un ahorro marginal.
+  const activeBatches = useMemo(
+    () => allBatches.filter((b) => b.status === "running" || b.status === "paused"),
+    [allBatches],
+  );
+  const activeBatchIds = useMemo(() => new Set(activeBatches.map((b) => b.id)), [activeBatches]);
+  // Progreso real de un lote visible: TODAS sus ops (rawOps), no solo las
+  // que caen dentro del grupo — un lote en scope no debe mentir su avance.
   const opsByBatch = useMemo(() => {
     const acc = new Map<number, OperationOut[]>();
-    for (const op of allOps) {
+    for (const op of rawOps) {
       if (op.batch_id == null) continue;
       const list = acc.get(op.batch_id) ?? [];
       list.push(op);
       acc.set(op.batch_id, list);
     }
     return acc;
-  }, [allOps]);
+  }, [rawOps]);
 
-  const runningOps = allOps.filter((o) => o.status === "running" && !activeBatchIds.has(o.batch_id ?? -1));
-  const queuedOps = allOps.filter(
-    (o) => (o.status === "pending" || o.status === "queued") && !activeBatchIds.has(o.batch_id ?? -1) && matches(o),
+  const runningOps = useMemo(
+    () => allOps.filter((o) => o.status === "running" && !activeBatchIds.has(o.batch_id ?? -1)),
+    [allOps, activeBatchIds],
+  );
+  const queuedOps = useMemo(
+    () =>
+      allOps.filter(
+        (o) => (o.status === "pending" || o.status === "queued") && !activeBatchIds.has(o.batch_id ?? -1) && matches(o),
+      ),
+    [allOps, activeBatchIds, nodeFilter, typeFilter, gwFilter],
   );
   // Intervención: fallidas de las últimas 24 h que siguen sin reintento posterior
   const dayAgo = Date.now() - 24 * 3600 * 1000;
@@ -519,9 +562,13 @@ export function JobsView({
       (o.finished_at == null || new Date(o.finished_at).getTime() > dayAgo),
   );
   // Historial: terminales (ops sueltas) + lotes terminados, misma línea temporal
-  const doneBatches = allBatches.filter((b) => !activeBatchIds.has(b.id));
-  const doneStandaloneOps = allOps.filter(
-    (o) => o.batch_id == null && TERMINAL_OP_STATUSES.has(o.status) && !FAILED_OP_STATUSES.has(o.status) && matches(o),
+  const doneBatches = useMemo(() => allBatches.filter((b) => !activeBatchIds.has(b.id)), [allBatches, activeBatchIds]);
+  const doneStandaloneOps = useMemo(
+    () =>
+      allOps.filter(
+        (o) => o.batch_id == null && TERMINAL_OP_STATUSES.has(o.status) && !FAILED_OP_STATUSES.has(o.status) && matches(o),
+      ),
+    [allOps, nodeFilter, typeFilter, gwFilter],
   );
   const history: { ts: string; item: ReactNode }[] = [
     ...doneBatches
@@ -572,6 +619,8 @@ export function JobsView({
 
   return (
     <div>
+      <GroupScopeBanner shown={allOps.length} total={rawOps.length} label="trabajos" />
+
       {/* Cabecera de la consola: estadísticas interpretadas + acciones */}
       <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap", marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Trabajos</h2>

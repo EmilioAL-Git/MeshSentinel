@@ -36,6 +36,7 @@ class SqlAdminOperationRepository:
             next_attempt_at=op.next_attempt_at,
             created_by=op.created_by,
             created_at=op.created_at or datetime.now(timezone.utc),
+            gateway_note=op.gateway_note,
         )
         self._session.add(m)
         await self._session.flush()

@@ -22,6 +22,9 @@ SCHEMA_BY_TYPE = {
     "position.updated": validator("position_updated.schema.json"),
     "telemetry.received": validator("telemetry_received.schema.json"),
     "message.received": validator("message_received.schema.json"),
+    "neighbors.seen": validator("neighbors_seen.schema.json"),
+    "traceroute.completed": validator("traceroute_completed.schema.json"),
+    "waypoint.shared": validator("waypoint_shared.schema.json"),
 }
 
 
@@ -149,6 +152,112 @@ def test_text_message_packet():
     assert event_type == "message.received"
     assert payload["to_node_id"] == "!deadbeef"
     assert payload["channel_index"] == 1
+    assert payload["rssi"] == -82
+
+
+def test_position_and_telemetry_carry_radio_metadata():
+    """Actividad 2.0 (registro por paquete): rssi/snr deben llegar también en
+    posición y telemetría, no solo en node.seen/mensajes (antes faltaban)."""
+    position = {
+        **BASE_PACKET,
+        "decoded": {"portnum": "POSITION_APP", "position": {"latitude": 1, "longitude": 1}},
+    }
+    _, pos_payload = decode_packet(position)
+    assert pos_payload["snr"] == 6.25
+    assert pos_payload["rssi"] == -82
+
+    telemetry = {
+        **BASE_PACKET,
+        "channel": 2,
+        "decoded": {
+            "portnum": "TELEMETRY_APP",
+            "telemetry": {"deviceMetrics": {"batteryLevel": 80}},
+        },
+    }
+    _, tel_payload = decode_packet(telemetry)
+    assert tel_payload["snr"] == 6.25
+    assert tel_payload["rssi"] == -82
+    assert tel_payload["channel_index"] == 2
+
+
+def test_neighborinfo_packet():
+    packet = {
+        **BASE_PACKET,
+        "decoded": {
+            "portnum": "NEIGHBORINFO_APP",
+            "neighborinfo": {
+                "neighbors": [
+                    {"nodeId": 0xA4E1F2B1, "snr": -8.0},
+                    {"nodeId": 0xA4E1F2B2, "snr": -11.5},
+                ]
+            },
+        },
+    }
+    decoded = decode_packet(packet)
+    assert_valid(decoded)
+    event_type, payload = decoded
+    assert event_type == "neighbors.seen"
+    assert payload["node_id"] == "!a4e1f2b0"
+    assert payload["neighbors"] == [
+        {"neighbor_id": "!a4e1f2b1", "snr": -8.0},
+        {"neighbor_id": "!a4e1f2b2", "snr": -11.5},
+    ]
+
+
+def test_neighborinfo_without_neighbors_is_dropped():
+    packet = {
+        **BASE_PACKET,
+        "decoded": {"portnum": "NEIGHBORINFO_APP", "neighborinfo": {"neighbors": []}},
+    }
+    assert decode_packet(packet) is None
+
+
+def test_traceroute_with_resolved_route():
+    packet = {
+        **BASE_PACKET,
+        "decoded": {
+            "portnum": "TRACEROUTE_APP",
+            "traceroute": {"route": [0xA4E1F2B1, 0xA4E1F2B2], "snrTowards": [6.0, -2.0]},
+        },
+    }
+    decoded = decode_packet(packet)
+    assert_valid(decoded)
+    event_type, payload = decoded
+    assert event_type == "traceroute.completed"
+    assert payload["route"] == ["!a4e1f2b1", "!a4e1f2b2"]
+
+
+def test_traceroute_without_route_is_dropped():
+    """Una solicitud sin resolver (route vacío) no es un hecho narrable todavía."""
+    packet = {**BASE_PACKET, "decoded": {"portnum": "TRACEROUTE_APP", "traceroute": {"route": []}}}
+    assert decode_packet(packet) is None
+
+
+def test_waypoint_packet():
+    packet = {
+        **BASE_PACKET,
+        "decoded": {
+            "portnum": "WAYPOINT_APP",
+            "waypoint": {
+                "name": "Refugio Sur",
+                "description": "Punto de encuentro",
+                "latitudeI": 404168333,
+                "longitudeI": -37037900,
+            },
+        },
+    }
+    decoded = decode_packet(packet)
+    assert_valid(decoded)
+    event_type, payload = decoded
+    assert event_type == "waypoint.shared"
+    assert payload["name"] == "Refugio Sur"
+    assert round(payload["latitude"], 4) == 40.4168
+    assert round(payload["longitude"], 4) == -3.7038
+
+
+def test_waypoint_without_coordinates_is_dropped():
+    packet = {**BASE_PACKET, "decoded": {"portnum": "WAYPOINT_APP", "waypoint": {"name": "x"}}}
+    assert decode_packet(packet) is None
 
 
 @pytest.mark.parametrize(

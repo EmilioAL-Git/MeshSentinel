@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/waypoint_shared.schema.json",
+  "title": "WaypointSharedPayload",
+  "description": "Payload de 'waypoint.shared': WAYPOINT_APP, un punto de interés compartido por un nodo.",
+  "type": "object",
+  "required": ["node_id", "latitude", "longitude"],
+  "properties": {
+    "node_id": { "type": "string", "pattern": "^![0-9a-f]{8}$" },
+    "name": { "type": ["string", "null"] },
+    "description": { "type": ["string", "null"] },
+    "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+    "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+    "snr": { "type": ["number", "null"] },
+    "rssi": { "type": ["integer", "null"] }
+  },
+  "additionalProperties": false
+}

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ackAlert,
   createChannel,
@@ -7,11 +7,14 @@ import {
   fetchAlertRules,
   fetchAlerts,
   fetchChannels,
+  fetchNodes,
   patchAlertRule,
   testChannel,
   type AlertOut,
   type Severity,
 } from "../api/client";
+import { scopeAlertsToGroup, useGroupNodeIds } from "../context/GroupContext";
+import { GroupScopeBanner } from "./shell/GroupScopeBanner";
 
 /**
  * Alertas (identidad v0.8): un puesto de triaje, no una página de tablas.
@@ -38,10 +41,12 @@ function AlertRow({
   alert,
   onAck,
   onOpenNode,
+  outOfGroup,
 }: {
   alert: AlertOut;
   onAck?: (id: number) => void;
   onOpenNode?: (nodeId: string) => void;
+  outOfGroup?: boolean;
 }) {
   const color = SEV_COLOR[alert.severity];
   const resolved = alert.status === "resolved";
@@ -64,6 +69,15 @@ function AlertRow({
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ color: "var(--text)" }}>{alert.message}</span>{" "}
         <span style={{ color: "var(--text-faint)" }}>· {alert.rule_name}</span>
+        {outOfGroup && (
+          <span
+            className="chip"
+            style={{ marginLeft: 6, color: "var(--warn)", borderColor: "var(--warn)" }}
+            title="Nodo fuera del grupo activo — visible por ser CRITICAL"
+          >
+            ⤫ fuera del grupo
+          </span>
+        )}
       </span>
       <span className="mono" style={{ color: "var(--text-faint)", fontSize: 10.5, whiteSpace: "nowrap" }}>
         {resolved ? `resuelta ${relativeTime(alert.resolved_at)}` : relativeTime(alert.fired_at)}
@@ -101,6 +115,9 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   const alerts = useQuery({ queryKey: ["alerts"], queryFn: () => fetchAlerts(undefined, 100), refetchInterval: 30_000 });
   const rules = useQuery({ queryKey: ["alert-rules"], queryFn: fetchAlertRules });
   const channels = useQuery({ queryKey: ["channels"], queryFn: fetchChannels });
+  // Mismo queryKey que App.tsx/GroupContext: caché compartida, sin fetch nuevo.
+  const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes() });
+  const groupNodeIds = useGroupNodeIds(nodes.data ?? []);
 
   const doAck = useMutation({ mutationFn: ackAlert, onSettled: invalidate });
   const toggleRule = useMutation({
@@ -116,13 +133,25 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   const [chTarget, setChTarget] = useState("");
 
   const all = alerts.data ?? [];
-  const active = all.filter((a) => a.status !== "resolved");
+  const allActive = all.filter((a) => a.status !== "resolved");
+
+  // Grupo activo: mismo criterio compartido con StatusPanel (GroupContext) —
+  // nunca se duplica aquí.
+  const { inScope: active, outOfGroupCritical } = useMemo(
+    () => scopeAlertsToGroup(allActive, groupNodeIds),
+    [allActive, groupNodeIds],
+  );
+  const isOutOfGroupCritical = (a: AlertOut) => outOfGroupCritical.has(a.id);
   const firing = active.filter((a) => a.status === "firing");
-  const resolved = all.filter((a) => a.status === "resolved").slice(0, 30);
+  const resolved = useMemo(
+    () => scopeAlertsToGroup(all, groupNodeIds).inScope.filter((a) => a.status === "resolved").slice(0, 30),
+    [all, groupNodeIds],
+  );
   const critCount = active.filter((a) => a.severity === "CRITICAL").length;
 
   return (
     <div className="ws">
+      <GroupScopeBanner shown={active.length} total={allActive.length} label="alertas" />
       <div className="kpis">
         <div className="kpi">
           <div className="v" style={{ color: critCount > 0 ? "var(--crit)" : "var(--text)" }}>{critCount}</div>
@@ -160,7 +189,13 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                 <div className="empty">Sin alertas activas — red dentro de los umbrales.</div>
               )}
               {active.map((a) => (
-                <AlertRow key={a.id} alert={a} onAck={(id) => doAck.mutate(id)} onOpenNode={onOpenNode} />
+                <AlertRow
+                  key={a.id}
+                  alert={a}
+                  onAck={(id) => doAck.mutate(id)}
+                  onOpenNode={onOpenNode}
+                  outOfGroup={isOutOfGroupCritical(a)}
+                />
               ))}
             </div>
           </div>

@@ -26,6 +26,8 @@ export interface NodeOut {
   last_seen_at: string | null;
   is_favorite: boolean;
   is_ignored: boolean;
+  preferred_gateway_id: string | null;
+  node_type_override: string | null;
   online: boolean;
 }
 
@@ -78,6 +80,7 @@ export interface GroupOut {
   kind: string;
   is_critical: boolean;
   member_count: number;
+  preferred_gateway_id: string | null;
 }
 
 /** Observación de un nodo por una pasarela concreta (node_gateway_links, M6.1/M6.2). */
@@ -167,8 +170,10 @@ export function fetchNodes(filters: NodeFilterParams = {}): Promise<NodeSummaryO
 export const fetchNode = (id: string) => get<NodeOut>(`/nodes/${encodeURIComponent(id)}`);
 export const fetchNodePositions = (id: string, limit = 50) =>
   get<PositionOut[]>(`/nodes/${encodeURIComponent(id)}/positions?limit=${limit}`);
-export const fetchNodeTelemetry = (id: string, limit = 50) =>
-  get<TelemetryOut[]>(`/nodes/${encodeURIComponent(id)}/telemetry?limit=${limit}`);
+export const fetchNodeTelemetry = (id: string, limit = 50, kind?: "device" | "environment" | "power") =>
+  get<TelemetryOut[]>(
+    `/nodes/${encodeURIComponent(id)}/telemetry?limit=${limit}${kind ? `&kind=${kind}` : ""}`,
+  );
 export const fetchNodeGateways = (id: string) =>
   get<NodeGatewayLinkOut[]>(`/nodes/${encodeURIComponent(id)}/gateways`);
 export const fetchGateways = (includeDeleted = false) =>
@@ -195,7 +200,8 @@ export interface MultiGatewayStatsOut {
   gateways: GatewayStatsOut[];
 }
 
-export const fetchGatewayStats = () => get<MultiGatewayStatsOut>("/gateways/stats");
+export const fetchGatewayStats = (groupId?: number) =>
+  get<MultiGatewayStatsOut>(`/gateways/stats${groupId != null ? `?group_id=${groupId}` : ""}`);
 
 // ── Gestión de gateways (M5) ─────────────────────────────────────────────────
 
@@ -267,10 +273,41 @@ export const deleteTag = (id: number) => send<void>("DELETE", `/tags/${id}`);
 export const fetchGroups = () => get<GroupOut[]>("/groups");
 export const createGroup = (name: string) => send<GroupOut>("POST", "/groups", { name });
 export const deleteGroup = (id: number) => send<void>("DELETE", `/groups/${id}`);
+
+// ── Selección inteligente de gateway ─────────────────────────────────────────
+// Único schema de selección compartido por operaciones individuales y por
+// lotes (Nivel 1 de la jerarquía) — nunca tres implementaciones distintas.
+export interface GatewaySelectionIn {
+  mode: "auto" | "preferred" | "forced";
+  gateway_id?: string | null;
+}
+export const GATEWAY_SELECTION_AUTO: GatewaySelectionIn = { mode: "auto" };
+export const GATEWAY_SELECTION_PREFERRED: GatewaySelectionIn = { mode: "preferred" };
+
+export const setNodePreferredGateway = (id: string, gatewayId: string | null) =>
+  send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/preferred-gateway`, { gateway_id: gatewayId });
+export const setNodeTypeOverride = (id: string, nodeType: string | null) =>
+  send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/node-type`, { node_type: nodeType });
+export const setGroupPreferredGateway = (id: number, gatewayId: string | null) =>
+  send<GroupOut>("PUT", `/groups/${id}/preferred-gateway`, { gateway_id: gatewayId });
 export const addGroupMember = (groupId: number, node_id: string) =>
   send<void>("POST", `/groups/${groupId}/members`, { node_id });
 export const removeGroupMember = (groupId: number, nodeId: string) =>
   send<void>("DELETE", `/groups/${groupId}/members/${encodeURIComponent(nodeId)}`);
+
+export interface BulkMembersOut {
+  added: number;
+  already_member: number;
+}
+export interface BulkRemoveOut {
+  removed: number;
+  not_member: number;
+}
+/** Gestión masiva de grupos desde Flota: un solo viaje, sin importar el tamaño de la selección. */
+export const addGroupMembersBulk = (groupId: number, nodeIds: string[]) =>
+  send<BulkMembersOut>("POST", `/groups/${groupId}/members/bulk`, { node_ids: nodeIds });
+export const removeGroupMembersBulk = (groupId: number, nodeIds: string[]) =>
+  send<BulkRemoveOut>("POST", `/groups/${groupId}/members/bulk-remove`, { node_ids: nodeIds });
 
 export interface ThresholdsOut {
   low_battery_percent: number;
@@ -307,6 +344,11 @@ export interface DashboardSummaryOut {
   avg_battery_percent: number | null;
   avg_seconds_since_last_seen: number | null;
   events_last_hour: number;
+  avg_snr: number | null;
+  avg_rssi: number | null;
+  avg_channel_utilization: number | null;
+  avg_temperature_c: number | null;
+  avg_pressure_hpa: number | null;
   critical_nodes: CriticalNodeOut[];
   gateways: GatewayOut[];
   thresholds: ThresholdsOut;
@@ -428,6 +470,7 @@ export interface OperationOut {
   started_at: string | null;
   finished_at: string | null;
   duration_ms: number | null;
+  gateway_note: string | null;
 }
 
 export const fetchCapabilities = () => get<CapabilityOut[]>("/admin/capabilities");
@@ -437,6 +480,7 @@ export const createOperation = (body: {
   node_id: string;
   operation_type: string;
   params?: Record<string, unknown>;
+  gateway_selection?: GatewaySelectionIn;
 }) => send<OperationOut>("POST", "/admin/operations", body);
 export const cancelOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/cancel`);
 export const retryOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/retry`);
@@ -530,11 +574,15 @@ export interface ConfigStateOut {
 export const fetchConfigSchema = () => get<ConfigSchemaOut>("/admin/config/schema");
 export const fetchNodeConfig = (nodeId: string) =>
   get<ConfigStateOut>(`/nodes/${encodeURIComponent(nodeId)}/config`);
-export const refreshNodeConfig = (nodeId: string, sections?: string[]) =>
-  send<{ operation_ids: number[] }>(
+export const refreshNodeConfig = (
+  nodeId: string,
+  sections?: string[],
+  gatewaySelection?: GatewaySelectionIn,
+) =>
+  send<{ operation_ids: number[]; gateway_note: string | null }>(
     "POST",
     `/nodes/${encodeURIComponent(nodeId)}/config/refresh`,
-    { sections: sections ?? null },
+    { sections: sections ?? null, gateway_selection: gatewaySelection },
   );
 // ── Batch Engine (M2) ────────────────────────────────────────────────────────
 
@@ -606,6 +654,7 @@ export const createBatch = (body: {
   params: Record<string, unknown>;
   node_ids: string[];
   scope_description?: Record<string, unknown>;
+  gateway_selection?: GatewaySelectionIn;
 }) => send<BatchOut>("POST", "/admin/batches", body);
 export function fetchBatches(filters: {
   status?: string;
@@ -632,11 +681,12 @@ export const cancelBatch = (id: number) => send<BatchOut>("POST", `/admin/batche
 export const applyNodeConfig = (
   nodeId: string,
   sections: Record<string, Record<string, unknown>>,
+  gatewaySelection?: GatewaySelectionIn,
 ) =>
-  send<{ operation_ids: number[] }>(
+  send<{ operation_ids: number[]; gateway_note: string | null }>(
     "POST",
     `/nodes/${encodeURIComponent(nodeId)}/config/apply`,
-    { sections },
+    { sections, gateway_selection: gatewaySelection },
   );
 
 // ── Perfiles de configuración (M3) ───────────────────────────────────────────

@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI
 
@@ -22,7 +22,9 @@ from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
+from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
+from noc.application.activity_events import render_alert_transition
 from noc.application.admin.batches import BatchService
 from noc.application.admin.profiles import ProfileService
 from noc.application.admin.service import AdminOperationService
@@ -64,6 +66,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Consola de actividad: eventos de ciclo de vida backend→UI por el hub WS
     activity.attach(hub.broadcast)
+    # Diario operativo (Actividad 2.0 Fase 1): las narrativas admin resuelven
+    # el nombre del nodo con una lectura puntual (fuera de la transacción del
+    # llamante — sesión propia, solo lectura)
+    activity.attach_labeler(_make_node_labeler(app.state.db.session_factory))
 
     # Pipeline de administración remota (M1.1, ADR 0013)
     admin_service = AdminOperationService(app.state.db.session_factory, command_queue, settings)
@@ -81,6 +87,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine = AlertEngine(app.state.db.session_factory)
     engine.add_listener(AlertNotifier(app.state.db.session_factory))
     engine.add_listener(_ws_alert_broadcaster)
+    # Diario operativo: narrativa de transiciones de alertas (la lógica de
+    # detección vive SOLO en el motor; aquí solo se redacta)
+    engine.add_listener(_make_alert_narrator(app.state.db.session_factory))
     alert_loop = AlertEngineLoop(engine, settings.alert_eval_interval_seconds)
     alert_loop.start()
 
@@ -94,6 +103,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await command_queue.close()
         await app.state.db.dispose()
         logger.info("Backend stopped")
+
+
+def _make_node_labeler(session_factory: Any) -> Any:
+    """Etiqueta de nodo para narrativas (short_name o node_id), con sesión
+    propia de solo lectura — reutilizable por admin y alertas."""
+
+    async def labeler(node_id: str) -> str:
+        async with session_factory() as session:
+            node = await SqlNodeRepository(session).get(node_id)
+        return node.short_name if node is not None and node.short_name else node_id
+
+    return labeler
+
+
+def _make_alert_narrator(session_factory: Any) -> Any:
+    """Listener del motor de alertas para el diario operativo (Actividad 2.0
+    Fase 1): traduce transiciones a lenguaje de operador. Solo redacta — la
+    detección (umbrales, duraciones) vive únicamente en el motor."""
+    labeler = _make_node_labeler(session_factory)
+
+    async def narrator(transition: AlertTransition) -> None:
+        if transition.rule is None:
+            return
+        a = transition.alert
+        label = await labeler(a.subject_id) if a.subject_type == "node" else a.subject_id
+        event = render_alert_transition(
+            transition.rule.rule_type, transition.kind, a.subject_type, a.subject_id, label, a.message
+        )
+        if event is not None:
+            await activity.emit_activity(event)
+
+    return narrator
 
 
 async def _ws_alert_broadcaster(transition: AlertTransition) -> None:

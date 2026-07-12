@@ -24,6 +24,16 @@ class Node:
     # Metadatos del NOC (M1.2): solo BD propia, nunca tocan la malla
     is_favorite: bool = False
     is_ignored: bool = False
+    # Selección inteligente de gateway (Nivel 2): preferencia del operador
+    # para las operaciones remotas de ESTE nodo — nunca escrita por eventos
+    # de la malla, solo por PUT /nodes/{id}/preferred-gateway.
+    preferred_gateway_id: str | None = None
+    # Clasificación manual (Inspector, Organización): None = "Automático"
+    # (clasificación derivada del role de firmware, ver fleet/classify.ts).
+    # Con valor, tiene prioridad absoluta sobre la automática en toda la app
+    # — nunca escrita por eventos de la malla, solo por
+    # PUT /nodes/{id}/node-type.
+    node_type_override: str | None = None
 
     def is_online(self, threshold_seconds: int, now: datetime | None = None) -> bool:
         if self.last_seen_at is None:
@@ -126,6 +136,9 @@ class Group:
     is_critical: bool = False
     member_count: int = 0
     id: int | None = None
+    # Selección inteligente de gateway (Nivel 3): preferencia heredada por
+    # todos los nodos del grupo salvo que tengan la suya propia (Nivel 2).
+    preferred_gateway_id: str | None = None
 
 
 @dataclass(slots=True)

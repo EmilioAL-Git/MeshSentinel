@@ -14,10 +14,11 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.schemas import GatewaySelectionIn
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
-from noc.application.admin.gateway_routing import select_gateway_for_node
+from noc.application.admin.gateway_routing import resolve_gateway
 from noc.application.admin.registry import OPERATIONS, validate_operation
 from noc.config import get_settings
 from noc.domain.admin.entities import AdminOperation
@@ -53,6 +54,7 @@ class OperationIn(BaseModel):
     params: dict[str, Any] = {}
     timeout_seconds: int | None = Field(default=None, ge=10, le=600)
     max_attempts: int | None = Field(default=None, ge=1, le=10)
+    gateway_selection: GatewaySelectionIn = Field(default_factory=GatewaySelectionIn)
 
 
 class OperationOut(BaseModel):
@@ -85,6 +87,7 @@ class OperationOut(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     duration_ms: int | None
+    gateway_note: str | None
 
     @classmethod
     def from_entity(cls, op: AdminOperation) -> "OperationOut":
@@ -112,23 +115,28 @@ async def create_operation(body: OperationIn, session: SessionDep) -> OperationO
     node = await SqlNodeRepository(session).get(body.node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found in registry")
-    # M6.2: mejor pasarela en el momento de encolar (fijada de por vida de la
-    # operación; con una sola pasarela equivale a nodes.gateway_id).
-    gateway_id = await select_gateway_for_node(
-        session, body.node_id, settings, fallback_gateway_id=node.gateway_id
+    # Selección inteligente de gateway (4 niveles: forzado > nodo preferido >
+    # grupo preferido > automático M6.2) — fijada de por vida de la operación.
+    resolution = await resolve_gateway(
+        session,
+        body.node_id,
+        settings,
+        forced_gateway_id=body.gateway_selection.gateway_id if body.gateway_selection.mode == "forced" else None,
+        use_preference=body.gateway_selection.mode != "auto",
     )
-    if not gateway_id:
+    if not resolution.gateway_id:
         raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
 
     op = await SqlAdminOperationRepository(session).create(
         AdminOperation(
             target_node_id=body.node_id,
-            gateway_id=gateway_id,
+            gateway_id=resolution.gateway_id,
             operation_type=body.operation_type,
             params=params,
             timeout_seconds=body.timeout_seconds or settings.admin_default_timeout_seconds,
             max_attempts=body.max_attempts or settings.admin_max_attempts,
             created_by="admin",  # RBAC futuro: el campo ya viaja (diseño §8)
+            gateway_note=resolution.note,
         )
     )
     await session.commit()
@@ -181,17 +189,21 @@ async def retry_operation(op_id: int, session: SessionDep) -> OperationOut:
             raise HTTPException(status_code=404, detail="Operation not found")
         if op.status not in ("failed", "timeout", "cancelled"):
             raise HTTPException(status_code=409, detail=f"Cannot retry operation in status '{op.status}'")
-        # M6.2 (diseño §6): el reintento MANUAL del operador es el único punto
-        # donde se re-evalúa la pasarela — la cobertura pudo cambiar desde que
-        # la operación se encoló. Sin candidato válido, conserva la original.
-        gateway_id = await select_gateway_for_node(
-            session, op.target_node_id, get_settings(), fallback_gateway_id=op.gateway_id
+        # El reintento MANUAL del operador es el único punto donde se
+        # re-evalúa la pasarela — la cobertura (y la preferencia de nodo/
+        # grupo) pudo cambiar desde que la operación se encoló. Siempre
+        # respeta la jerarquía de preferencia (no hay forzado que recordar:
+        # `AdminOperation` no guarda el modo original, solo la pasarela ya
+        # resuelta — limitación aceptada, ver informe).
+        resolution = await resolve_gateway(
+            session, op.target_node_id, get_settings(), forced_gateway_id=None, use_preference=True
         )
         op = await repo.update_fields(
             op_id,
             {
                 "status": "pending",
-                "gateway_id": gateway_id or op.gateway_id,
+                "gateway_id": resolution.gateway_id or op.gateway_id,
+                "gateway_note": resolution.note,
                 "attempts": 0,
                 "next_attempt_at": None,
                 "error": None,

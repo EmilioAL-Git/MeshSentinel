@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.admin.batches import PlannedOperation
-from noc.application.admin.gateway_routing import select_gateway_for_node
+from noc.application.admin.gateway_routing import resolve_gateway
 from noc.application.admin.registry import validate_operation
 from noc.application.admin.remote_flag_sync import (
     RemoteFlagKnown,
@@ -105,14 +105,7 @@ async def queue_remote_flag(
         raise HTTPException(status_code=422, detail="subject_node_id must differ from node_id")
 
     node_repo = SqlNodeRepository(session)
-    target = await node_repo.get(node_id)
-    if target is None:
-        raise HTTPException(status_code=404, detail="Node not found in registry")
-    gateway_id = await select_gateway_for_node(
-        session, node_id, get_settings(), fallback_gateway_id=target.gateway_id
-    )
-    if not gateway_id:
-        raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
+    target, gateway_id = await _resolve_target(node_id, session)
     subject = await node_repo.get(body.subject_node_id)
     if subject is None:
         raise HTTPException(status_code=404, detail="Subject node not found in registry")
@@ -163,18 +156,17 @@ async def queue_remote_flag(
 
 async def _resolve_target(node_id: str, session: SessionDep):
     """Devuelve (nodo destino, pasarela de enrutado). La pasarela se decide
-    con la selección M6.2 (mejor enlace activo + pasarela conectada), con la
-    caché nodes.gateway_id como fallback mono-pasarela."""
+    con la selección inteligente de gateway (preferencia de nodo/grupo, con
+    el algoritmo automático M6.2 como último nivel) — sin selector propio en
+    esta pantalla, siempre en modo "preferido" (Nivel 2-4)."""
     node_repo = SqlNodeRepository(session)
     target = await node_repo.get(node_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Node not found in registry")
-    gateway_id = await select_gateway_for_node(
-        session, node_id, get_settings(), fallback_gateway_id=target.gateway_id
-    )
-    if not gateway_id:
+    resolution = await resolve_gateway(session, node_id, get_settings())
+    if not resolution.gateway_id:
         raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
-    return target, gateway_id
+    return target, resolution.gateway_id
 
 
 async def _contact_data_for_plan(session: SessionDep, plan: RemoteFlagSyncPlan) -> dict[str, dict[str, Any]]:

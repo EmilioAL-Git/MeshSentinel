@@ -4,10 +4,14 @@ import {
   createOperation,
   displayName,
   fetchCapabilities,
+  fetchGateways,
+  GATEWAY_SELECTION_PREFERRED,
+  type GatewaySelectionIn,
   type NodeSummaryOut,
 } from "../../api/client";
 import { trackOperations } from "../../opTracker";
 import { t } from "../../tokens";
+import { GatewaySelect } from "../shell/GatewaySelect";
 import { NodeSelect } from "../NodeSelect";
 import { toast } from "../shell/Toast";
 
@@ -33,12 +37,15 @@ export function NewOperationForm({
 }) {
   const queryClient = useQueryClient();
   const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: fetchCapabilities, staleTime: 300_000 });
+  // Mismo queryKey que App.tsx: caché compartida, sin fetch nuevo.
+  const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
 
   const create = useMutation({
     mutationFn: createOperation,
     onSuccess: (op) => {
       trackOperations([op.id]);
       toast(`${op.operation_type} añadida a la cola (op #${op.id})`);
+      if (op.gateway_note) toast(op.gateway_note, { kind: "error" });
       onClose();
     },
     onError: (e) => toast(`No se pudo encolar: ${e.message}`, { kind: "error" }),
@@ -51,6 +58,7 @@ export function NewOperationForm({
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [gatewaySelection, setGatewaySelection] = useState<GatewaySelectionIn>(GATEWAY_SELECTION_PREFERRED);
 
   const spec = useMemo(
     () => (capabilities.data ?? []).find((c) => c.operation_type === opType),
@@ -78,7 +86,7 @@ export function NewOperationForm({
   const canSubmit = nodeId !== "" && paramsReady;
 
   const submit = () => {
-    create.mutate({ node_id: nodeId, operation_type: opType, params: buildParams() });
+    create.mutate({ node_id: nodeId, operation_type: opType, params: buildParams(), gateway_selection: gatewaySelection });
     setConfirming(false);
     setConfirmText("");
   };
@@ -160,6 +168,7 @@ export function NewOperationForm({
             />
           ),
         )}
+        <GatewaySelect value={gatewaySelection} onChange={setGatewaySelection} gateways={gateways.data ?? []} />
         {!spec?.requires_confirmation ? (
           <button
             style={{ ...input, cursor: canSubmit ? "pointer" : "not-allowed" }}

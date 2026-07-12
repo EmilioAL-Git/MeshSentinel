@@ -60,7 +60,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Métricas del shell (§3) */
-  --header-height: 44px;
+  --header-height: 56px;
   --statusbar-height: 28px;
 
   /* Espaciado (escala de 4 px) */

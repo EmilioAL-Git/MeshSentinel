@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/neighbors_seen.schema.json",
+  "title": "NeighborsSeenPayload",
+  "description": "Payload de 'neighbors.seen': NEIGHBORINFO_APP, vecinos directos reportados por un nodo (topología, sin persistir aún).",
+  "type": "object",
+  "required": ["node_id", "neighbors"],
+  "properties": {
+    "node_id": { "type": "string", "pattern": "^![0-9a-f]{8}$" },
+    "neighbors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["neighbor_id"],
+        "properties": {
+          "neighbor_id": { "type": "string", "pattern": "^![0-9a-f]{8}$" },
+          "snr": { "type": ["number", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "snr": { "type": ["number", "null"] },
+    "rssi": { "type": ["integer", "null"] }
+  },
+  "additionalProperties": false
+}

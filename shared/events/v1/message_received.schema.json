@@ -10,6 +10,7 @@
     "channel_index": { "type": "integer", "minimum": 0, "default": 0 },
     "text": { "type": "string", "maxLength": 512 },
     "snr": { "type": ["number", "null"] },
+    "rssi": { "type": ["integer", "null"] },
     "hops_away": { "type": ["integer", "null"], "minimum": 0 }
   },
   "additionalProperties": false

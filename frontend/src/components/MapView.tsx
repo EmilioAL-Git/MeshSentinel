@@ -3,12 +3,18 @@ import "leaflet/dist/leaflet.css";
 import { memo, useEffect, useMemo, useRef } from "react";
 import { MapContainer, Marker, TileLayer, Tooltip, useMap } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
-import { activeGatewayCount, type NodeSummaryOut } from "../api/client";
+import { activeGatewayCount, type GatewayOut, type NodeSummaryOut } from "../api/client";
+import { classifyNode } from "./fleet/classify";
+import { usePersistedState } from "../hooks/usePersistedState";
+import { LayerToggle, DEFAULT_MAP_LAYERS, type MapColorMode, type MapLayerState } from "./map/LayerToggle";
+import { LinksLayer } from "./map/LinksLayer";
 import { styles } from "../styles";
 
 interface Props {
   summaries: NodeSummaryOut[];
   gatewayNodeIds: Set<string>;
+  /** Capa "Enlaces" (Fase B.2): posiciones de pasarela se derivan de su nodo local. */
+  gateways: GatewayOut[];
   onShowDetail: (nodeId: string) => void;
   /**
    * Modo lienzo (Centro de Operaciones, v0.7 §5): sin tarjeta ni título,
@@ -23,6 +29,13 @@ interface Props {
   focusId?: string | null;
   /** Nodos con alerta CRITICAL activa: halo pulsante permanente (nunca se atenúan). */
   alertNodeIds?: Set<string>;
+  /**
+   * Grupo activo ("Grupo como contexto global"): nodos fuera de él se
+   * atenúan igual que con Focus — NUNCA se ocultan (contexto espacial de
+   * una malla compartida). Pasarelas y alertas CRITICAL nunca se atenúan
+   * por esto. `null`/`undefined` = sin grupo activo, sin atenuación.
+   */
+  groupNodeIds?: Set<string> | null;
   /** Pulsos de una sola vez al llegar eventos (mapa vivo, v0.7.3). */
   pulses?: MapPulse[];
   /** Expone la instancia de Leaflet (⌖ Centrar del Inspector, flyTo). */
@@ -45,6 +58,28 @@ const COLOR_GATEWAY = "var(--warn)";
 // a recrear los elementos DOM de todos los marcadores.
 const iconCache = new Map<string, L.DivIcon>();
 
+/**
+ * Color del marcador según el modo activo (Fase B.1): "status" es el
+ * comportamiento de siempre; "quality" recolorea por SNR del nodo
+ * (mismos umbrales que `thresholds.snr_degraded_db`, aproximados aquí
+ * porque `nodeIcon` no recibe el umbral configurado); "redundancy"
+ * recolorea por nº de pasarelas activas (mismo dato que el badge 🛰N).
+ */
+function colorFor(colorMode: MapColorMode, online: boolean, isGateway: boolean, gatewayCount: number, snr: number | null): string {
+  if (colorMode === "quality" && !isGateway) {
+    if (snr == null) return COLOR_OFFLINE;
+    if (snr < -12) return "var(--crit)";
+    if (snr < 0) return "var(--warn)";
+    return COLOR_ONLINE;
+  }
+  if (colorMode === "redundancy" && !isGateway) {
+    if (gatewayCount <= 0) return COLOR_OFFLINE;
+    if (gatewayCount === 1) return "var(--warn)";
+    return COLOR_ONLINE;
+  }
+  return isGateway ? COLOR_GATEWAY : online ? COLOR_ONLINE : COLOR_OFFLINE;
+}
+
 function nodeIcon(
   online: boolean,
   isGateway: boolean,
@@ -52,11 +87,13 @@ function nodeIcon(
   selected: boolean,
   focused: boolean,
   hasAlert: boolean,
+  colorMode: MapColorMode = "status",
+  snr: number | null = null,
 ): L.DivIcon {
-  const key = `${online}-${isGateway}-${gatewayCount}-${selected}-${focused}-${hasAlert}`;
+  const key = `${online}-${isGateway}-${gatewayCount}-${selected}-${focused}-${hasAlert}-${colorMode}-${snr}`;
   let icon = iconCache.get(key);
   if (!icon) {
-    const color = isGateway ? COLOR_GATEWAY : online ? COLOR_ONLINE : COLOR_OFFLINE;
+    const color = colorFor(colorMode, online, isGateway, gatewayCount, snr);
     const shape = isGateway
       ? `width:16px;height:16px;transform:rotate(45deg);border-radius:3px;`
       : `width:14px;height:14px;border-radius:50%;`;
@@ -95,6 +132,7 @@ interface NodeMarkerProps {
   hasAlert: boolean;
   /** Con Focus activo, el resto de nodos se atenúa — nunca los que tienen alerta. */
   dimmed: boolean;
+  colorMode: MapColorMode;
   onShowDetail: (nodeId: string) => void;
 }
 
@@ -102,7 +140,7 @@ interface NodeMarkerProps {
 // El popup de Leaflet desapareció: el detalle vive en el Inspector y el
 // hover solo enseña un tooltip mínimo de identificación.
 const NodeMarker = memo(
-  function NodeMarker({ summary, isGateway, isSelected, isFocused, hasAlert, dimmed, onShowDetail }: NodeMarkerProps) {
+  function NodeMarker({ summary, isGateway, isSelected, isFocused, hasAlert, dimmed, colorMode, onShowDetail }: NodeMarkerProps) {
     const { node, last_position: pos, last_device_telemetry: tel } = summary;
     if (!pos) return null;
     const activeLinks = summary.gateway_links.filter((l) => l.active);
@@ -111,7 +149,7 @@ const NodeMarker = memo(
     return (
       <Marker
         position={[pos.latitude, pos.longitude]}
-        icon={nodeIcon(node.online, isGateway, activeLinks.length, isSelected, isFocused, hasAlert)}
+        icon={nodeIcon(node.online, isGateway, activeLinks.length, isSelected, isFocused, hasAlert, colorMode, node.snr)}
         opacity={dimmed ? 0.45 : 1}
         eventHandlers={{ click: () => onShowDetail(node.node_id) }}
       >
@@ -133,6 +171,7 @@ const NodeMarker = memo(
     prev.isFocused === next.isFocused &&
     prev.hasAlert === next.hasAlert &&
     prev.dimmed === next.dimmed &&
+    prev.colorMode === next.colorMode &&
     prev.onShowDetail === next.onShowDetail &&
     prev.summary.node.online === next.summary.node.online &&
     prev.summary.node.snr === next.summary.node.snr &&
@@ -237,16 +276,36 @@ function PulseLayer({ pulses }: { pulses: MapPulse[] }) {
 export function MapView({
   summaries,
   gatewayNodeIds,
+  gateways,
   onShowDetail,
   fill = false,
   selectedId = null,
   focusId = null,
   alertNodeIds,
+  groupNodeIds = null,
   pulses,
   onMapReady,
 }: Props) {
   const withPosition = useMemo(() => summaries.filter((s) => s.last_position), [summaries]);
   const withoutPosition = summaries.length - withPosition.length;
+
+  const [layers, setLayers] = usePersistedState<MapLayerState>("noc.map.layers", DEFAULT_MAP_LAYERS);
+
+  // Capas de categoría (Fase B.1): filtran qué marcadores se dibujan,
+  // reutilizando `classifyNode` (mismo criterio que Flota). "Favoritos" es
+  // aditivo: añade favoritos aunque su categoría esté apagada, nunca oculta.
+  const visibleByLayer = useMemo(() => {
+    return withPosition.filter((s) => {
+      if (layers.showFavoritesOnly && s.node.is_favorite) return true;
+      const cat = classifyNode(s, gatewayNodeIds);
+      if (cat === "gateway") return layers.showGateways;
+      if (cat === "infra") return layers.showInfra;
+      if (cat === "fixed") return layers.showFixed;
+      // "user" y "unclassified" comparten el toggle "Usuarios" (catch-all,
+      // ver classify.ts): nunca desaparecen silenciosamente.
+      return layers.showUsers;
+    });
+  }, [withPosition, layers, gatewayNodeIds]);
 
   const map = (
     <MapContainer
@@ -263,19 +322,35 @@ export function MapView({
       <ExposeMap onMapReady={onMapReady} />
       <AutoResize />
       <FitOnFirstData summaries={withPosition} />
+      {layers.showLinks && (
+        <LinksLayer
+          summaries={visibleByLayer}
+          gateways={gateways.map((g) => ({ gateway_id: g.gateway_id, local_node_id: g.local_node_id }))}
+        />
+      )}
       <MarkerClusterGroup chunkedLoading maxClusterRadius={50}>
-        {withPosition.map((s) => {
+        {visibleByLayer.map((s) => {
           const id = s.node.node_id;
+          const isGateway = gatewayNodeIds.has(id);
           const hasAlert = alertNodeIds?.has(id) ?? false;
+          const focusDim = focusId != null && id !== focusId && id !== selectedId && !hasAlert;
+          const groupDim =
+            groupNodeIds != null &&
+            !groupNodeIds.has(id) &&
+            !isGateway &&
+            !hasAlert &&
+            id !== selectedId &&
+            id !== focusId;
           return (
             <NodeMarker
               key={id}
               summary={s}
-              isGateway={gatewayNodeIds.has(id)}
+              isGateway={isGateway}
               isSelected={id === selectedId}
               isFocused={id === focusId}
               hasAlert={hasAlert}
-              dimmed={focusId != null && id !== focusId && id !== selectedId && !hasAlert}
+              dimmed={focusDim || groupDim}
+              colorMode={layers.colorMode}
               onShowDetail={onShowDetail}
             />
           );
@@ -291,8 +366,11 @@ export function MapView({
       <div style={{ position: "relative", height: "100%", width: "100%" }}>
         {map}
         <div style={{ ...overlayStyle, top: 10, left: 10 }}>
-          {withPosition.length} nodos en el mapa
+          {visibleByLayer.length} / {withPosition.length} nodos en el mapa
           {withoutPosition > 0 && ` · ${withoutPosition} sin posición`}
+        </div>
+        <div style={{ ...overlayStyle, top: 10, right: 10, padding: "0.4rem" }}>
+          <LayerToggle layers={layers} onChange={setLayers} />
         </div>
         <div style={{ ...overlayStyle, bottom: 10, left: 10 }}>
           <Legend />

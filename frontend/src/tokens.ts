@@ -75,3 +75,10 @@ export function healthColor(status: "HEALTHY" | "WARNING" | "CRITICAL" | undefin
   if (status === "CRITICAL") return t.crit;
   return t.textFaint;
 }
+
+/** Color de una alerta por severidad (StatusPanel, Inspector › Alertas). */
+export function alertSeverityColor(severity: "CRITICAL" | "WARNING" | "INFO" | string): string {
+  if (severity === "CRITICAL") return t.crit;
+  if (severity === "WARNING") return t.warn;
+  return t.textDim;
+}

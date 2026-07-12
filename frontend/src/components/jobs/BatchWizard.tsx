@@ -5,11 +5,15 @@ import {
   displayName,
   fetchCapabilities,
   fetchConfigSchema,
+  fetchGateways,
+  GATEWAY_SELECTION_PREFERRED,
   previewBatch,
   type BatchPreviewOut,
+  type GatewaySelectionIn,
   type NodeSummaryOut,
 } from "../../api/client";
 import { styles } from "../../styles";
+import { GatewaySelect } from "../shell/GatewaySelect";
 import { NodeSelect } from "../NodeSelect";
 import { fmtSeconds } from "./status";
 
@@ -37,6 +41,8 @@ export function BatchWizard({
 }) {
   const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: fetchCapabilities, staleTime: 300_000 });
   const schema = useQuery({ queryKey: ["config-schema"], queryFn: fetchConfigSchema, staleTime: 3_600_000 });
+  // Mismo queryKey que App.tsx: caché compartida, sin fetch nuevo.
+  const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
 
   const bulkCaps = (capabilities.data ?? []).filter((c) => c.allow_bulk);
   const [name, setName] = useState("");
@@ -47,6 +53,7 @@ export function BatchWizard({
   const [otherFieldValues, setOtherFieldValues] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<BatchPreviewOut | null>(null);
   const [confirmText, setConfirmText] = useState("");
+  const [gatewaySelection, setGatewaySelection] = useState<GatewaySelectionIn>(GATEWAY_SELECTION_PREFERRED);
 
   const spec = bulkCaps.find((c) => c.operation_type === opType);
   const isConfigSet = opType === "config.set" || opType === "module_config.set";
@@ -91,14 +98,17 @@ export function BatchWizard({
     onSuccess: setPreview,
   });
   const doCreate = useMutation({
-    mutationFn: () =>
-      createBatch({
+    mutationFn: () => {
+      const excludedIds = new Set((preview?.excluded ?? []).map((n) => n.node_id));
+      return createBatch({
         name: name || `${opType} × ${preview?.eligible_count ?? 0}`,
         operation_type: opType,
         params: buildParams(),
-        node_ids: (preview?.eligible ?? []).map((n) => n.node_id),
+        node_ids: selectedIds.filter((id) => !excludedIds.has(id)),
         scope_description: preview?.scope_description,
-      }),
+        gateway_selection: gatewaySelection,
+      });
+    },
     onSuccess: (batch) => onDone(batch.id),
   });
 
@@ -208,6 +218,7 @@ export function BatchWizard({
             )}
           </>
         )}
+        <GatewaySelect value={gatewaySelection} onChange={setGatewaySelection} gateways={gateways.data ?? []} />
         <button
           style={btn}
           disabled={!paramsReady || selectedIds.length === 0 || doPreview.isPending}

@@ -14,7 +14,10 @@
     "uptime_seconds": { "type": ["integer", "null"], "minimum": 0 },
     "temperature_c": { "type": ["number", "null"] },
     "relative_humidity": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
-    "barometric_pressure_hpa": { "type": ["number", "null"] }
+    "barometric_pressure_hpa": { "type": ["number", "null"] },
+    "channel_index": { "type": "integer", "minimum": 0, "default": 0 },
+    "snr": { "type": ["number", "null"] },
+    "rssi": { "type": ["integer", "null"] }
   },
   "additionalProperties": false
 }

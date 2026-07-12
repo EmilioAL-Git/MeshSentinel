@@ -507,7 +507,7 @@ export function GatewaysView() {
   });
   const stats = useQuery({
     queryKey: ["gateway-stats"],
-    queryFn: fetchGatewayStats,
+    queryFn: () => fetchGatewayStats(),
     refetchInterval: 15_000,
   });
   const [wizardFor, setWizardFor] = useState<string | null>(null);

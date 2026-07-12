@@ -32,7 +32,7 @@ from noc.application.admin.config_schema import (
     values_equal,
 )
 from noc.application.admin.config_state import SectionState, load_section_states
-from noc.application.admin.gateway_routing import select_gateways_for_nodes
+from noc.application.admin.gateway_routing import resolve_gateways_for_nodes
 from noc.config import Settings
 from noc.domain.admin.entities import ConfigProfile, ConfigProfileVersion
 
@@ -331,25 +331,26 @@ class ProfileService:
             raise ValueError("Ningún nodo requiere cambios (o ninguno es elegible)")
 
         async with self._session_factory() as session:
-            node_repo = SqlNodeRepository(session)
-            fallbacks = {
-                p.node_id: (await node_repo.get(p.node_id)).gateway_id  # type: ignore[union-attr]
-                for p in preview.eligible
-            }
-            # M6.2: cada nodo del lote viaja por su mejor pasarela actual
-            gateways = await select_gateways_for_nodes(session, fallbacks, self._settings)
+            # Selección inteligente de gateway: cada nodo del lote viaja por
+            # su pasarela preferida/automática (sin selector propio en esta
+            # pantalla, ver informe — siempre modo "preferido").
+            resolved = await resolve_gateways_for_nodes(
+                session, [p.node_id for p in preview.eligible], self._settings
+            )
 
         planned: list[PlannedOperation] = []
         for plan in preview.eligible:
+            resolution = resolved[plan.node_id]
             for section in sorted(plan.sections_to_apply, key=apply_order_key):
                 meta = ALL_SECTIONS[section]
                 op_type = "config.set" if meta.kind == "config" else "module_config.set"
                 planned.append(
                     PlannedOperation(
                         node_id=plan.node_id,
-                        gateway_id=gateways[plan.node_id] or "",
+                        gateway_id=resolution.gateway_id or "",
                         operation_type=op_type,
                         params={"section": section, "values": plan.sections_to_apply[section]},
+                        gateway_note=resolution.note,
                     )
                 )
 

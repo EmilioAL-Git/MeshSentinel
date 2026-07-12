@@ -1,65 +1,28 @@
 import { useMemo } from "react";
 import {
-  activeGatewayCount,
+  type AlertOut,
   type GatewayOut,
   type GroupOut,
+  type MultiGatewayStatsOut,
   type NodeFilterParams,
   type NodeSummaryOut,
   type TagOut,
 } from "../../api/client";
+import { AddToGroupMenu } from "./AddToGroupMenu";
+import { FleetBlocks } from "./FleetBlocks";
+import { GroupBar } from "./GroupBar";
+import { computeFleetGroupMetrics } from "./groupStats";
+import { FleetRow, GRID } from "./instruments";
 
 /**
- * Flota (identidad v0.8): sustituye a la vista "Nodos" (tabla HTML + barra de
- * selects). Un roster de operación: KPIs arriba, barra de mando con filtros
- * segmentados, filas densas con instrumentos (presencia, batería como
- * medidor, SNR como barras de señal) y una barra de armado de lotes que solo
- * existe cuando hay selección. Cero lógica nueva: mismos filtros M1.2,
- * misma selección M2, mismo Inspector global al hacer clic.
+ * Flota (fase "Flota orientada a grupos", v0.8.x): con grupo activo deja de
+ * ser una lista plana — es la representación operativa de ese grupo, en
+ * bloques por categoría (§ FleetBlocks) con su propia banda de estado
+ * (§ GroupBar). Sin grupo activo ("Toda la red"), se comporta exactamente
+ * como hasta ahora: roster plano, filtros M1.2 completos, misma selección
+ * M2, mismo Inspector global al hacer clic. La taxonomía SOLO existe dentro
+ * de un grupo — no tiene sentido clasificar miles de nodos ajenos.
  */
-
-const GRID = "20px 20px 14px minmax(140px,1.5fr) 92px minmax(80px,1fr) 120px 76px minmax(90px,120px) 70px 26px";
-
-function relTime(iso: string | null): string {
-  if (!iso) return "—";
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return `${Math.round(s)}s`;
-  if (s < 3600) return `${Math.round(s / 60)}m`;
-  if (s < 86400) return `${Math.round(s / 3600)}h`;
-  return `${Math.round(s / 86400)}d`;
-}
-
-function Battery({ level }: { level: number | null | undefined }) {
-  if (level == null) return <span style={{ color: "var(--text-faint)" }}>—</span>;
-  if (level > 100) {
-    return <span className="meter" style={{ color: "var(--ok)" }}>⚡ ext</span>;
-  }
-  const color = level <= 20 ? "var(--crit)" : level <= 50 ? "var(--warn)" : "var(--ok)";
-  return (
-    <span className="meter">
-      <span className="track">
-        <span className="fill" style={{ width: `${level}%`, background: color }} />
-      </span>
-      <span style={{ color }}>{level}%</span>
-    </span>
-  );
-}
-
-function Signal({ snr }: { snr: number | null }) {
-  if (snr == null) return <span style={{ color: "var(--text-faint)" }}>—</span>;
-  const bars = snr > 5 ? 4 : snr > 0 ? 3 : snr > -7 ? 2 : snr > -15 ? 1 : 0;
-  const heights = [4, 7, 10, 12];
-  return (
-    <span
-      className={`sigbars${bars <= 2 ? " weak" : ""}`}
-      title={`SNR ${snr} dB`}
-      style={{ marginRight: 5 }}
-    >
-      {heights.map((h, i) => (
-        <i key={i} className={i < bars ? "on" : undefined} style={{ height: h }} />
-      ))}
-    </span>
-  );
-}
 
 export function FleetView({
   summaries,
@@ -71,6 +34,10 @@ export function FleetView({
   tags,
   groups,
   gateways,
+  gatewayNodeIds,
+  activeGroup,
+  groupGatewayStats,
+  alerts,
   hwModels,
   selected,
   focusId,
@@ -90,6 +57,10 @@ export function FleetView({
   tags: TagOut[];
   groups: GroupOut[];
   gateways: GatewayOut[];
+  gatewayNodeIds: Set<string>;
+  activeGroup: GroupOut | null;
+  groupGatewayStats: MultiGatewayStatsOut | undefined;
+  alerts: AlertOut[];
   hwModels: string[];
   selected: string | null;
   focusId: string | null;
@@ -102,8 +73,12 @@ export function FleetView({
 }) {
   const set = (patch: NodeFilterParams) => onFiltersChange({ ...filters, ...patch });
   const hasFilters = Object.values(filters).some((v) => v !== undefined && v !== "" && v !== false);
+  const isGrouped = activeGroup != null;
 
-  const online = summaries.filter((s) => s.node.online).length;
+  // Memoizados: con miles de nodos, recorrer `summaries`/`allSummaries` en
+  // cada render (incl. los que no cambian ni datos ni selección) deja de
+  // ser gratis.
+  const online = useMemo(() => summaries.filter((s) => s.node.online).length, [summaries]);
   const lowBattery = useMemo(
     () =>
       summaries.filter((s) => {
@@ -112,7 +87,8 @@ export function FleetView({
       }).length,
     [summaries],
   );
-  const favCount = allSummaries.filter((s) => s.node.is_favorite).length;
+  const favCount = useMemo(() => allSummaries.filter((s) => s.node.is_favorite).length, [allSummaries]);
+  const groupMetrics = useMemo(() => computeFleetGroupMetrics(summaries, alerts), [summaries, alerts]);
 
   const toggleChecked = (id: string) => {
     const next = new Set(checkedIds);
@@ -120,11 +96,17 @@ export function FleetView({
     else next.add(id);
     onCheckedChange(next);
   };
-  const allVisibleChecked =
-    summaries.length > 0 && summaries.every((s) => checkedIds.has(s.node.node_id));
+  const allVisibleChecked = useMemo(
+    () => summaries.length > 0 && summaries.every((s) => checkedIds.has(s.node.node_id)),
+    [summaries, checkedIds],
+  );
 
   return (
     <div className="ws">
+      {isGrouped && activeGroup && (
+        <GroupBar group={activeGroup} metrics={groupMetrics} gatewayStats={groupGatewayStats} />
+      )}
+
       {/* Constantes de la flota */}
       <div className="kpis">
         <div className="kpi">
@@ -201,18 +183,23 @@ export function FleetView({
             <option key={t.id} value={t.name}>{t.name}</option>
           ))}
         </select>
-        <select
-          className="input"
-          value={filters.group_id ?? ""}
-          onChange={(e) => set({ group_id: e.target.value ? Number(e.target.value) : undefined })}
-        >
-          <option value="">grupo</option>
-          {groups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name} ({g.member_count})
-            </option>
-          ))}
-        </select>
+        {/* El filtro manual de grupo queda oculto con grupo activo: ya está
+            scopado por el selector global (App.tsx), mostrarlo aquí sería
+            un segundo mecanismo redundante para lo mismo. */}
+        {!isGrouped && (
+          <select
+            className="input"
+            value={filters.group_id ?? ""}
+            onChange={(e) => set({ group_id: e.target.value ? Number(e.target.value) : undefined })}
+          >
+            <option value="">grupo</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name} ({g.member_count})
+              </option>
+            ))}
+          </select>
+        )}
         <select className="input" value={filters.gateway_id ?? ""} onChange={(e) => set({ gateway_id: e.target.value || undefined })}>
           <option value="">pasarela</option>
           {gateways.map((g) => (
@@ -247,15 +234,32 @@ export function FleetView({
         )}
       </div>
 
-      {/* Roster */}
+      {/* Roster: bloques por categoría dentro de un grupo, lista plana en "Toda la red" */}
       <div className="panel" style={{ flex: 1, border: "none" }}>
         <div className="ws-scroll">
-          <div className="roster-head" style={{ gridTemplateColumns: GRID }}>
-            <span>
-              <input
-                type="checkbox"
-                checked={allVisibleChecked}
-                onChange={() => {
+          {loading && <div className="empty">Cargando flota…</div>}
+          {error && <div className="empty" style={{ color: "var(--crit)" }}>Error consultando la API.</div>}
+          {!loading && summaries.length === 0 && (
+            <div className="empty">Ningún nodo coincide con los filtros actuales.</div>
+          )}
+          {!loading && summaries.length > 0 && isGrouped && (
+            <FleetBlocks
+              summaries={summaries}
+              gatewayNodeIds={gatewayNodeIds}
+              selected={selected}
+              focusId={focusId}
+              checkedIds={checkedIds}
+              onSelect={onSelect}
+              onToggleFavorite={onToggleFavorite}
+              onToggleIgnored={onToggleIgnored}
+              onCheckedChange={onCheckedChange}
+            />
+          )}
+          {!loading && summaries.length > 0 && !isGrouped && (
+            <>
+              <RosterHeadWithSelectAll
+                allVisibleChecked={allVisibleChecked}
+                onToggleAll={() => {
                   const next = new Set(checkedIds);
                   for (const s of summaries) {
                     if (allVisibleChecked) next.delete(s.node.node_id);
@@ -263,117 +267,22 @@ export function FleetView({
                   }
                   onCheckedChange(next);
                 }}
-                title="Armar/desarmar todos los visibles"
               />
-            </span>
-            <span />
-            <span />
-            <span>Nodo</span>
-            <span>ID</span>
-            <span>Etiquetas</span>
-            <span>Batería</span>
-            <span>Señal</span>
-            <span>Pasarela</span>
-            <span>Visto</span>
-            <span />
-          </div>
-          {loading && <div className="empty">Cargando flota…</div>}
-          {error && <div className="empty" style={{ color: "var(--crit)" }}>Error consultando la API.</div>}
-          {!loading && summaries.length === 0 && (
-            <div className="empty">Ningún nodo coincide con los filtros actuales.</div>
+              {summaries.map((summary) => (
+                <FleetRow
+                  key={summary.node.node_id}
+                  summary={summary}
+                  selected={selected}
+                  focusId={focusId}
+                  checked={checkedIds.has(summary.node.node_id)}
+                  onSelect={onSelect}
+                  onToggleFavorite={onToggleFavorite}
+                  onToggleIgnored={onToggleIgnored}
+                  onToggleChecked={toggleChecked}
+                />
+              ))}
+            </>
           )}
-          {summaries.map((summary) => {
-            const { node, last_device_telemetry, tags: nodeTags } = summary;
-            const gwCount = activeGatewayCount(summary);
-            const cls = [
-              "roster-row",
-              focusId === node.node_id ? "focus" : selected === node.node_id ? "sel" : "",
-              node.is_ignored ? "dim" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            return (
-              <div
-                key={node.node_id}
-                className={cls}
-                style={{ gridTemplateColumns: GRID }}
-                onClick={() => onSelect(node.node_id)}
-              >
-                <span onClick={(e) => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={checkedIds.has(node.node_id)}
-                    onChange={() => toggleChecked(node.node_id)}
-                  />
-                </span>
-                <span
-                  title={node.is_favorite ? "Quitar de favoritos" : "Marcar favorito"}
-                  style={{ cursor: "pointer", color: node.is_favorite ? "var(--warn)" : "var(--text-faint)" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleFavorite(node.node_id, !node.is_favorite);
-                  }}
-                >
-                  {node.is_favorite ? "★" : "☆"}
-                </span>
-                <span
-                  className={`presence ${node.online ? "on" : "off"}`}
-                  title={node.online ? "En línea" : "Offline"}
-                >
-                  {node.online ? "●" : "○"}
-                </span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  <strong>{node.short_name ?? "?"}</strong>{" "}
-                  <span style={{ color: "var(--text-dim)" }}>{node.long_name ?? ""}</span>
-                  {node.is_ignored && <span style={{ color: "var(--text-faint)" }}> · ignorado</span>}
-                </span>
-                <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{node.node_id}</span>
-                <span style={{ overflow: "hidden", whiteSpace: "nowrap" }}>
-                  {nodeTags.map((tag) => (
-                    <span
-                      key={tag.id}
-                      className="chip"
-                      style={{ marginRight: 4, borderColor: tag.color ?? "var(--border)", color: tag.color ?? "var(--text-dim)" }}
-                    >
-                      {tag.name}
-                    </span>
-                  ))}
-                </span>
-                <span>
-                  <Battery level={last_device_telemetry?.battery_level} />
-                </span>
-                <span>
-                  <Signal snr={node.snr} />
-                  {node.snr != null && (
-                    <span className="mono" style={{ fontSize: 10.5, color: "var(--text-dim)" }}>
-                      {node.snr}
-                    </span>
-                  )}
-                </span>
-                <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {node.gateway_id ?? "—"}
-                  {gwCount > 1 && (
-                    <span className="chip" style={{ marginLeft: 5, color: "var(--accent)", borderColor: "var(--accent)" }} title={`Oído por ${gwCount} pasarelas`}>
-                      🛰{gwCount}
-                    </span>
-                  )}
-                </span>
-                <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                  {relTime(node.last_seen_at)}
-                </span>
-                <span
-                  title={node.is_ignored ? "Dejar de ignorar" : "Ignorar nodo"}
-                  style={{ cursor: "pointer", color: "var(--text-faint)" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleIgnored(node.node_id, !node.is_ignored);
-                  }}
-                >
-                  {node.is_ignored ? "🚫" : "👁"}
-                </span>
-              </div>
-            );
-          })}
         </div>
 
         {/* Barra de armado: solo existe cuando hay selección */}
@@ -420,6 +329,7 @@ export function FleetView({
             <button className="btn ghost" onClick={() => onCheckedChange(new Set())}>
               desarmar todo
             </button>
+            <AddToGroupMenu selectedIds={[...checkedIds]} groups={groups} allSummaries={allSummaries} />
             <span style={{ marginLeft: "auto" }} />
             <button className="btn primary" onClick={onCreateBatch}>
               ▶ Crear lote ({checkedIds.size})
@@ -427,6 +337,33 @@ export function FleetView({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Cabecera plana con el checkbox "armar/desarmar todos" (solo modo "Toda la red"). */
+function RosterHeadWithSelectAll({
+  allVisibleChecked,
+  onToggleAll,
+}: {
+  allVisibleChecked: boolean;
+  onToggleAll: () => void;
+}) {
+  return (
+    <div className="roster-head" style={{ gridTemplateColumns: GRID }}>
+      <span>
+        <input type="checkbox" checked={allVisibleChecked} onChange={onToggleAll} title="Armar/desarmar todos los visibles" />
+      </span>
+      <span />
+      <span />
+      <span>Nodo</span>
+      <span>ID</span>
+      <span>Etiquetas</span>
+      <span>Batería</span>
+      <span>Señal</span>
+      <span>Pasarela</span>
+      <span>Visto</span>
+      <span />
     </div>
   );
 }

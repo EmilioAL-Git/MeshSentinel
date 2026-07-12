@@ -30,6 +30,9 @@ TransitionKind = Literal["fired", "resolved", "reminder"]
 class AlertTransition:
     kind: TransitionKind
     alert: Alert
+    # Regla que produjo la transición: permite a los listeners decidir por
+    # rule_type (p. ej. la narrativa del diario operativo) sin re-consultarla
+    rule: AlertRule | None = None
 
 
 TransitionListener = Callable[[AlertTransition], Awaitable[None]]
@@ -118,7 +121,7 @@ class AlertEngine:
                             last_notified_at=now,
                         )
                     )
-                    transitions.append(AlertTransition("fired", alert))
+                    transitions.append(AlertTransition("fired", alert, rule))
                     logger.info(
                         "alert.fired rule=%s subject=%s severity=%s", rule.name, cond.subject_id, rule.severity
                     )
@@ -126,13 +129,13 @@ class AlertEngine:
                     since_notified = (now - ensure_utc(existing.last_notified_at)).total_seconds()
                     if since_notified >= rule.cooldown_seconds and existing.status == "firing":
                         await repo.mark_notified(existing.id or 0, now)
-                        transitions.append(AlertTransition("reminder", existing))
+                        transitions.append(AlertTransition("reminder", existing, rule))
 
             for key, alert in active_by_key.items():
                 if key not in condition_keys:
                     resolved = await repo.resolve(alert.id or 0, now)
                     if resolved:
-                        transitions.append(AlertTransition("resolved", resolved))
+                        transitions.append(AlertTransition("resolved", resolved, rule))
                         logger.info("alert.resolved rule=%s subject=%s", rule.name, alert.subject_id)
 
         return transitions

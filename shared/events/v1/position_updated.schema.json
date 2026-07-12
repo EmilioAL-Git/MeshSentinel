@@ -19,7 +19,9 @@
       "type": ["string", "null"],
       "format": "date-time",
       "description": "Hora del fix GPS según el nodo; puede diferir del timestamp del sobre"
-    }
+    },
+    "snr": { "type": ["number", "null"] },
+    "rssi": { "type": ["integer", "null"] }
   },
   "additionalProperties": false
 }

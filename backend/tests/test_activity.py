@@ -95,7 +95,9 @@ async def test_pipeline_emits_lifecycle_events(session_factory):
 
     states = [e["payload"]["state"] for e in events if e["event_type"] == "admin.operation"]
     assert states == ["dispatched", "running", "retry_scheduled", "dispatched", "finished"]
-    finished = events[-1]["payload"]
+    # El último admin.operation (la narrativa activity.event del diario puede
+    # llegar detrás, Actividad 2.0 Fase 1)
+    finished = [e for e in events if e["event_type"] == "admin.operation"][-1]["payload"]
     assert finished["final_status"] == "failed"
     assert finished["node_id"] == NODE
     assert finished["operation_type"] == "metadata.get"

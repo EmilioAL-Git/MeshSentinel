@@ -3,15 +3,19 @@ import {
   CATEGORY_LABEL,
   type ActivityCategory,
   type ActivityEntry,
+  type ActivityPriority,
   type ActivitySeverity,
 } from "../activity";
 import { type GatewayOut, type NodeSummaryOut } from "../api/client";
+import { useGroupNodeIds } from "../context/GroupContext";
 import { NodeSelect } from "./NodeSelect";
+import { GroupScopeBanner } from "./shell/GroupScopeBanner";
 
 /**
- * Registro (identidad v0.8): la actividad del sistema como terminal de
- * eventos a sangre completa — mono, timestamp, gutter de severidad —
- * en vez de una tarjeta con lista. Mismos filtros y buffer de 500.
+ * Registro (Actividad 2.0 Fase 1): el diario operativo de la red. Cada
+ * línea es un HECHO redactado por el backend en lenguaje de operador
+ * (nunca paquetes ni estados técnicos), con icono, prioridad visual y
+ * detalles ya formateados. Mismos filtros y buffer de 500.
  */
 
 const SEVERITY_COLOR: Record<ActivitySeverity, string> = {
@@ -19,6 +23,14 @@ const SEVERITY_COLOR: Record<ActivitySeverity, string> = {
   ok: "var(--ok)",
   warn: "var(--warn)",
   error: "var(--crit)",
+};
+
+/** Prioridad del diario → color del gutter y del título. */
+const PRIORITY_COLOR: Record<ActivityPriority, string> = {
+  info: "var(--text-dim)",
+  important: "var(--accent)",
+  warning: "var(--warn)",
+  critical: "var(--crit)",
 };
 
 const CATEGORY_COLOR: Record<ActivityCategory, string> = {
@@ -46,33 +58,53 @@ export function ActivityConsole({
   const [batchFilter, setBatchFilter] = useState("");
   const [gatewayFilter, setGatewayFilter] = useState("");
   const [categories, setCategories] = useState<Set<ActivityCategory>>(new Set(ALL_CATEGORIES));
+  // "Ver paquete": capa técnica plegada por defecto (vista principal 100%
+  // humana); un id puede reutilizarse entre renders porque event_id es único
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Grupo activo ("Grupo como contexto global"): un evento sin nodo asociado
+  // (pasarela, sistema) no se le puede atribuir a ningún grupo — se mantiene
+  // siempre visible, igual criterio que en Alertas.
+  const groupNodeIds = useGroupNodeIds(summaries);
+  const groupScoped = useMemo(
+    () => (groupNodeIds == null ? entries : entries.filter((e) => e.nodeId == null || groupNodeIds.has(e.nodeId))),
+    [entries, groupNodeIds],
+  );
 
   // Batches vistos en el buffer (para el filtro)
   const batchIds = useMemo(
     () =>
-      [...new Set(entries.map((e) => e.batchId).filter((b): b is number => b != null))].sort(
+      [...new Set(groupScoped.map((e) => e.batchId).filter((b): b is number => b != null))].sort(
         (a, b) => b - a,
       ),
-    [entries],
+    [groupScoped],
   );
   const gatewayIds = useMemo(() => {
     const ids = new Set(gateways.map((g) => g.gateway_id));
     // "system": origen de eventos internos del backend (alertas, actividad),
     // no una pasarela real — debe coincidir con SYSTEM_SOURCE en envelopes.py
-    for (const e of entries) if (e.gatewayId && e.gatewayId !== "system") ids.add(e.gatewayId);
+    for (const e of groupScoped) if (e.gatewayId && e.gatewayId !== "system") ids.add(e.gatewayId);
     return [...ids].sort();
-  }, [entries, gateways]);
+  }, [groupScoped, gateways]);
 
   const filtered = useMemo(
     () =>
-      entries.filter(
+      groupScoped.filter(
         (e) =>
           categories.has(e.category) &&
           (nodeFilter === "" || e.nodeId === nodeFilter) &&
           (batchFilter === "" || e.batchId === Number(batchFilter)) &&
           (gatewayFilter === "" || e.gatewayId === gatewayFilter),
       ),
-    [entries, categories, nodeFilter, batchFilter, gatewayFilter],
+    [groupScoped, categories, nodeFilter, batchFilter, gatewayFilter],
   );
 
   const toggleCategory = (c: ActivityCategory) => {
@@ -87,6 +119,7 @@ export function ActivityConsole({
 
   return (
     <div className="ws">
+      <GroupScopeBanner shown={groupScoped.length} total={entries.length} label="eventos" />
       <div className="toolbar">
         <span className="microlabel">Registro de eventos</span>
         <span className="noc-pulse" style={{ color: "var(--ok)", fontSize: 9 }}>●</span>
@@ -141,20 +174,78 @@ export function ActivityConsole({
           </div>
         ) : (
           <div className="termlog" style={{ padding: "0.3rem 0" }}>
-            {filtered.map((e) => (
-              <div key={e.id} className="line" style={{ borderLeftColor: CATEGORY_COLOR[e.category] }}>
-                <span className="ts">{e.time}</span>
-                <span className="src" style={{ color: CATEGORY_COLOR[e.category] }}>
-                  {CATEGORY_LABEL[e.category].toLowerCase()}
-                </span>
-                {e.gatewayId && e.gatewayId !== "system" && (
-                  <span className="src" title={`Pasarela de origen: ${e.gatewayId}`}>{e.gatewayId}</span>
-                )}
-                <span className="msg" style={{ color: SEVERITY_COLOR[e.severity] }}>
-                  {e.text}
-                </span>
-              </div>
-            ))}
+            {filtered.map((e) => {
+              const accent = e.priority ? PRIORITY_COLOR[e.priority] : CATEGORY_COLOR[e.category];
+              // Capa técnica: solo existe si el backend la envió (entradas
+              // de paquete); nunca se muestra en la cabecera principal.
+              const hasTechnical =
+                e.internalType != null || e.rssi != null || e.snr != null || e.raw != null;
+              const isExpanded = expanded.has(e.id);
+              return (
+                <div key={e.id} className="line" style={{ borderLeftColor: accent }}>
+                  <span className="ts">{e.time}</span>
+                  {e.icon && <span style={{ fontSize: 12, lineHeight: "1.4" }}>{e.icon}</span>}
+                  {e.gatewayId && (
+                    <span className="src" title={`Pasarela de origen: ${e.gatewayId}`}>{e.gatewayId}</span>
+                  )}
+                  <span style={{ display: "inline-flex", flexDirection: "column", gap: 1 }}>
+                    <span
+                      className="msg"
+                      style={{
+                        color: e.priority ? accent : SEVERITY_COLOR[e.severity],
+                        fontWeight: e.priority === "critical" || e.priority === "important" ? 600 : 400,
+                      }}
+                    >
+                      {e.text}
+                    </span>
+                    {e.nodeLabel && (
+                      <span className="msg" style={{ color: "var(--text-dim)" }}>{e.nodeLabel}</span>
+                    )}
+                    {e.description && (
+                      <span className="msg" style={{ color: "var(--text)", fontStyle: "italic" }}>
+                        {e.description}
+                      </span>
+                    )}
+                    {e.details && e.details.length > 0 && (
+                      <span className="msg" style={{ color: "var(--text-faint)", fontSize: 11 }}>
+                        {e.details.map(([k, v], i) => (
+                          <span key={k}>
+                            {i > 0 && " · "}
+                            {k}: <span style={{ color: "var(--text-dim)" }}>{v}</span>
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                    {hasTechnical && (
+                      <>
+                        <button
+                          className="btn ghost"
+                          style={{ alignSelf: "flex-start", fontSize: 10, padding: "0 0.4rem", height: 16 }}
+                          onClick={() => toggleExpanded(e.id)}
+                        >
+                          {isExpanded ? "▾ Ocultar paquete" : "▸ Ver paquete"}
+                        </button>
+                        {isExpanded && (
+                          <span
+                            className="msg mono"
+                            style={{ color: "var(--text-faint)", fontSize: 10.5, whiteSpace: "pre-wrap" }}
+                          >
+                            {[
+                              e.internalType && `Tipo interno: ${e.internalType}`,
+                              e.rssi != null && `RSSI: ${e.rssi} dBm`,
+                              e.snr != null && `SNR: ${e.snr} dB`,
+                              e.raw && JSON.stringify(e.raw, null, 2),
+                            ]
+                              .filter(Boolean)
+                              .join("\n")}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from noc.application.dashboard import is_stale
 from noc.domain.nodes.entities import (
@@ -12,6 +13,42 @@ from noc.domain.nodes.entities import (
     Tag,
     Telemetry,
 )
+
+
+class GatewaySelectionIn(BaseModel):
+    """Selección inteligente de gateway (Nivel 1 de la jerarquía, ver
+    `application/admin/gateway_routing.py`): único schema de request
+    compartido por operaciones individuales y por lotes — evita tener tres
+    implementaciones distintas del mismo selector.
+
+    - "preferred" (por defecto): respeta preferencia de nodo/grupo, cae al
+      automático si no está operativa — mismo resultado que hoy cuando no
+      hay ninguna preferencia configurada (cero regresión).
+    - "auto": ignora deliberadamente cualquier preferencia, algoritmo puro.
+    - "forced": usa `gateway_id` siempre, sin comprobar disponibilidad.
+    """
+
+    mode: Literal["auto", "preferred", "forced"] = "preferred"
+    gateway_id: str | None = None
+
+    @model_validator(mode="after")
+    def _forced_requires_gateway_id(self) -> "GatewaySelectionIn":
+        if self.mode == "forced" and not self.gateway_id:
+            raise ValueError("gateway_id es obligatorio cuando mode='forced'")
+        return self
+
+
+class PreferredGatewayIn(BaseModel):
+    """Nivel 2/3 de la selección inteligente de gateway — mismo request en
+    `PUT /nodes/{id}/preferred-gateway` y `PUT /groups/{id}/preferred-gateway`."""
+
+    gateway_id: str | None = None
+
+
+class NodeTypeIn(BaseModel):
+    """Clasificación manual (Inspector, Organización): null = "Automático"."""
+
+    node_type: Literal["gateway", "infra", "fixed", "user", "unclassified"] | None = None
 
 
 class PositionOut(BaseModel):
@@ -66,6 +103,8 @@ class NodeOut(BaseModel):
     last_seen_at: datetime | None
     is_favorite: bool
     is_ignored: bool
+    preferred_gateway_id: str | None
+    node_type_override: str | None
     online: bool
 
     @classmethod

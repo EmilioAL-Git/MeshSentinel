@@ -42,6 +42,18 @@ class MultiGatewayStats:
     gateways: list[GatewayStats] = field(default_factory=list)
 
 
+def scope_to_members(
+    nodes: list[Node], links: list[NodeGatewayLink], member_ids: set[str]
+) -> tuple[list[Node], list[NodeGatewayLink]]:
+    """Restringe nodos/enlaces a un subconjunto (p. ej. miembros de un grupo,
+    Flota orientada a grupos): mismo `compute_multi_gateway_stats` sin
+    tocar, ni concepto de dominio nuevo — solo pre-filtra sus entradas."""
+    return (
+        [n for n in nodes if n.node_id in member_ids],
+        [link for link in links if link.node_id in member_ids],
+    )
+
+
 def compute_multi_gateway_stats(
     links: list[NodeGatewayLink],
     gateways: list[GatewayInfo],

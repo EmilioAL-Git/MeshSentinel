@@ -10,6 +10,7 @@ import type {
   NodeSummaryOut,
   OperationOut,
 } from "../../api/client";
+import { useGroupNodeIds } from "../../context/GroupContext";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { t } from "../../tokens";
 import { MapView, type MapPulse } from "../MapView";
@@ -118,6 +119,9 @@ export function OpsCenter({
     return () => window.clearTimeout(timer);
   }, [activity, positionOf]);
 
+  // Grupo activo: nodos fuera de él se atenúan en el mapa, nunca se ocultan.
+  const groupNodeIds = useGroupNodeIds(summaries);
+
   // Nodos con alerta CRITICAL activa: halo permanente, jamás atenuados
   const alertNodeIds = useMemo(
     () =>
@@ -139,7 +143,7 @@ export function OpsCenter({
       {/* Panel izquierdo: estado (leer) */}
       <div
         style={{
-          width: leftOpen ? 300 : 0,
+          width: leftOpen ? 340 : 0,
           flexShrink: 0,
           background: t.surface,
           borderRight: leftOpen ? `1px solid ${t.border}` : "none",
@@ -150,6 +154,8 @@ export function OpsCenter({
       >
         {leftOpen && (
           <StatusPanel
+            summaries={summaries}
+            gatewayNodeIds={gatewayNodeIds}
             summary={summary}
             alerts={alerts}
             gateways={gateways}
@@ -167,11 +173,13 @@ export function OpsCenter({
         <MapView
           summaries={summaries}
           gatewayNodeIds={gatewayNodeIds}
+          gateways={gateways}
           onShowDetail={setSelected}
           fill
           selectedId={selected}
           focusId={focusId}
           alertNodeIds={alertNodeIds}
+          groupNodeIds={groupNodeIds}
           pulses={pulses}
           onMapReady={onMapReady}
         />

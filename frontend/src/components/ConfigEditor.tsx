@@ -3,16 +3,21 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   applyNodeConfig,
   fetchConfigSchema,
+  fetchGateways,
   fetchNodeConfig,
   fetchOperations,
+  GATEWAY_SELECTION_PREFERRED,
   refreshNodeConfig,
   type ConfigFieldSchema,
   type ConfigSchemaOut,
   type ConfigSectionSchema,
+  type GatewaySelectionIn,
   type NodeSummaryOut,
   type SectionSnapshot,
 } from "../api/client";
 import { NodeSelect } from "./NodeSelect";
+import { GatewaySelect } from "./shell/GatewaySelect";
+import { toast } from "./shell/Toast";
 import { styles } from "../styles";
 
 interface Props {
@@ -261,8 +266,11 @@ export function ConfigEditor({ summaries }: Props) {
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [gatewaySelection, setGatewaySelection] = useState<GatewaySelectionIn>(GATEWAY_SELECTION_PREFERRED);
 
   const schema = useQuery({ queryKey: ["config-schema"], queryFn: fetchConfigSchema, staleTime: 60 * 60_000 });
+  // Mismo queryKey que App.tsx: caché compartida, sin fetch nuevo.
+  const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
   const nodeConfig = useQuery({
     queryKey: ["node-config", nodeId],
     queryFn: () => fetchNodeConfig(nodeId),
@@ -281,11 +289,18 @@ export function ConfigEditor({ summaries }: Props) {
     queryClient.invalidateQueries({ queryKey: ["operations"] });
   };
   const refresh = useMutation({
-    mutationFn: (sections: string[] | undefined) => refreshNodeConfig(nodeId, sections),
+    mutationFn: (sections: string[] | undefined) => refreshNodeConfig(nodeId, sections, gatewaySelection),
+    onSuccess: (r) => {
+      if (r.gateway_note) toast(r.gateway_note, { kind: "error" });
+    },
     onSettled: invalidate,
   });
   const apply = useMutation({
-    mutationFn: (payload: Record<string, Record<string, unknown>>) => applyNodeConfig(nodeId, payload),
+    mutationFn: (payload: Record<string, Record<string, unknown>>) =>
+      applyNodeConfig(nodeId, payload, gatewaySelection),
+    onSuccess: (r) => {
+      if (r.gateway_note) toast(r.gateway_note, { kind: "error" });
+    },
     onSettled: () => {
       invalidate();
       setEdits({});
@@ -343,6 +358,7 @@ export function ConfigEditor({ summaries }: Props) {
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
           <h2 style={{ margin: 0 }}>Editor de configuración</h2>
           <NodeSelect value={nodeId} onChange={setNodeId} options={summaries} showOnlineStatus />
+          <GatewaySelect value={gatewaySelection} onChange={setGatewaySelection} gateways={gateways.data ?? []} />
           <button
             style={{ ...btn, opacity: nodeId ? 1 : 0.5 }}
             disabled={!nodeId || refresh.isPending}

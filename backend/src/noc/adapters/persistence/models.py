@@ -70,6 +70,11 @@ class NodeModel(Base):
     # Metadatos del NOC (M1.2) — nunca provienen de la malla ni la modifican
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     is_ignored: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Selección inteligente de gateway (Nivel 2): sin FK, mismo criterio que
+    # gateway_id de esta misma tabla (puede referenciar una pasarela sin fila propia aún).
+    preferred_gateway_id: Mapped[str | None] = mapped_column(String(64))
+    # Clasificación manual (Inspector, Organización): NULL = "Automático".
+    node_type_override: Mapped[str | None] = mapped_column(String(16))
 
 
 class NodeGatewayLinkModel(Base):
@@ -118,6 +123,8 @@ class GroupModel(Base):
     kind: Mapped[str] = mapped_column(String(16), default="static")
     filter_expr: Mapped[str | None] = mapped_column(Text)
     is_critical: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Selección inteligente de gateway (Nivel 3), sin FK (mismo criterio que nodes.gateway_id).
+    preferred_gateway_id: Mapped[str | None] = mapped_column(String(64))
 
 
 class GroupMemberModel(Base):
@@ -225,6 +232,7 @@ class AdminOperationModel(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_ms: Mapped[int | None] = mapped_column(Integer)
+    gateway_note: Mapped[str | None] = mapped_column(Text)
 
 
 class ConfigProfileModel(Base):

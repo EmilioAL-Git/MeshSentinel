@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.api.routers.admin_operations import OperationOut
+from noc.adapters.api.schemas import GatewaySelectionIn
 from noc.adapters.persistence.admin_repositories import (
     SqlAdminBatchRepository,
     SqlAdminOperationRepository,
@@ -93,6 +94,7 @@ class BatchCreateIn(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     node_ids: list[str] = Field(min_length=1)
     scope_description: dict[str, Any] | None = None
+    gateway_selection: GatewaySelectionIn = Field(default_factory=GatewaySelectionIn)
 
 
 class BatchOut(BaseModel):
@@ -177,6 +179,8 @@ async def create_batch(body: BatchCreateIn, request: Request) -> BatchOut:
             params=body.params,
             node_ids=body.node_ids,
             scope_description=body.scope_description,
+            forced_gateway_id=body.gateway_selection.gateway_id if body.gateway_selection.mode == "forced" else None,
+            use_preference=body.gateway_selection.mode != "auto",
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -144,6 +144,26 @@ async def test_create_batch_creates_operations(session_factory):
     assert len(queue.sent) == 1
 
 
+async def test_create_batch_with_forced_gateway_overrides_everything(session_factory):
+    """Selección inteligente de gateway, Nivel 1: forzar en la creación del
+    lote gana sobre cualquier preferencia y sobre el automático — cada
+    operación del lote sale por la MISMA pasarela forzada."""
+    await seed_nodes(session_factory)
+    _, batches, _ = make_services(session_factory)
+
+    batch = await batches.create(
+        "Forzado a gw-manual", "module_config.set", PARAMS, NODES[:3], None,
+        forced_gateway_id="gw-manual",
+    )
+    async with session_factory() as session:
+        ops = await SqlAdminOperationRepository(session).list_operations(
+            None, None, 100, batch_id=batch.id
+        )
+    assert len(ops) == 3
+    assert all(o.gateway_id == "gw-manual" for o in ops)
+    assert all(o.gateway_note is None for o in ops)  # forzado: sin nota de fallback
+
+
 async def test_batch_completion_and_progress(session_factory):
     await seed_nodes(session_factory)
     admin, batches, _ = make_services(session_factory)

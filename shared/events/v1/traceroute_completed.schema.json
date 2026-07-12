@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshtastic-noc/shared/events/v1/traceroute_completed.schema.json",
+  "title": "TracerouteCompletedPayload",
+  "description": "Payload de 'traceroute.completed': TRACEROUTE_APP con la ruta ya resuelta (route no vacío).",
+  "type": "object",
+  "required": ["node_id", "route"],
+  "properties": {
+    "node_id": { "type": "string", "pattern": "^![0-9a-f]{8}$" },
+    "route": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^![0-9a-f]{8}$" }
+    },
+    "snr_towards": {
+      "type": "array",
+      "items": { "type": ["number", "null"] }
+    },
+    "snr": { "type": ["number", "null"] },
+    "rssi": { "type": ["integer", "null"] }
+  },
+  "additionalProperties": false
+}

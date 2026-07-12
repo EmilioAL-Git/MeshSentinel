@@ -115,6 +115,9 @@ async def test_summary_aggregates(session_factory):
     assert s.gateways_total == 1 and s.gateways_connected == 1
     assert s.low_battery_count == 1
     assert s.avg_battery_percent == pytest.approx((90 + 12) / 2)  # 101 excluido
+    assert s.avg_snr == pytest.approx((5.0 + -18.0) / 2)  # solo !00000001/!00000002 tienen snr
+    assert s.avg_rssi is None  # ningún nodo sembrado trae rssi
+    assert s.avg_channel_utilization is None  # ninguna telemetría sembrada trae channel_utilization
     assert s.events_last_hour == 3  # 3 telemetrías dentro de la última hora
     assert s.thresholds is not None and s.thresholds.low_battery_percent == 20
     # offline 25% > 20% crítico

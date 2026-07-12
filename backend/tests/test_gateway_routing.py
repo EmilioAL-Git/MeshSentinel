@@ -8,16 +8,19 @@ comportamiento anterior a M6.2 (fallback a `nodes.gateway_id`).
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from noc.adapters.persistence.repositories import SqlGatewayRepository
+from noc.adapters.persistence.organization_repositories import SqlGroupRepository
+from noc.adapters.persistence.repositories import SqlGatewayRepository, SqlNodeRepository
 from noc.application.admin.batches import BatchService
 from noc.application.admin.gateway_routing import (
+    resolve_gateway,
+    resolve_gateways_for_nodes,
     select_gateway_for_node,
     select_gateways_for_nodes,
 )
-from noc.application.gateway_stats import compute_multi_gateway_stats
+from noc.application.gateway_stats import compute_multi_gateway_stats, scope_to_members
 from noc.application.ingest import IngestService
 from noc.config import Settings
-from noc.domain.nodes.entities import GatewayInfo, Node, NodeGatewayLink
+from noc.domain.nodes.entities import GatewayInfo, Group, Node, NodeGatewayLink
 
 NODE_A = "!000000a1"
 NODE_B = "!000000b2"
@@ -223,6 +226,139 @@ async def test_bulk_selection_routes_each_node_by_its_own_gateway(session_factor
     assert selected == {NODE_A: "gw-01", NODE_B: "gw-02"}
 
 
+# ── Selección inteligente de gateway (jerarquía de 4 niveles) ────────────────
+
+
+async def test_resolve_forced_wins_even_if_gateway_down(session_factory):
+    """Nivel 1: forzado siempre gana, sin comprobar disponibilidad."""
+    ingest = IngestService(session_factory)
+    await seen(ingest, NODE_A, "gw-01", snr=5.0)
+    await heartbeat(session_factory, "gw-01")
+    async with session_factory() as session:
+        resolution = await resolve_gateway(
+            session, NODE_A, make_settings(), forced_gateway_id="gw-99-offline"
+        )
+    assert resolution.gateway_id == "gw-99-offline"
+    assert resolution.source == "forced"
+    assert resolution.note is None
+
+
+async def test_resolve_node_preference_used_when_eligible(session_factory):
+    """Nivel 2: preferencia del nodo, pasarela operativa -> se usa tal cual."""
+    ingest = IngestService(session_factory)
+    await seen(ingest, NODE_A, "gw-01", snr=5.0)
+    await heartbeat(session_factory, "gw-01")
+    await heartbeat(session_factory, "gw-02")
+    async with session_factory() as session, session.begin():
+        await SqlNodeRepository(session).set_preferred_gateway(NODE_A, "gw-02")
+    async with session_factory() as session:
+        resolution = await resolve_gateway(session, NODE_A, make_settings())
+    assert resolution.gateway_id == "gw-02"
+    assert resolution.source == "node_preferred"
+    assert resolution.note is None
+
+
+async def test_resolve_node_preference_falls_back_with_note_when_unavailable(session_factory):
+    """Preferencia blanda: si la pasarela preferida no está operativa, cae al
+    automático Y explica por qué — nunca falla mientras haya alternativa."""
+    ingest = IngestService(session_factory)
+    await seen(ingest, NODE_A, "gw-01", snr=5.0)
+    await heartbeat(session_factory, "gw-01")  # gw-02 nunca manda heartbeat: no elegible
+    async with session_factory() as session, session.begin():
+        await SqlNodeRepository(session).set_preferred_gateway(NODE_A, "gw-02")
+    async with session_factory() as session:
+        resolution = await resolve_gateway(session, NODE_A, make_settings())
+    assert resolution.gateway_id == "gw-01"
+    assert resolution.source == "auto"
+    assert resolution.note is not None
+    assert "gw-02" in resolution.note and "gw-01" in resolution.note
+
+
+async def test_resolve_group_preference_used_when_node_has_none(session_factory):
+    """Nivel 3: sin preferencia propia, hereda la del grupo."""
+    ingest = IngestService(session_factory)
+    await seen(ingest, NODE_A, "gw-01", snr=5.0)
+    await heartbeat(session_factory, "gw-01")
+    await heartbeat(session_factory, "gw-02")
+    async with session_factory() as session, session.begin():
+        groups = SqlGroupRepository(session)
+        g = await groups.create(Group(name="Routers"))
+        await groups.add_member(g.id, NODE_A)
+        await groups.set_preferred_gateway(g.id, "gw-02")
+    async with session_factory() as session:
+        resolution = await resolve_gateway(session, NODE_A, make_settings())
+    assert resolution.gateway_id == "gw-02"
+    assert resolution.source == "group_preferred"
+
+
+async def test_resolve_node_preference_beats_group_preference(session_factory):
+    """Nivel 2 > Nivel 3: la preferencia propia del nodo manda sobre la del grupo."""
+    ingest = IngestService(session_factory)
+    await seen(ingest, NODE_A, "gw-01", snr=5.0)
+    await heartbeat(session_factory, "gw-01")
+    await heartbeat(session_factory, "gw-02")
+    async with session_factory() as session, session.begin():
+        groups = SqlGroupRepository(session)
+        g = await groups.create(Group(name="Routers"))
+        await groups.add_member(g.id, NODE_A)
+        await groups.set_preferred_gateway(g.id, "gw-02")
+        await SqlNodeRepository(session).set_preferred_gateway(NODE_A, "gw-01")
+    async with session_factory() as session:
+        resolution = await resolve_gateway(session, NODE_A, make_settings())
+    assert resolution.gateway_id == "gw-01"
+    assert resolution.source == "node_preferred"
+
+
+async def test_resolve_no_preference_falls_through_to_automatic(session_factory):
+    """Nivel 4: sin ninguna preferencia, comportamiento automático de siempre."""
+    ingest = IngestService(session_factory)
+    await seen(ingest, NODE_A, "gw-01", snr=5.0)
+    await heartbeat(session_factory, "gw-01")
+    async with session_factory() as session:
+        resolution = await resolve_gateway(session, NODE_A, make_settings())
+    assert resolution.gateway_id == "gw-01"
+    assert resolution.source == "auto"
+    assert resolution.note is None
+
+
+async def test_resolve_use_preference_false_skips_preference_chain(session_factory):
+    """Selector de operación en modo "Automático": ignora deliberadamente
+    node/group preferido, va directo al Nivel 4."""
+    ingest = IngestService(session_factory)
+    await seen(ingest, NODE_A, "gw-01", snr=5.0)
+    await heartbeat(session_factory, "gw-01")
+    await heartbeat(session_factory, "gw-02")
+    async with session_factory() as session, session.begin():
+        await SqlNodeRepository(session).set_preferred_gateway(NODE_A, "gw-02")
+    async with session_factory() as session:
+        resolution = await resolve_gateway(session, NODE_A, make_settings(), use_preference=False)
+    assert resolution.gateway_id == "gw-01"
+    assert resolution.source == "auto"
+
+
+async def test_resolve_gateways_for_nodes_bulk_mixes_sources_in_one_call(session_factory):
+    """La versión en bloque resuelve nodos con distinto origen (forzado no
+    aplica aquí — es global a la llamada) en una sola pasada, coste constante."""
+    ingest = IngestService(session_factory)
+    node_c = "!000000c3"
+    await seen(ingest, NODE_A, "gw-01", snr=5.0)
+    await seen(ingest, NODE_B, "gw-01", snr=5.0)
+    await seen(ingest, node_c, "gw-01", snr=5.0)
+    await heartbeat(session_factory, "gw-01")
+    await heartbeat(session_factory, "gw-02")
+    async with session_factory() as session, session.begin():
+        await SqlNodeRepository(session).set_preferred_gateway(NODE_A, "gw-02")  # elegible
+        # NODE_B y node_c sin preferencia -> automático
+    async with session_factory() as session:
+        result = await resolve_gateways_for_nodes(
+            session, [NODE_A, NODE_B, node_c], make_settings()
+        )
+    assert result[NODE_A].gateway_id == "gw-02"
+    assert result[NODE_A].source == "node_preferred"
+    assert result[NODE_B].source == "auto"
+    assert result[node_c].source == "auto"
+
+
 # ── Reparto de lotes ─────────────────────────────────────────────────────────
 
 
@@ -310,3 +446,31 @@ def test_stats_ignore_ignored_nodes_and_deleted_gateways():
     assert [g.gateway_id for g in stats.gateways] == ["gw-01"]
     assert stats.gateways[0].nodes_visible == 1
     assert stats.gateways[0].primary_for == 1
+
+
+def test_scope_to_members_filters_stats_to_group():
+    """Flota orientada a grupos: /gateways/stats?group_id= reutiliza
+    compute_multi_gateway_stats tal cual, solo restringido a los miembros."""
+    now = datetime.now(timezone.utc)
+    links = [
+        _link("!00000001", "gw-01"),
+        _link("!00000002", "gw-01"),
+        _link("!00000002", "gw-02"),
+        _link("!00000003", "gw-02"),
+    ]
+    nodes = [
+        Node(node_id="!00000001", gateway_id="gw-01"),
+        Node(node_id="!00000002", gateway_id="gw-02"),
+        Node(node_id="!00000003", gateway_id="gw-02"),
+    ]
+    gateways = [_gateway("gw-01"), _gateway("gw-02")]
+    member_ids = {"!00000001", "!00000002"}  # !00000003 fuera del grupo
+
+    scoped_nodes, scoped_links = scope_to_members(nodes, links, member_ids)
+    stats = compute_multi_gateway_stats(scoped_links, gateways, scoped_nodes, 900, now)
+
+    assert stats.nodes_observed == 2  # !00000003 excluido
+    assert stats.nodes_shared == 1  # !00000002 sigue compartido
+    gw2 = next(g for g in stats.gateways if g.gateway_id == "gw-02")
+    assert gw2.nodes_visible == 1  # solo !00000002 del grupo, no !00000003
+    assert gw2.primary_for == 1  # !00000003 no cuenta pese a tener gw-02 como primaria

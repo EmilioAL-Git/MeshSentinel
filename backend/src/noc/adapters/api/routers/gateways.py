@@ -15,12 +15,13 @@ from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.api.schemas import GatewayOut
+from noc.adapters.persistence.organization_repositories import SqlGroupRepository
 from noc.adapters.persistence.repositories import (
     SqlGatewayRepository,
     SqlNodeGatewayLinkRepository,
     SqlNodeRepository,
 )
-from noc.application.gateway_stats import GatewayStats, compute_multi_gateway_stats
+from noc.application.gateway_stats import GatewayStats, compute_multi_gateway_stats, scope_to_members
 from noc.application.gateways.service import GatewayService
 from noc.config import get_settings
 
@@ -101,15 +102,24 @@ class MultiGatewayStatsOut(BaseModel):
 
 # Registrada ANTES de GET /gateways/{gateway_id}: "stats" no es un gateway_id.
 @router.get("/stats", response_model=MultiGatewayStatsOut)
-async def gateway_stats(session: SessionDep) -> MultiGatewayStatsOut:
+async def gateway_stats(session: SessionDep, group_id: int | None = Query(None)) -> MultiGatewayStatsOut:
     """Métricas Multi-Gateway (M6.2): nodos visibles/exclusivos/compartidos y
     última actividad por pasarela, más redundancia global. Los nodos ignorados
-    quedan fuera, igual que en el resto de agregados del NOC (M1.2)."""
+    quedan fuera, igual que en el resto de agregados del NOC (M1.2).
+
+    `group_id` (Flota orientada a grupos): mismo cálculo, `compute_multi_gateway_stats`
+    sin tocar, solo pre-filtrando `nodes`/`links` a los miembros del grupo — las
+    pasarelas se listan completas para que el desglose siga siendo legible."""
     settings = get_settings()
+    nodes = await SqlNodeRepository(session).list_all()
+    links = await SqlNodeGatewayLinkRepository(session).list_all()
+    if group_id is not None:
+        member_ids = set(await SqlGroupRepository(session).members(group_id))
+        nodes, links = scope_to_members(nodes, links, member_ids)
     stats = compute_multi_gateway_stats(
-        links=await SqlNodeGatewayLinkRepository(session).list_all(),
+        links=links,
         gateways=await SqlGatewayRepository(session).list_all(),
-        nodes=await SqlNodeRepository(session).list_all(),
+        nodes=nodes,
         offline_threshold_seconds=settings.node_offline_after_seconds,
         now=datetime.now(timezone.utc),
     )

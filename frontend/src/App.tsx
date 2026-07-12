@@ -17,6 +17,7 @@ import {
   openEventsSocket,
   setNodeFavorite,
   setNodeIgnored,
+  type DashboardSummaryOut,
   type EventsSocketStatus,
   type NodeFilterParams,
 } from "./api/client";
@@ -32,10 +33,13 @@ import { OpsCenter } from "./components/opscenter/OpsCenter";
 import { ProfilesView } from "./components/ProfilesView";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { FocusChip, type FocusState } from "./components/shell/FocusChip";
+import { GroupSelector } from "./components/shell/GroupSelector";
 import { Hud } from "./components/shell/Hud";
 import { NavRail } from "./components/shell/NavRail";
 import { StatusBar } from "./components/shell/StatusBar";
 import { toast, ToastHost } from "./components/shell/Toast";
+import { scopeAlertsToGroup, scopeOperationsToGroup, useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
+import { computeFleetGroupMetrics, computeGroupAttention, computeGroupStatus, scopeGatewaysToGroup } from "./components/fleet/groupStats";
 import { consumeFinished } from "./opTracker";
 import { t } from "./tokens";
 
@@ -43,11 +47,15 @@ const DATA_EVENTS = new Set([
   "node.seen",
   "position.updated",
   "telemetry.received",
+  "message.received",
   "gateway.status",
   "alert.fired",
   "alert.resolved",
   "admin.operation",
   "admin.batch",
+  // Diario operativo (Actividad 2.0 Fase 1): la ÚNICA fuente del feed;
+  // el resto de eventos siguen usándose para invalidación y opTracker
+  "activity.event",
 ]);
 
 type View =
@@ -86,14 +94,26 @@ function resolveView(v: string): View {
 
 export default function App() {
   const queryClient = useQueryClient();
+  const { activeGroupId, activeGroup } = useActiveGroup();
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, refetchInterval: 15_000 });
-  // Query base (sin ignorados): la usan Mapa, Centro y el feed
+  // Query base (sin ignorados): la usan Mapa, Centro y el feed — nunca escopada
+  // al grupo activo (necesitan ver toda la red para el contexto espacial/global)
   const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes(), refetchInterval: 30_000 });
   const [filters, setFilters] = useState<NodeFilterParams>({});
-  // Query filtrada para la Flota (búsqueda avanzada M1.2)
+  // Query filtrada para la Flota (búsqueda avanzada M1.2 + grupo activo,
+  // "Flota orientada a grupos": filtrado server-side, group_id ya existente
+  // en apply_filters, M1.2 — el grupo activo manda sobre el filtro manual)
   const filteredNodes = useQuery({
-    queryKey: ["nodes", filters],
-    queryFn: () => fetchNodes(filters),
+    queryKey: ["nodes", filters, activeGroupId],
+    queryFn: () => fetchNodes(activeGroupId != null ? { ...filters, group_id: activeGroupId } : filters),
+    refetchInterval: 30_000,
+  });
+  // Estadísticas Multi-Gateway escopadas al grupo activo (§ GroupBar) —
+  // reutiliza compute_multi_gateway_stats sin tocarlo (backend, scope_to_members)
+  const groupGatewayStats = useQuery({
+    queryKey: ["gateway-stats", "group", activeGroupId],
+    queryFn: () => fetchGatewayStats(activeGroupId!),
+    enabled: activeGroupId != null,
     refetchInterval: 30_000,
   });
   const tags = useQuery({ queryKey: ["tags"], queryFn: fetchTags });
@@ -130,7 +150,7 @@ export default function App() {
   const [view, setView] = useState<View>("ops");
   const gatewayStats = useQuery({
     queryKey: ["gateway-stats"],
-    queryFn: fetchGatewayStats,
+    queryFn: () => fetchGatewayStats(),
     refetchInterval: 30_000,
   });
   const [wsStatus, setWsStatus] = useState<EventsSocketStatus>({
@@ -148,44 +168,34 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   // Selección múltiple para batches (M2)
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  // Cambiar de grupo activo limpia la selección: nodos armados en un grupo
+  // dejan de ser visibles en otro, pero seguirían viajando al lote si no se
+  // limpian — la misma clase de confusión de identidad que ya se corrigió
+  // en BatchWizard esta sesión.
+  useEffect(() => {
+    setCheckedIds(new Set());
+  }, [activeGroupId]);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [openBatchId, setOpenBatchId] = useState<number | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const invalidateTimer = useRef<number | null>(null);
-
-  // Resolución de nombres para el feed sin recrear la conexión WS
-  const nodeNamesRef = useRef<Map<string, string>>(new Map());
-  useEffect(() => {
-    const map = new Map<string, string>();
-    for (const s of nodes.data ?? []) {
-      map.set(s.node.node_id, s.node.short_name ?? s.node.node_id);
-    }
-    nodeNamesRef.current = map;
-  }, [nodes.data]);
 
   useEffect(() => {
     // Tormentas de eventos controladas en dos niveles:
     // 1) las queries se invalidan agrupadas en ventanas de 2s;
     // 2) el feed de actividad se acumula en un ref y se vuelca al estado
     //    como máximo 1 vez por segundo (cero peticiones HTTP).
+    // El feed es el diario operativo (Actividad 2.0 Fase 1): solo entra
+    // `activity.event`, ya redactado por el backend con nombres resueltos y
+    // solo transiciones (los heartbeats nunca llegan como hechos).
     const pending: ActivityEntry[] = [];
-    const nodeName = (id: string) => nodeNamesRef.current.get(id) ?? id;
-    // gateway.status llega como heartbeat cada 30 s: solo interesa el CAMBIO
-    // de estado (conexión/desconexión/reconexión), no cada latido
-    const lastGatewayStatus = new Map<string, string>();
 
     const ws = openEventsSocket((event) => {
       if (!DATA_EVENTS.has(event.event_type)) return;
       // Cierre del ciclo: toast cuando termina una operación lanzada aquí
       const finished = consumeFinished(event);
       if (finished) toast(finished.text, { kind: finished.kind });
-      let skipEntry = false;
-      if (event.event_type === "gateway.status") {
-        const status = String(event.payload.status ?? "");
-        skipEntry = lastGatewayStatus.get(event.gateway_id) === status;
-        lastGatewayStatus.set(event.gateway_id, status);
-      }
-      const entry = skipEntry ? null : toEntry(event, nodeName);
+      const entry = toEntry(event);
       if (entry) pending.unshift(entry);
 
       if (invalidateTimer.current == null) {
@@ -205,12 +215,7 @@ export default function App() {
 
     const flush = window.setInterval(() => {
       if (pending.length === 0) return;
-      setActivity((prev) => {
-        const merged = [...pending.splice(0), ...prev];
-        // Dedupe de heartbeats consecutivos idénticos (p. ej. gateway.status cada 30s)
-        const deduped = merged.filter((e, i) => i === 0 || e.text !== merged[i - 1].text);
-        return deduped.slice(0, ACTIVITY_LIMIT);
-      });
+      setActivity((prev) => [...pending.splice(0), ...prev].slice(0, ACTIVITY_LIMIT));
     }, 1000);
 
     return () => {
@@ -247,6 +252,54 @@ export default function App() {
     () => [...new Set(summaries.map((s) => s.node.hw_model).filter((h): h is string => h != null))].sort(),
     [summaries],
   );
+
+  // Grupo como contexto global (fase de cierre): HUD, StatusBar y las
+  // insignias del riel son las tres superficies "siempre visibles" — deben
+  // hablar del grupo activo igual que Flota/Trabajos/Alertas/Registro/Mapa,
+  // o el contexto se rompe justo donde el operador mira primero. Un único
+  // cálculo aquí, reutilizando groupStats.ts (GroupBar/StatusPanel) sin
+  // duplicar nada: cero lógica nueva, solo un tercer consumidor.
+  const groupNodeIds = useGroupNodeIds(summaries);
+  const groupSummaries = useMemo(
+    () => (groupNodeIds == null ? [] : summaries.filter((s) => groupNodeIds.has(s.node.node_id))),
+    [summaries, groupNodeIds],
+  );
+  const shellAlerts = useMemo(
+    () => scopeAlertsToGroup(alerts.data ?? [], groupNodeIds).inScope,
+    [alerts.data, groupNodeIds],
+  );
+  const shellOperations = useMemo(
+    () => scopeOperationsToGroup(operations.data ?? [], groupNodeIds),
+    [operations.data, groupNodeIds],
+  );
+  const shellGateways = useMemo(
+    () => scopeGatewaysToGroup(gateways.data ?? [], groupNodeIds, groupGatewayStats.data),
+    [gateways.data, groupNodeIds, groupGatewayStats.data],
+  );
+  const shellGroupMetrics = useMemo(
+    () => (groupNodeIds == null ? null : computeFleetGroupMetrics(groupSummaries, alerts.data ?? [])),
+    [groupNodeIds, groupSummaries, alerts.data],
+  );
+  const shellGroupAttention = useMemo(
+    () => (groupNodeIds == null || dashboard.data == null ? null : computeGroupAttention(groupSummaries, dashboard.data.thresholds)),
+    [groupNodeIds, groupSummaries, dashboard.data],
+  );
+  const shellSummary: DashboardSummaryOut | undefined = useMemo(() => {
+    if (groupNodeIds == null || dashboard.data == null || shellGroupMetrics == null) return dashboard.data;
+    const lowBatteryCount = (shellGroupAttention ?? []).filter((n) => n.reasons.includes("low_battery")).length;
+    return {
+      ...dashboard.data,
+      status: computeGroupStatus(shellGroupMetrics.criticalAlerts, shellGroupAttention?.length ?? 0),
+      nodes_total: shellGroupMetrics.total,
+      nodes_online: shellGroupMetrics.online,
+      nodes_offline: shellGroupMetrics.total - shellGroupMetrics.online,
+      offline_percent:
+        shellGroupMetrics.total > 0
+          ? (100 * (shellGroupMetrics.total - shellGroupMetrics.online)) / shellGroupMetrics.total
+          : 0,
+      low_battery_count: lowBatteryCount,
+    };
+  }, [groupNodeIds, dashboard.data, shellGroupMetrics, shellGroupAttention]);
 
   const invalidateNodeData = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["nodes"] });
@@ -327,12 +380,10 @@ export default function App() {
     filteredSummaries.find((s) => s.node.node_id === selected) ??
     summaries.find((s) => s.node.node_id === selected);
 
-  // Insignias vivas del riel
-  const activeAlertCount = (alerts.data ?? []).filter((a) => a.status !== "resolved").length;
-  const hasCritAlert = (alerts.data ?? []).some(
-    (a) => a.status !== "resolved" && a.severity === "CRITICAL",
-  );
-  const activeOpsCount = (operations.data ?? []).filter(
+  // Insignias vivas del riel — mismo alcance que HUD/StatusBar (grupo activo)
+  const activeAlertCount = shellAlerts.filter((a) => a.status !== "resolved").length;
+  const hasCritAlert = shellAlerts.some((a) => a.status !== "resolved" && a.severity === "CRITICAL");
+  const activeOpsCount = shellOperations.filter(
     (o) => o.status === "pending" || o.status === "queued" || o.status === "running",
   ).length;
   const railItems = VIEWS.map((v) => ({
@@ -368,21 +419,18 @@ export default function App() {
           flexShrink: 0,
         }}
       >
-        <h1
+        <img
+          src="/brand/logo.png"
+          alt="MeshSentinel"
           onClick={() => setView("ops")}
           title="Centro de Operaciones"
           style={{
-            margin: 0,
-            fontSize: "0.92rem",
-            fontWeight: 650,
-            letterSpacing: "0.14em",
-            whiteSpace: "nowrap",
+            height: "3rem",
+            width: "auto",
             cursor: "pointer",
-            textTransform: "uppercase",
+            flexShrink: 0,
           }}
-        >
-          ⌬ MeshSentinel
-        </h1>
+        />
         <span
           className="mono"
           style={{ color: t.textFaint, fontSize: 11, letterSpacing: "0.1em", whiteSpace: "nowrap" }}
@@ -404,6 +452,7 @@ export default function App() {
           <span>⌕ Buscar…</span>
           <span className="mono" style={{ marginLeft: "auto", fontSize: "0.72rem", color: t.textFaint }}>⌘K</span>
         </button>
+        <GroupSelector />
         <span style={{ marginLeft: "auto" }} />
         {focus && (
           <FocusChip
@@ -416,10 +465,10 @@ export default function App() {
           />
         )}
         <Hud
-          summary={dashboard.data}
-          gateways={gateways.data ?? []}
-          alerts={alerts.data ?? []}
-          operations={operations.data ?? []}
+          summary={shellSummary}
+          gateways={shellGateways}
+          alerts={shellAlerts}
+          operations={shellOperations}
           onGoTo={(v) => setView(resolveView(v))}
         />
       </header>
@@ -497,6 +546,10 @@ export default function App() {
               tags={tags.data ?? []}
               groups={groups.data ?? []}
               gateways={gateways.data ?? []}
+              gatewayNodeIds={gatewayNodeIds}
+              activeGroup={activeGroup}
+              groupGatewayStats={groupGatewayStats.data}
+              alerts={alerts.data ?? []}
               hwModels={hwModels}
               selected={selected}
               focusId={focus?.id ?? null}
@@ -595,13 +648,19 @@ export default function App() {
         </div>
       )}
 
-      {/* Inspector global (§8.1): un solo cajón para toda la aplicación */}
+      {/* Inspector global (v0.9: ventana flotante): una sola ventana para
+          toda la aplicación. `alerts`/`activity` sin escopar por grupo — el
+          Inspector nunca oculta datos de un nodo por estar fuera del grupo
+          activo, solo avisa (outsideActiveGroup, más arriba en el propio
+          componente). */}
       {selected && (
         <Inspector
           nodeId={selected}
           summary={selectedSummary}
           summaries={summaries}
           operations={operations.data ?? []}
+          alerts={alerts.data ?? []}
+          activity={activity}
           onClose={() => setSelected(null)}
           onCenter={centerOnMap}
           onGoTo={(v) => setView(resolveView(v))}
@@ -614,10 +673,10 @@ export default function App() {
       <StatusBar
         wsStatus={wsStatus}
         backendOk={!health.isError && health.data?.status === "ok"}
-        summary={dashboard.data}
-        gateways={gateways.data ?? []}
-        alerts={alerts.data ?? []}
-        operations={operations.data ?? []}
+        summary={shellSummary}
+        gateways={shellGateways}
+        alerts={shellAlerts}
+        operations={shellOperations}
         runningBatch={runningBatch.data}
         onGoTo={(v) => setView(resolveView(v))}
       />

@@ -60,6 +60,24 @@ async def test_favorite_and_ignored_flags(session_factory):
     assert node.is_favorite and not node.is_ignored
 
 
+async def test_node_type_override(session_factory):
+    """Clasificación manual (Inspector, Organización): null = 'Automático'."""
+    await seed(session_factory)
+    async with session_factory() as session, session.begin():
+        repo = SqlNodeRepository(session)
+        node = await repo.set_node_type_override(NODES[0], "fixed")
+        assert node.node_type_override == "fixed"
+        assert await repo.set_node_type_override("!ffffffff", "fixed") is None
+
+    async with session_factory() as session:
+        node = await SqlNodeRepository(session).get(NODES[0])
+    assert node.node_type_override == "fixed"
+
+    async with session_factory() as session, session.begin():
+        node = await SqlNodeRepository(session).set_node_type_override(NODES[0], None)
+        assert node.node_type_override is None
+
+
 async def test_sighting_upsert_preserves_noc_metadata(session_factory):
     """Crítico: un node.seen posterior no debe pisar favoritos/ignorados."""
     await seed(session_factory)
@@ -120,6 +138,31 @@ async def test_groups_membership_and_counts(session_factory):
     by_id = {s.node.node_id: s for s in result}
     assert by_id[NODES[1]].group_ids == [listed[0].id]
     assert by_id[NODES[0]].group_ids == []
+
+
+async def test_groups_bulk_membership(session_factory):
+    """Gestión masiva desde Flota: añadir/quitar cientos de nodos de una vez,
+    idempotente, sin errores por miembros repetidos o inexistentes."""
+    await seed(session_factory)
+    async with session_factory() as session, session.begin():
+        groups = SqlGroupRepository(session)
+        g = await groups.create(Group(name="Routers"))
+        await groups.add_member(g.id, NODES[0])  # ya miembro antes del bulk
+
+        added, already = await groups.add_members_bulk(g.id, [NODES[0], NODES[1], NODES[2], NODES[1]])
+        assert (added, already) == (2, 1)  # duplicados en la petición se deduplican antes de contar
+
+    async with session_factory() as session:
+        assert set(await SqlGroupRepository(session).members(g.id)) == set(NODES)
+
+    async with session_factory() as session, session.begin():
+        removed, not_member = await SqlGroupRepository(session).remove_members_bulk(
+            g.id, [NODES[0], NODES[1], "!ffffffff"]
+        )
+        assert (removed, not_member) == (2, 1)
+
+    async with session_factory() as session:
+        assert await SqlGroupRepository(session).members(g.id) == [NODES[2]]
 
 
 # ── Búsqueda avanzada (función pura reutilizable) ────────────────────────────

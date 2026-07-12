@@ -137,8 +137,36 @@ class SqlNodeRepository:
         rows = await self._session.scalars(select(NodeModel))
         return [_node_entity(r) for r in rows]
 
+    async def list_for_ids(self, node_ids: list[str]) -> list[Node]:
+        if not node_ids:
+            return []
+        rows = await self._session.scalars(select(NodeModel).where(NodeModel.id.in_(node_ids)))
+        return [_node_entity(r) for r in rows]
+
+    async def set_preferred_gateway(self, node_id: str, gateway_id: str | None) -> Node | None:
+        """Nivel 2 de la selección inteligente de gateway (Inspector)."""
+        model = await self._session.get(NodeModel, node_id)
+        if model is None:
+            return None
+        model.preferred_gateway_id = gateway_id
+        await self._session.flush()
+        return _node_entity(model)
+
+    async def set_node_type_override(self, node_id: str, node_type: str | None) -> Node | None:
+        """Clasificación manual (Inspector, Organización): None = "Automático"."""
+        model = await self._session.get(NodeModel, node_id)
+        if model is None:
+            return None
+        model.node_type_override = node_type
+        await self._session.flush()
+        return _node_entity(model)
+
     async def list_summaries(self) -> list[NodeSummary]:
-        nodes = (await self._session.scalars(select(NodeModel).order_by(NodeModel.last_seen_at.desc()))).all()
+        nodes = (
+            await self._session.scalars(
+                select(NodeModel).order_by(NodeModel.last_seen_at.desc(), NodeModel.id)
+            )
+        ).all()
 
         latest_pos = {p.node_id: p for p in await self._latest_per_node(PositionModel)}
         latest_tel = {
@@ -223,6 +251,16 @@ class SqlTelemetryRepository:
             stmt = stmt.where(TelemetryModel.kind == kind)
         rows = await self._session.scalars(stmt.order_by(TelemetryModel.received_at.desc()).limit(limit))
         return [_to_entity(r, Telemetry) for r in rows]
+
+    async def latest_by_kind(self, node_id: str) -> dict[str, Telemetry]:
+        """Último registro conocido de cada kind (telemetría unificada,
+        Actividad 2.0 Fase 1): el estado actual del nodo, no un paquete."""
+        out: dict[str, Telemetry] = {}
+        for kind in ("device", "environment", "power"):
+            rows = await self.list_for_node(node_id, 1, kind)
+            if rows:
+                out[kind] = rows[0]
+        return out
 
     async def count_since(self, since: datetime) -> int:
         result = await self._session.scalar(

@@ -6,7 +6,9 @@ from noc.adapters.api.schemas import (
     NodeGatewayLinkOut,
     NodeOut,
     NodeSummaryOut,
+    NodeTypeIn,
     PositionOut,
+    PreferredGatewayIn,
     TelemetryOut,
 )
 from noc.adapters.persistence.organization_repositories import SqlTagRepository
@@ -84,6 +86,30 @@ async def set_favorite(node_id: str, body: FlagIn, session: SessionDep) -> NodeO
 @router.put("/{node_id}/ignored", response_model=NodeOut)
 async def set_ignored(node_id: str, body: FlagIn, session: SessionDep) -> NodeOut:
     node = await SqlNodeRepository(session).set_flag(node_id, "is_ignored", body.value)
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    await session.commit()
+    return NodeOut.from_entity(node, get_settings().node_offline_after_seconds)
+
+
+@router.put("/{node_id}/preferred-gateway", response_model=NodeOut)
+async def set_node_preferred_gateway(
+    node_id: str, body: PreferredGatewayIn, session: SessionDep
+) -> NodeOut:
+    """Nivel 2 de la selección inteligente de gateway (Inspector, sección Organización)."""
+    node = await SqlNodeRepository(session).set_preferred_gateway(node_id, body.gateway_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    await session.commit()
+    return NodeOut.from_entity(node, get_settings().node_offline_after_seconds)
+
+
+@router.put("/{node_id}/node-type", response_model=NodeOut)
+async def set_node_type(node_id: str, body: NodeTypeIn, session: SessionDep) -> NodeOut:
+    """Clasificación manual (Inspector, Organización): null = "Automático",
+    con prioridad absoluta sobre la clasificación derivada del role de
+    firmware en cualquier otro caso (Flota, bloques, estadísticas de grupo)."""
+    node = await SqlNodeRepository(session).set_node_type_override(node_id, body.node_type)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
     await session.commit()

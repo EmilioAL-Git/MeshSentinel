@@ -76,6 +76,14 @@ class DashboardSummary:
     avg_battery_percent: float | None
     avg_seconds_since_last_seen: float | None
     events_last_hour: int
+    # Situation Center (v0.9): mismos agregados de un solo paso, para que el
+    # caso "red completa" tenga la misma paridad de métricas que el caso
+    # "grupo activo" (frontend/groupStats.ts las calcula en cliente).
+    avg_snr: float | None = None
+    avg_rssi: float | None = None
+    avg_channel_utilization: float | None = None
+    avg_temperature_c: float | None = None
+    avg_pressure_hpa: float | None = None
     critical_nodes: list[CriticalNode] = field(default_factory=list)
     gateways: list[GatewayInfo] = field(default_factory=list)
     thresholds: Thresholds | None = None
@@ -163,6 +171,21 @@ class DashboardService:
             for x in summaries
             if x.node.last_seen_at is not None
         ]
+        snr_values = [x.node.snr for x in summaries if x.node.snr is not None]
+        rssi_values = [x.node.rssi for x in summaries if x.node.rssi is not None]
+        channel_util_values = [
+            t.channel_utilization
+            for x in summaries
+            if (t := x.last_device_telemetry) and t.channel_utilization is not None
+        ]
+        temperature_values = [
+            t.temperature_c for x in summaries if (t := x.last_device_telemetry) and t.temperature_c is not None
+        ]
+        pressure_values = [
+            t.barometric_pressure_hpa
+            for x in summaries
+            if (t := x.last_device_telemetry) and t.barometric_pressure_hpa is not None
+        ]
 
         gateways_healthy = sum(
             1 for g in gateways if g.status == "connected" and not is_stale(g.updated_at, s.gateway_stale_after_seconds, now)
@@ -192,6 +215,15 @@ class DashboardService:
             avg_battery_percent=round(sum(batteries) / len(batteries), 1) if batteries else None,
             avg_seconds_since_last_seen=round(sum(seen_ages) / len(seen_ages), 1) if seen_ages else None,
             events_last_hour=events_last_hour,
+            avg_snr=round(sum(snr_values) / len(snr_values), 1) if snr_values else None,
+            avg_rssi=round(sum(rssi_values) / len(rssi_values), 1) if rssi_values else None,
+            avg_channel_utilization=(
+                round(sum(channel_util_values) / len(channel_util_values), 1) if channel_util_values else None
+            ),
+            avg_temperature_c=(
+                round(sum(temperature_values) / len(temperature_values), 1) if temperature_values else None
+            ),
+            avg_pressure_hpa=round(sum(pressure_values) / len(pressure_values), 1) if pressure_values else None,
             critical_nodes=self._critical_nodes(summaries, now),
             gateways=gateways,
             thresholds=Thresholds(

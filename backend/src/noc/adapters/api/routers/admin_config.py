@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.schemas import GatewaySelectionIn
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
@@ -32,7 +33,7 @@ from noc.application.admin.config_schema import (
     validate_field_value,
 )
 from noc.application.admin.config_state import load_section_states
-from noc.application.admin.gateway_routing import select_gateway_for_node
+from noc.application.admin.gateway_routing import resolve_gateway
 from noc.application.admin.registry import validate_operation
 from noc.config import get_settings
 from noc.domain.admin.entities import AdminOperation
@@ -65,14 +66,19 @@ class RefreshIn(BaseModel):
     sections: list[str] | None = Field(
         default=None, description="Lista de secciones a refrescar (None = todas)"
     )
+    gateway_selection: GatewaySelectionIn = Field(default_factory=GatewaySelectionIn)
 
 
 class ApplyIn(BaseModel):
     sections: dict[str, dict[str, Any]]
+    gateway_selection: GatewaySelectionIn = Field(default_factory=GatewaySelectionIn)
 
 
 class ApplyOut(BaseModel):
     operation_ids: list[int]
+    # Selección inteligente de gateway: primera nota de fallback entre las
+    # operaciones encoladas, si alguna la tuvo (ver AdminOperation.gateway_note).
+    gateway_note: str | None = None
 
 
 # ── /schema (independiente del nodo) ─────────────────────────────────────────
@@ -119,7 +125,7 @@ async def _emit_created(ops: list[AdminOperation]) -> None:
 
 
 async def _create_operation(
-    session, node, gateway_id: str, op_type: str, params: dict[str, Any]
+    session, node, gateway_id: str, op_type: str, params: dict[str, Any], gateway_note: str | None = None
 ) -> AdminOperation:
     """Auxiliar compartido: crea una AdminOperation validada y persistida."""
     settings = get_settings()
@@ -133,6 +139,7 @@ async def _create_operation(
             timeout_seconds=settings.admin_default_timeout_seconds,
             max_attempts=settings.admin_max_attempts,
             created_by="admin",
+            gateway_note=gateway_note,
         )
     )
     return op
@@ -145,10 +152,14 @@ async def refresh_node_config(
     node = await SqlNodeRepository(session).get(node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
-    gateway_id = await select_gateway_for_node(
-        session, node_id, get_settings(), fallback_gateway_id=node.gateway_id
+    resolution = await resolve_gateway(
+        session,
+        node_id,
+        get_settings(),
+        forced_gateway_id=body.gateway_selection.gateway_id if body.gateway_selection.mode == "forced" else None,
+        use_preference=body.gateway_selection.mode != "auto",
     )
-    if not gateway_id:
+    if not resolution.gateway_id:
         raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
 
     requested = body.sections or list(ALL_SECTIONS.keys())
@@ -163,10 +174,13 @@ async def refresh_node_config(
             op_type, params = "config.get", {"section": name}
         else:
             op_type, params = "module_config.get", {"section": name}
-        ops.append(await _create_operation(session, node, gateway_id, op_type, params))
+        ops.append(await _create_operation(session, node, resolution.gateway_id, op_type, params, resolution.note))
     await session.commit()
     await _emit_created(ops)
-    return ApplyOut(operation_ids=[op.id or 0 for op in ops])
+    return ApplyOut(
+        operation_ids=[op.id or 0 for op in ops],
+        gateway_note=next((op.gateway_note for op in ops if op.gateway_note), None),
+    )
 
 
 # ── /nodes/{id}/config/apply ─────────────────────────────────────────────────
@@ -184,10 +198,14 @@ async def apply_node_config(
     node = await SqlNodeRepository(session).get(node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
-    gateway_id = await select_gateway_for_node(
-        session, node_id, get_settings(), fallback_gateway_id=node.gateway_id
+    resolution = await resolve_gateway(
+        session,
+        node_id,
+        get_settings(),
+        forced_gateway_id=body.gateway_selection.gateway_id if body.gateway_selection.mode == "forced" else None,
+        use_preference=body.gateway_selection.mode != "auto",
     )
-    if not gateway_id:
+    if not resolution.gateway_id:
         raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
     if not body.sections:
         raise HTTPException(status_code=422, detail="No sections provided")
@@ -227,7 +245,10 @@ async def apply_node_config(
 
     ops = []
     for _name, op_type, params in resolved:
-        ops.append(await _create_operation(session, node, gateway_id, op_type, params))
+        ops.append(await _create_operation(session, node, resolution.gateway_id, op_type, params, resolution.note))
     await session.commit()
     await _emit_created(ops)
-    return ApplyOut(operation_ids=[op.id or 0 for op in ops])
+    return ApplyOut(
+        operation_ids=[op.id or 0 for op in ops],
+        gateway_note=next((op.gateway_note for op in ops if op.gateway_note), None),
+    )

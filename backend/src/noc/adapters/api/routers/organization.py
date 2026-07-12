@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import SessionDep
-from noc.adapters.api.schemas import TagOut
+from noc.adapters.api.schemas import PreferredGatewayIn, TagOut
 from noc.adapters.persistence.organization_repositories import SqlGroupRepository, SqlTagRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.domain.nodes.entities import Group, Tag
@@ -26,10 +26,14 @@ class GroupOut(BaseModel):
     kind: str
     is_critical: bool
     member_count: int
+    preferred_gateway_id: str | None = None
 
     @classmethod
     def from_entity(cls, g: Group) -> "GroupOut":
-        return cls(id=g.id or 0, name=g.name, kind=g.kind, is_critical=g.is_critical, member_count=g.member_count)
+        return cls(
+            id=g.id or 0, name=g.name, kind=g.kind, is_critical=g.is_critical,
+            member_count=g.member_count, preferred_gateway_id=g.preferred_gateway_id,
+        )
 
 
 class GroupDetailOut(GroupOut):
@@ -38,6 +42,20 @@ class GroupDetailOut(GroupOut):
 
 class MemberIn(BaseModel):
     node_id: str = Field(pattern=r"^![0-9a-f]{8}$")
+
+
+class BulkMembersIn(BaseModel):
+    node_ids: list[str] = Field(min_length=1)
+
+
+class BulkMembersOut(BaseModel):
+    added: int
+    already_member: int
+
+
+class BulkRemoveOut(BaseModel):
+    removed: int
+    not_member: int
 
 
 # ── Etiquetas ────────────────────────────────────────────────────────────────
@@ -91,12 +109,49 @@ async def get_group(group_id: int, session: SessionDep) -> GroupDetailOut:
     return GroupDetailOut(**GroupOut.from_entity(group).model_dump(), members=members)
 
 
+@router.put("/groups/{group_id}/preferred-gateway", response_model=GroupOut)
+async def set_group_preferred_gateway(
+    group_id: int, body: PreferredGatewayIn, session: SessionDep
+) -> GroupOut:
+    """Nivel 3 de la selección inteligente de gateway (editor de grupo)."""
+    group = await SqlGroupRepository(session).set_preferred_gateway(group_id, body.gateway_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    await session.commit()
+    return GroupOut.from_entity(group)
+
+
 @router.delete("/groups/{group_id}", status_code=204)
 async def delete_group(group_id: int, session: SessionDep) -> None:
     deleted = await SqlGroupRepository(session).delete(group_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Group not found")
     await session.commit()
+
+
+# Gestión masiva desde Flota: registradas ANTES de /members/{node_id} —
+# igual que /gateways/stats antes de /gateways/{gateway_id}. Starlette hace
+# *partial match* de ruta antes que de método: sin este orden, un POST a
+# .../members/bulk encaja primero con el DELETE .../members/{node_id}
+# (node_id="bulk") y responde 405 en vez de llegar a esta ruta.
+@router.post("/groups/{group_id}/members/bulk", response_model=BulkMembersOut)
+async def add_group_members_bulk(group_id: int, body: BulkMembersIn, session: SessionDep) -> BulkMembersOut:
+    repo = SqlGroupRepository(session)
+    if await repo.get(group_id) is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    added, already = await repo.add_members_bulk(group_id, body.node_ids)
+    await session.commit()
+    return BulkMembersOut(added=added, already_member=already)
+
+
+@router.post("/groups/{group_id}/members/bulk-remove", response_model=BulkRemoveOut)
+async def remove_group_members_bulk(group_id: int, body: BulkMembersIn, session: SessionDep) -> BulkRemoveOut:
+    repo = SqlGroupRepository(session)
+    if await repo.get(group_id) is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    removed, not_member = await repo.remove_members_bulk(group_id, body.node_ids)
+    await session.commit()
+    return BulkRemoveOut(removed=removed, not_member=not_member)
 
 
 @router.post("/groups/{group_id}/members", status_code=204)

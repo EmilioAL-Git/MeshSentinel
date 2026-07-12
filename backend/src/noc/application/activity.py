@@ -14,12 +14,17 @@ consola (pasarelas, alertas, malla) se alimenta de los eventos ya existentes.
 import logging
 from typing import Any, Awaitable, Callable
 
+from noc.application.activity_events import ActivityEvent, render_batch, render_operation
 from noc.application.envelopes import SYSTEM_SOURCE, make_event_envelope
 from noc.domain.admin.entities import AdminBatch, AdminOperation
 
 logger = logging.getLogger("noc.activity")
 
 Publisher = Callable[[dict[str, Any]], Awaitable[None]]
+# Resolución de etiqueta de nodo (short_name o node_id) para las narrativas
+# admin; se inyecta en el arranque igual que el publisher. Sin ella, la
+# narrativa usa el node_id crudo como etiqueta.
+NodeLabeler = Callable[[str], Awaitable[str]]
 
 
 class ActivityPublisher:
@@ -28,9 +33,28 @@ class ActivityPublisher:
 
     def __init__(self) -> None:
         self._publish: Publisher | None = None
+        self._labeler: NodeLabeler | None = None
 
     def attach(self, publish: Publisher | None) -> None:
         self._publish = publish
+
+    def attach_labeler(self, labeler: NodeLabeler | None) -> None:
+        self._labeler = labeler
+
+    async def _label(self, node_id: str) -> str:
+        if self._labeler is None:
+            return node_id
+        try:
+            return await self._labeler(node_id)
+        except Exception:
+            logger.exception("node labeler failed (%s)", node_id)
+            return node_id
+
+    async def emit_activity(self, event: ActivityEvent) -> None:
+        """Publica un hecho del diario operativo (Actividad 2.0 Fase 1)."""
+        await self.emit(
+            "activity.event", event.to_payload(), gateway_id=event.gateway_id or SYSTEM_SOURCE
+        )
 
     async def emit(
         self, event_type: str, payload: dict[str, Any], gateway_id: str = SYSTEM_SOURCE
@@ -59,6 +83,25 @@ class ActivityPublisher:
         payload.update(extra)
         await self.emit("admin.operation", payload, gateway_id=op.gateway_id)
 
+        # Diario operativo (Actividad 2.0 Fase 1): el mismo hecho, narrado en
+        # vocabulario de operador — coexiste con el evento técnico de arriba
+        # (que siguen usando Trabajos/opTracker), nunca lo sustituye.
+        narrative = render_operation(
+            op.operation_type,
+            state,
+            op.target_node_id,
+            await self._label(op.target_node_id),
+            op.gateway_id,
+            op.batch_id,
+            final_status=extra.get("final_status"),
+            verify=extra.get("verify"),
+            error=extra.get("error"),
+            attempts=op.attempts,
+            max_attempts=op.max_attempts,
+        )
+        if narrative is not None:
+            await self.emit_activity(narrative)
+
     async def batch(self, batch: AdminBatch, state: str, **extra: Any) -> None:
         payload: dict[str, Any] = {
             "batch_id": batch.id,
@@ -69,6 +112,10 @@ class ActivityPublisher:
         }
         payload.update(extra)
         await self.emit("admin.batch", payload)
+
+        narrative = render_batch(batch.id, batch.name, state, len(batch.node_ids))
+        if narrative is not None:
+            await self.emit_activity(narrative)
 
 
 # Instancia compartida: el arranque le adjunta el hub WS; sin adjuntar (tests,
