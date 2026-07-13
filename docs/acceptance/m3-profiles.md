@@ -1,5 +1,10 @@
 # M3 — Perfiles de configuración
 
+> **Histórico**: la referencia a "el monitor de Batches" corresponde a una
+> vista ya fusionada en **Trabajos** (ver `docs/glossary.md`). Perfiles y
+> Configuración siguen existiendo como vistas propias; la mecánica de
+> CRUD/versionado/sync no cambió.
+
 Valida el ciclo completo con el simulador y después con hardware. Antes de
 empezar conviene tener leída la configuración de algún nodo (pestaña
 Configuración → Refrescar todo, o secciones sueltas): la comparación se hace

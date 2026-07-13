@@ -1,6 +1,11 @@
 # ADR 0010 — Reconexión USB con backoff y acceso a dispositivos en Docker sin privileged
 
 - Estado: Aceptado (2026-06-12)
+- **Nota (ADR 0023, 2026-07-12)**: el bucle de reconexión con backoff
+  descrito aquí fue **movido** a la base común
+  `gateway/transports/meshtastic_stream.py`, compartida con TCP —
+  `usb.py` ya no lo implementa por separado. La decisión sobre acceso a
+  dispositivos en Docker sin `privileged` no cambió. Ver ADR 0023.
 
 ## Contexto
 

@@ -1,6 +1,12 @@
 # ADR 0011 — Dashboard NOC: agregación en backend con caché TTL y umbrales configurables
 
 - Estado: Aceptado (2026-06-12)
+- **Nota (actualizada)**: la decisión de agregación en backend/caché TTL/
+  umbrales sigue exactamente vigente y en uso. Lo que sí cambió es la UI: la
+  pestaña "Dashboard" independiente fue degradada a opción de menú en
+  v0.7.1 y **eliminada por completo** en v0.8.0 — el endpoint
+  `/dashboard/summary` alimenta hoy el panel de situación del **Centro**,
+  no una vista propia. Ver `docs/status.md`.
 
 ## Contexto
 

@@ -1,10 +1,26 @@
 # Diseño: Actividad 2.0 — la consola de eventos de MeshSentinel
 
-> Estado: **DISEÑO, sin implementar**. Pedido explícito del usuario, con el
+> Estado: **DISEÑO, sin implementar** (para el alcance de este documento:
+> consola de paquetes en crudo, chat persistente, nombres de canal,
+> persistencia de NeighborInfo). Pedido explícito del usuario, con el
 > mismo nivel de análisis previo que el sistema de Grupos y que
 > `docs/design/motor-de-reglas-y-topologia.md`. No se escribe código hasta
 > aprobación explícita, fase por fase (mismo procedimiento que el resto de
 > MeshSentinel desde M1.2).
+>
+> **Nota de linaje**: la "Fase 1" que este documento proponía (§1-§5) fue
+> redefinida por `actividad-2.0-fase1-eventos-legibles.md` y, un día
+> después, sustituida de nuevo por `actividad-2.0-registro-por-paquete.md`
+> (implementado, vigente hoy) — ninguna de las dos siguió la filosofía de
+> "hechos narrados" con la que arranca este documento; el sistema
+> implementado es más cercano a la idea original de "traza de paquetes" de
+> este documento que a la de su primer sucesor. El resto del alcance de
+> este documento (consola de paquetes en crudo `PacketConsole.tsx`, chat
+> `ChatPanel.tsx`, nombres de canal, persistencia de topología vía
+> NeighborInfo) sigue sin construir, salvo que el decoder de
+> NeighborInfo/Traceroute/Waypoint (§5.5 de este documento) sí se
+> implementó, pero solo como narración en el registro, no como persistencia
+> — ver `docs/design/motor-de-reglas-y-topologia.md`.
 
 ## 0. Filosofía (reformulación del encargo)
 

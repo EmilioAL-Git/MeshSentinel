@@ -1,6 +1,14 @@
 # ADR 0009 — Transporte USB sobre la librería oficial: puente hilos→asyncio y snapshot NodeDB
 
 - Estado: Aceptado (2026-06-12)
+- **Nota (ADR 0023, 2026-07-12)**: todo el comportamiento descrito aquí
+  (puente hilo→asyncio, snapshot NodeDB, backoff, pipeline de
+  administración) fue **movido** (no copiado) a la base común
+  `gateway/transports/meshtastic_stream.py`, compartida con el transporte
+  TCP. `gateway/transports/usb.py` hoy solo contiene `findPorts`,
+  `SerialInterface` y `discover_devices`. Las decisiones de este ADR siguen
+  vigentes en la práctica, pero la ubicación del código descrita aquí ya no
+  es exacta — ver ADR 0023.
 
 ## Contexto
 

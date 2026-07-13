@@ -1,5 +1,11 @@
 # M4.2 — Sincronización de favoritos e ignorados
 
+> **Histórico**: "abre el detalle de un nodo" se refiere a la página
+> NodeDetail, **eliminada** en v0.7.2 y sustituida por el **Inspector**
+> global; "pestaña Batches" corresponde a una vista ya fusionada en
+> **Trabajos** (ver `docs/glossary.md`). La lógica de sincronización/
+> reenvío no cambió.
+
 Valida con el simulador primero y después con hardware real. Necesitas al
 menos un nodo destino (target) y dos o tres nodos sujeto conocidos.
 

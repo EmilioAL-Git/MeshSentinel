@@ -1,5 +1,9 @@
 # M1.3 — Acceptance Test: primeras operaciones SET (seguras)
 
+> **Histórico**: referencias a "la pestaña Operaciones" corresponden a una
+> pestaña ya fusionada en **Trabajos** (ver `docs/glossary.md`). El flujo
+> de confirmación y verificación read-back no cambió.
+
 Valida el pipeline de escritura con verificación read-back. Primero simulador,
 después hardware. Requiere `admin_key` del nodo central en los nodos objetivo.
 

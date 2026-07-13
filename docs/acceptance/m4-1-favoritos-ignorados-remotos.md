@@ -1,5 +1,11 @@
 # M4.1 — Favoritos e ignorados remotos
 
+> **Histórico**: "abre el detalle de un nodo" se refiere a la página
+> NodeDetail, **eliminada** en v0.7.2 y sustituida por el **Inspector**
+> global (mismo contenido, cajón en vez de página); "pestaña Batches/
+> Operaciones" corresponde a vistas ya fusionadas en **Trabajos** (ver
+> `docs/glossary.md`). La lógica de favoritos/ignorados remotos no cambió.
+
 Valida con el simulador primero y después con hardware real. Necesitas al
 menos dos nodos conocidos por el NOC (target y sujeto).
 

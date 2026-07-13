@@ -1,6 +1,13 @@
 # ADR 0017 — Consola de actividad: eventos de ciclo de vida backend→UI
 
 - Estado: Aceptado (2026-07-09)
+- **Nota (actualizada)**: la decisión de infraestructura (reutilizar el hub
+  WebSocket existente, `ActivityPublisher`, vocabulario aditivo
+  `admin.operation`/`admin.batch`) sigue vigente. La vista se llama hoy
+  **Registro**, no "Actividad", y su contenido fue rediseñado dos veces más
+  bajo el nombre "Actividad 2.0" — ver
+  `docs/design/actividad-2.0-registro-por-paquete.md` (vigente) para el
+  comportamiento actual, que no está descrito en este ADR.
 - Complementa: ADR 0003 (bus), ADR 0006 (contrato), ADR 0013 (pipeline), ADR 0016 (batches)
 
 ## Contexto

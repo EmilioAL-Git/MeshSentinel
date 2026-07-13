@@ -1,5 +1,11 @@
 # M2 — Batch Engine: administración masiva
 
+> **Histórico**: "en Nodos, marcar checkboxes" corresponde a la tabla de
+> nodos anterior, sustituida por **Flota** (misma idea, UI distinta); "la
+> vista Batches" ya no existe como pestaña propia, se fusionó en
+> **Trabajos** (ver `docs/glossary.md`). La semántica de lotes (dry-run,
+> ejecución, pausa/cancelación) no cambió.
+
 Valida el ciclo completo con el simulador (12 nodos) y después con hardware.
 
 ## A. Simulador

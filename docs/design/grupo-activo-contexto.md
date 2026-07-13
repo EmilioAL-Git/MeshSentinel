@@ -1,7 +1,24 @@
 # El Sitio como contexto — propuesta de diseño
 
-Estado: **PROPUESTA — revisión 2, incorpora las decisiones del usuario tras
-la primera lectura. No implementada, no aprobada.**
+> **Estado real (actualizado): implementado.** El núcleo de este diseño se
+> construyó en el commit `bdfb628` ("v0.9 + Grupo activo + Actividad 2.0"):
+> `GroupContext.tsx` (grupo activo persistido), `GroupSelector`,
+> `GroupScopeBanner` (el escape "Toda la red" de §5), `GroupBar`,
+> `AddToGroupMenu` y `classify.ts` (taxonomía de 5 categorías de §8:
+> pasarela/infraestructura/fijo/usuario/sin clasificar). La cabecera
+> original de este documento (abajo) quedó desactualizada — se conserva tal
+> cual para el rastro de decisión, pero **no describe el estado actual**;
+> ver `docs/status.md`. Una divergencia respecto al diseño original: la
+> clasificación de "nodo fijo" no usa la convención de etiqueta `"fijo"`
+> propuesta en §8 (marcada allí como heurística débil) sino una columna
+> `node_type_override` más el rol real de firmware — un mecanismo más
+> fuerte que el diseñado. No confirmado por inspección de código: si el
+> campo `groups.icon` (§2.2) y las fases D (estadísticas ambientales,
+> comparación entre sitios) llegaron a implementarse.
+
+Estado original de este documento (histórico): **PROPUESTA — revisión 2,
+incorpora las decisiones del usuario tras la primera lectura. No
+implementada, no aprobada.**
 
 Este documento **no sustituye** a `docs/design/v0.7-centro-de-operaciones.md`
 (sigue siendo la referencia normativa del Centro) — lo extiende. Cualquier

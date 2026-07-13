@@ -1,5 +1,10 @@
 # Guía de aceptación — M6.2: Multi-Gateway funcional
 
+> **Histórico**: "pestaña Nodos" corresponde a la tabla sustituida por
+> **Flota**; "Operaciones → nueva operación" y "Crear batch" corresponden a
+> vistas ya fusionadas en **Trabajos** (ver `docs/glossary.md`). El
+> mecanismo de enrutado/reparto/estadísticas validado no cambió.
+
 Objetivo: comprobar que el sistema trabaja de verdad con varias pasarelas a la
 vez (observación, enrutado, reparto de lotes, estadísticas) y que con UNA sola
 pasarela nada cambia. Referencias: ADR 0022, `docs/design/m6-multi-gateway.md`.

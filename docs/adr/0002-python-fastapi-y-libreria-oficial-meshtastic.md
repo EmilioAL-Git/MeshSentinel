@@ -15,7 +15,9 @@ de mantenimiento permanente.
   nativos, validación con Pydantic, async de serie.
 - El gateway usa la librería **`meshtastic`** de PyPI, siempre envuelta en un
   adaptador propio (`gateway/transports`) para aislar el resto del sistema de los
-  cambios de protobufs entre versiones de firmware.
+  cambios de protobufs entre versiones de firmware. (Nota: tras ADR 0023 el
+  alcance exacto es `gateway/transports/meshtastic_stream.py` + `tcp.py` +
+  `usb.py`, todos dentro de `gateway/transports`; la decisión no cambia.)
 - Firmware objetivo: la versión estable más reciente durante el desarrollo.
   Región LoRa: EU_868.
 

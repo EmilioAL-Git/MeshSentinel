@@ -4,6 +4,10 @@
 - Complementa: ADR 0013 (pipeline de administración remota), ADR 0016 (Batch
   Engine), ADR 0021 (gestión de gateways), diseño `docs/design/m6-multi-gateway.md`
   (aprobado) y M6.1 (`node_gateway_links` + `select_primary_link`, migración 0009)
+- **Nota (actualizada)**: el enrutado/reparto/estadísticas siguen vigentes
+  tal cual. Las referencias a "tabla de nodos" y "monitor de Batches" en
+  este ADR corresponden a UI ya sustituida por **Flota** y **Trabajos**
+  respectivamente (v0.8.0) — ver `docs/glossary.md`.
 
 ## Contexto
 

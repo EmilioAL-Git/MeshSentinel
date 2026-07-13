@@ -1,5 +1,10 @@
 # Transporte TCP (ADR 0023)
 
+> **Histórico (menor)**: la referencia a "Operaciones → metadata.get"
+> corresponde a una vista ya fusionada en **Trabajos** (ver
+> `docs/glossary.md`). El resto de la guía (asistente de la pestaña
+> **Enlaces**, comportamiento del transporte) sigue vigente tal cual.
+
 Objetivo: verificar que TCP se comporta **exactamente igual** que USB en todo
 el sistema — la única diferencia es cómo se crea la conexión. Requiere un nodo
 Meshtastic con WiFi/Ethernet accesible en la red (puerto 4403).

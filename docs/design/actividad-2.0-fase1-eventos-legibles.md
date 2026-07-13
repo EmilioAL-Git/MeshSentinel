@@ -1,14 +1,26 @@
 # Actividad 2.0 — Fase 1: el diario operativo de la red
 
-> Estado: **IMPLEMENTADO** (2026-07-12, pendiente de validación del
-> usuario). Ver §8 para las desviaciones respecto al diseño, todas
-> pedidas explícitamente por el usuario en el encargo de implementación
-> o descubiertas durante la verificación. Segunda revisión del diseño:
-> cambia la filosofía respecto a la primera versión (que seguía pensando
-> en términos de "paquete → evento"). Redefine y acota la Fase 1
-> propuesta en `actividad-2.0-consola-de-eventos.md` (aquella era más
-> amplia: consola de paquetes + chat + timeline; sigue vigente para fases
-> posteriores, sin cambios en ese plan).
+> **Estado real (actualizado): SUSTITUIDO.** El mecanismo central de este
+> documento — telemetría unificada por nodo (una tarjeta por nodo que
+> fusiona device/environment/power vía `latest_by_kind`) y NodeInfo narrado
+> solo si hay novedad — **ya no es como funciona el sistema**. Al día
+> siguiente de esta implementación, `actividad-2.0-registro-por-paquete.md`
+> revirtió esa filosofía a petición del usuario: hoy cada paquete decodificado
+> genera siempre su propia entrada (telemetría device/environment/power como
+> 3 entradas independientes, NodeInfo siempre, no solo ante cambios). Este
+> documento se conserva como rastro de decisión; **para el comportamiento
+> vigente, ver `actividad-2.0-registro-por-paquete.md`**.
+>
+> Estado original de este documento (histórico): **IMPLEMENTADO**
+> (2026-07-12, pendiente de validación del usuario). Ver §8 para las
+> desviaciones respecto al diseño, todas pedidas explícitamente por el
+> usuario en el encargo de implementación o descubiertas durante la
+> verificación. Segunda revisión del diseño: cambia la filosofía respecto a
+> la primera versión (que seguía pensando en términos de "paquete →
+> evento"). Redefine y acota la Fase 1 propuesta en
+> `actividad-2.0-consola-de-eventos.md` (aquella era más amplia: consola de
+> paquetes + chat + timeline; sigue vigente para fases posteriores, sin
+> cambios en ese plan).
 
 ## 0. Cambio de filosofía
 

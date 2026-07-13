@@ -1,14 +1,19 @@
 # Actividad 2.0 — Revisión: un paquete decodificado = una entrada
 
-> Estado: **IMPLEMENTADO** (2026-07-12, pendiente de validación del
-> usuario). Ver §8 al final del documento para el resumen de lo construido
-> y las verificaciones realizadas. Tercera revisión
-> de la filosofía de Actividad, pedida por el usuario tras validar la
-> Fase 1 implementada (`actividad-2.0-fase1-eventos-legibles.md`, ya en
-> el código): Actividad deja de ser el diario de *hechos* y pasa a ser el
-> **registro cronológico exhaustivo de paquetes decodificados**. Los
-> hechos importantes ya tienen su sitio (Alertas, Centro); Actividad
-> responde a "¿qué paquetes circulan ahora mismo por la red?".
+> Estado: **IMPLEMENTADO — documento vigente para el comportamiento actual
+> del Registro** (2026-07-12, pendiente de validación del usuario). Ver §8
+> al final del documento para el resumen de lo construido y las
+> verificaciones realizadas. Tercera revisión de la filosofía de Actividad,
+> pedida por el usuario tras validar la Fase 1 implementada
+> (`actividad-2.0-fase1-eventos-legibles.md`, ya en el código — **este
+> documento la sustituye por completo**, no la complementa): Actividad deja
+> de ser el diario de *hechos* y pasa a ser el **registro cronológico
+> exhaustivo de paquetes decodificados**. Los hechos importantes ya tienen
+> su sitio (Alertas, Centro); Actividad responde a "¿qué paquetes circulan
+> ahora mismo por la red?". El alcance más amplio de
+> `actividad-2.0-consola-de-eventos.md` (consola de paquetes en crudo,
+> chat, persistencia de topología) sigue sin construir y no es lo que
+> describe este documento.
 >
 > **Cuarta revisión (este documento)**: corrige el vocabulario de
 > cabecera — nada de nombres internos del protocolo

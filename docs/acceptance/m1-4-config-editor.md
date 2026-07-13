@@ -1,5 +1,10 @@
 # M1.4 — Editor completo de configuración
 
+> **Histórico**: la vista "Configuración" sigue existiendo (re-cromada en
+> v0.8.0), pero las referencias a "la vista Operaciones" corresponden a una
+> pestaña ya fusionada en **Trabajos** (ver `docs/glossary.md`). El
+> mecanismo del editor (esquema, apply, verify) no cambió.
+
 Valida el editor de configuración generado a partir del esquema protobuf,
 tanto con simulador como con hardware real. Sigue el patrón de M1.3: pre-read,
 SET, settle, verify.

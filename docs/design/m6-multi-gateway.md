@@ -1,8 +1,22 @@
 # M6 — Diseño de Multi-Gateway
 
-- Estado: **Aprobado** por el usuario, con un ajuste incorporado (orden de
-  ranking de calidad de enlace en §3/§6). Pendiente de resolver las
-  preguntas abiertas del §15 antes de arrancar M6.1.
+> **Estado real (actualizado): parcialmente implementado.** El commit
+> `a5a6b12` (M6.2, consolidando M6.1+M6.2+M6.4+M6.7+M6.8 de este plan)
+> implementó: `node_gateway_links` (§1.3), visibilidad N:M y redundancia en
+> dashboard/mapa (§4), simulador con semilla compartida (§9), y el
+> endpoint de estadísticas por pasarela (§11, parcial). **Con una
+> simplificación deliberada respecto al ranking de §6**: la selección de
+> pasarela al encolar una operación es "primer candidato sano, con
+> fallback a `nodes.gateway_id`, sin failover" — no el ranking completo por
+> prioridad → saltos → SNR → RSSI → recencia que describe §6, que sigue
+> siendo un ítem de `docs/roadmap.md`. **No implementado**: rate limit por
+> pasarela (§8/M6.5 — sigue global), la regla de alerta
+> `node_gateway_link_stale` (§5.2/M6.3), y la agrupación de ETA
+> multi-pasarela (§7/M6.6). Ver `docs/status.md` para el detalle.
+
+Estado original de este documento (histórico): **Aprobado** por el usuario,
+con un ajuste incorporado (orden de ranking de calidad de enlace en §3/§6).
+Pendiente de resolver las preguntas abiertas del §15 antes de arrancar M6.1.
 - Contexto previo: valoración pre-M6 en `CLAUDE.md` (cuatro obstáculos), ADR 0001,
   0013, 0016, 0019, 0020, 0021
 - Este documento **no** introduce migraciones, endpoints ni código. Es la base

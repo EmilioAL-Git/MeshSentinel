@@ -5,6 +5,18 @@
 > diseños porque comparten consumidor (Situation Center y capa "Enlaces"
 > del mapa) y porque el segundo es precondición de datos para completar el
 > primero con una regla de "enlace nodo↔nodo perdido".
+>
+> **Nota (actualizada)**: parte del trabajo de decodificación que este
+> documento pide en §2.2 (`decode_neighborinfo`, evento `neighbors.seen`)
+> **ya aterrizó**, pero con un alcance menor al que describe este
+> documento: `actividad-2.0-registro-por-paquete.md` implementó el decoder
+> de `NEIGHBORINFO_APP`/`TRACEROUTE_APP`/`WAYPOINT_APP` y los eventos
+> `neighbors.seen`/`traceroute.completed`/`waypoint.shared` — pero **solo
+> como narración en el Registro de actividad**, no como persistencia
+> consultable. La tabla `node_neighbors` y el endpoint
+> `GET /nodes/{id}/neighbors` de §2 de este documento siguen sin construir;
+> implementarlos ahora parte de un decoder ya existente, así que el
+> esfuerzo restante es menor al que asume este documento.
 
 ## 1. Motor de reglas definitivo
 

@@ -1,6 +1,11 @@
 # ADR 0016 — Batch Engine (M2): coordinación de lotes sobre el pipeline existente
 
 - Estado: Aceptado (2026-07-09)
+- **Nota (actualizada)**: la decisión de coordinación (una `AdminOperation`
+  por nodo, cero efectos propios) sigue vigente. La pestaña "Batches"
+  mencionada en este ADR ya no existe: se fusionó con "Operaciones" en la
+  vista **Trabajos** (v0.7.4), luego re-cromada en v0.8.0. Ver
+  `docs/glossary.md`.
 - Complementa: ADR 0013 (pipeline), ADR 0014 (verify), diseño del Módulo 1 §4.1/§5
 
 ## Contexto

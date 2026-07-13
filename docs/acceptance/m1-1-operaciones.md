@@ -1,5 +1,9 @@
 # M1.1 — Acceptance Test: pipeline de operaciones remotas (solo lectura)
 
+> **Histórico**: referencias a "la pestaña Operaciones" corresponden a una
+> pestaña ya fusionada en **Trabajos** (ver `docs/glossary.md`). El
+> pipeline y la API que valida esta guía no cambiaron.
+
 Valida el flujo completo Aplicación → Cola → Gateway → Nodo → Respuesta →
 Historial → UI. Primero con el **simulador** (sin hardware), después con USB.
 

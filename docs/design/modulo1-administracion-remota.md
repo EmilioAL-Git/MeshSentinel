@@ -1,6 +1,16 @@
 # Módulo 1 — Administración Remota: Documento de Diseño Técnico
 
-- Estado: **Borrador para revisión** (v1, 2026-07-08)
+> **Documento histórico.** El Módulo 1 se implementó por completo en
+> sucesivas entregas (M1.1–M1.4) y su diseño terminó de ejecutarse; este
+> documento queda como referencia de la decisión original, no como guía
+> vigente. Divergencias conocidas respecto a lo construido: los nombres de
+> API de §6/§7 (`admin_operation_batches`, `/admin/batches:dry-run`)
+> difieren de los reales (`admin_batches`, `BatchService.create_planned`,
+> ver ADR 0016/0018); el enrutado de pasarela de §4.4 ("presupuesto global,
+> pasarela por última vez vista") fue sustituido por el enrutado N:M de
+> ADR 0022. Ver `docs/status.md` para el estado actual.
+
+- Estado original (histórico): **Borrador para revisión** (v1, 2026-07-08)
 - Alcance: solo diseño. Sin código, migraciones, endpoints ni pantallas.
 - Base: v0.4.0-beta (`3903abc`), librería oficial `meshtastic` (Python), firmware ≥ 2.5 (PKC).
 

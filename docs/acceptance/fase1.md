@@ -1,5 +1,12 @@
 # Fase 1 — Acceptance Test
 
+> **Histórico**: guía escrita contra la UI anterior a v0.7 — §8 describe
+> barra superior + tabla de nodos + panel de detalle lateral, sustituidos
+> por StatusBar/HUD, **Flota** y el **Inspector** global. Los pasos de
+> infraestructura (§1-7, §9-10) siguen siendo válidos tal cual; solo §8
+> necesita traducirse a la navegación actual (ver `docs/glossary.md`). La
+> funcionalidad validada no cambió.
+
 Guía de validación manual del despliegue completo con Docker Compose usando
 exclusivamente el **simulador** (sin hardware Meshtastic).
 

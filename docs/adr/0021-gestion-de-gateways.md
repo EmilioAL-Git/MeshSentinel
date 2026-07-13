@@ -4,6 +4,10 @@
 - Complementa: ADR 0001 (gateway desacoplado), ADR 0003 (Redis pub/sub +
   streams por-gateway), ADR 0006 (contrato versionado), ADR 0007 (transporte
   simulado), ADR 0009/0010 (transporte USB, reconexión)
+- **Nota (actualizada)**: el modelo de datos y la API de gestión siguen
+  vigentes. La vista se etiqueta hoy **"Enlaces"** en el riel de navegación
+  (el identificador interno `gateways` no cambió) y fue re-cromada como
+  "rack de módulos" en v0.8.0.
 
 ## Contexto
 
