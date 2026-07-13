@@ -28,6 +28,14 @@ export const t = {
   accentTint: "var(--accent-tint)",
   fontUi: "var(--font-ui)",
   fontMono: "var(--font-mono)",
+  // Identidad de tipo de paquete (Registro) — nunca para estado/severidad
+  catBlue: "var(--cat-blue)",
+  catGreen: "var(--cat-green)",
+  catOrange: "var(--cat-orange)",
+  catViolet: "var(--cat-violet)",
+  catAqua: "var(--cat-aqua)",
+  catYellow: "var(--cat-yellow)",
+  catMagenta: "var(--cat-magenta)",
 } as const;
 
 /** Hex crudos — SOLO para canvas/serializaciones sin acceso al cascade. */

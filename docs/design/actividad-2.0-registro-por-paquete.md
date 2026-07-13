@@ -275,3 +275,45 @@ simulador no genera — capturas confirman cabeceras 100% en español sin
 nombres de portnum, telemetrías de distintos nodos como entradas
 independientes nunca fusionadas, y el desplegable "Ver paquete" mostrando
 `internal_type`/RSSI/SNR/JSON correctamente.
+
+## 9. Pulido final del Registro (2026-07-13, solo frontend)
+
+Segunda pasada pedida por el usuario ya con la filosofía "un paquete =
+una entrada" dada por buena: convertir el Registro en una consola de
+tráfico más útil sin tocar backend. Confinado a `activity.ts`/
+`ActivityConsole.tsx`/`theme.css`/`tokens.ts` — `ActivityPublisher`,
+`ActivityEvent`, el decoder, Alertas, Trabajos, Centro e Inspector
+quedaron intactos, tal como exigió el encargo.
+
+- **Origen/Destino**: reutiliza `node_label` (origen) y el detalle
+  `Destinatario` que `render_message` ya redactaba (destino de un mensaje
+  directo). Para el resto de paquetes (sin ese detalle) el destino es
+  "Difusión" — una asunción documentada, no un dato leído del paquete:
+  el contrato no expone `to_node_id` salvo en mensajes, y ampliarlo
+  quedaba fuera del encargo ("no tocar el decoder").
+- **Hora exacta**: `HH:MM:SS.mmm` calculado del mismo `timestamp` ISO que
+  ya viajaba (no existía ningún "tiempo relativo" que conservar).
+- **Filtros rápidos por tipo**: fila de chips que filtra por el
+  `packetType` ya redactado por el backend — cero interpretación de
+  paquetes en React. Los 3 kinds de telemetría comparten un único filtro
+  "Telemetría" (más "Ambiental" aparte), igual que en el resumen.
+- **Identidad visual por tipo**: 7 tonos categóricos nuevos
+  (`--cat-blue/green/orange/violet/aqua/yellow/magenta`), separados de
+  los semánticos existentes (`--ok/--warn/--crit` intactos) — validados
+  con la skill de dataviz contra el fondo oscuro real de la app
+  (`#11151d`): banda de luminosidad y contraste ≥3:1 en verde, CVD en el
+  suelo 8-12 aceptado porque cada entrada siempre lleva icono + texto,
+  nunca solo color. "Información del nodo" usa gris neutro
+  (`--text-dim`) en vez de un color categórico, deliberadamente.
+- **Resumen de tráfico (últimos 60 s)**: 100% en memoria sobre el buffer
+  de 500 ya existente (filtrado por `receivedAtMs`, campo nuevo solo en
+  el `ActivityEntry` del frontend), con un tick cada 2 s para que la
+  ventana se recalcule aunque no lleguen eventos nuevos. Sin SQL, sin
+  histórico, coste despreciable (filtrar ≤500 elementos cada 2 s).
+
+Verificado con Playwright sobre el mismo patrón de stack aislado
+(backend sin rebuild, no se tocó): capturas confirman colores distintos
+por tipo, Origen/Destino correcto (incluida "Difusión" para broadcast),
+el filtro reduciendo correctamente el listado (4/18 al filtrar por
+Posición) y el resumen con conteos reales. 285 tests backend+gateway sin
+tocar, ruff limpio, `tsc -b`/`npm run build` limpios.

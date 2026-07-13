@@ -1,4 +1,5 @@
 import type { NocEvent } from "./api/client";
+import { t } from "./tokens";
 
 /** Buffer del registro de actividad (vista Registro). */
 export const ACTIVITY_LIMIT = 500;
@@ -21,6 +22,10 @@ export type ActivityPriority = "info" | "important" | "warning" | "critical";
 export interface ActivityEntry {
   id: string;
   time: string;
+  /** Epoch ms del `timestamp` del envelope — para la ventana de "último
+   * minuto" (§ resumen de tráfico) y para poder ordenar/filtrar por tiempo
+   * sin volver a parsear `time` (que ya viene formateado para mostrar). */
+  receivedAtMs: number;
   text: string;
   category: ActivityCategory;
   severity: ActivitySeverity;
@@ -68,6 +73,72 @@ const PRIORITY_SEVERITY: Record<ActivityPriority, ActivitySeverity> = {
   critical: "error",
 };
 
+/** HH:MM:SS.mmm — hora exacta de recepción (pulido §2: antes solo se veía
+ * al segundo). Cálculo puro sobre el timestamp ya provisto por el backend,
+ * sin tocar el contrato ni el modelo. */
+function formatExactTime(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number, len = 2) => String(n).padStart(len, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+}
+
+/**
+ * Identidad de tipo de paquete (pulido §3/§4): un solo mapa, clave = el
+ * `packetType` que el backend ya redacta ("Telemetría del dispositivo"...).
+ * Ni React ni este módulo interpretan Meshtastic — solo asocian una
+ * etiqueta de filtro y un color a un texto que el backend ya decidió.
+ */
+export interface PacketFilter {
+  key: string;
+  label: string;
+  /** `packetType` exactos que caen en este filtro (varios kinds de
+   * telemetría comparten filtro, igual que en el resumen de tráfico). */
+  types: string[];
+  color: string;
+}
+
+export const PACKET_FILTERS: PacketFilter[] = [
+  {
+    key: "telemetria",
+    label: "Telemetría",
+    types: ["Telemetría del dispositivo", "Telemetría de energía"],
+    color: t.catBlue,
+  },
+  { key: "ambiental", label: "Ambiental", types: ["Telemetría ambiental"], color: t.catGreen },
+  { key: "posicion", label: "Posición", types: ["Posición actualizada"], color: t.catOrange },
+  { key: "mensajes", label: "Mensajes", types: ["Mensaje recibido"], color: t.catViolet },
+  { key: "nodeinfo", label: "Información del nodo", types: ["Información del nodo"], color: t.textDim },
+  { key: "vecinos", label: "Vecinos", types: ["Información de vecinos"], color: t.catAqua },
+  { key: "traceroute", label: "Traceroute", types: ["Traceroute"], color: t.catYellow },
+  { key: "waypoint", label: "Waypoint", types: ["Waypoint compartido"], color: t.catMagenta },
+];
+
+const PACKET_TYPE_COLOR = new Map<string, string>(
+  PACKET_FILTERS.flatMap((f) => f.types.map((type) => [type, f.color] as const)),
+);
+
+/** Color de identidad para una entrada de paquete; `undefined` para
+ * sucesos no derivados de un paquete (gateway/alert/admin/hechos). */
+export function packetColor(packetType: string | undefined): string | undefined {
+  return packetType ? PACKET_TYPE_COLOR.get(packetType) : undefined;
+}
+
+/**
+ * Origen/destino (pulido §1): reutiliza SOLO lo que el backend ya redactó
+ * — `nodeLabel` (quién envía) y, si existe, el detalle "Destinatario" ya
+ * calculado para mensajes directos. Sin ese detalle, el destino es
+ * "Difusión": telemetría/posición/NodeInfo/vecinos/waypoint son, en la
+ * práctica, siempre broadcast en Meshtastic — una asunción documentada,
+ * no un dato leído del paquete (el contrato no lo expone hoy salvo para
+ * mensajes). Ninguna interpretación de protocolo: solo texto ya decidido
+ * por el backend.
+ */
+export function originDestination(e: ActivityEntry): { origin: string; destination: string } | null {
+  if (!e.packetType || !e.nodeLabel) return null;
+  const destinatario = e.details?.find(([k]) => k === "Destinatario")?.[1];
+  return { origin: e.nodeLabel, destination: destinatario ?? "Difusión" };
+}
+
 /**
  * Actividad 2.0 Fase 1: el feed es el diario operativo de la red. Toda la
  * narrativa (títulos, detalles, prioridad) la produce el backend como
@@ -95,7 +166,8 @@ export function toEntry(event: NocEvent): ActivityEntry | null {
   const raw = p.raw && typeof p.raw === "object" ? (p.raw as Record<string, unknown>) : undefined;
   return {
     id: event.event_id,
-    time: new Date(event.timestamp).toLocaleTimeString(),
+    time: formatExactTime(event.timestamp),
+    receivedAtMs: new Date(event.timestamp).getTime(),
     text: str(p.title) ?? "",
     category,
     severity: PRIORITY_SEVERITY[priority] ?? "info",

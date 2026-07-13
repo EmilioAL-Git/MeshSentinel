@@ -55,6 +55,20 @@
   --crit-tint: rgba(229, 72, 77, 0.12);
   --accent-tint: rgba(76, 141, 255, 0.12);
 
+  /* Identidad de tipo de paquete (Registro, Actividad 2.0): paleta
+   * categórica, NUNCA reutilizar para estado/severidad (esas siguen siendo
+   * exclusivamente --ok/--warn/--crit). Validada con la skill de dataviz
+   * contra el fondo oscuro real de la app (#11151d): banda de luminosidad,
+   * contraste >=3:1 y separación CVD en el suelo 8-12 aceptable porque cada
+   * uso siempre lleva icono + texto, nunca solo color. */
+  --cat-blue: #3987e5;
+  --cat-green: #008300;
+  --cat-orange: #d95926;
+  --cat-violet: #9085e9;
+  --cat-aqua: #199e70;
+  --cat-yellow: #c98500;
+  --cat-magenta: #d55181;
+
   /* Tipografía */
   --font-ui: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
