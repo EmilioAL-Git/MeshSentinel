@@ -94,21 +94,20 @@ function suggestSeed(gateways: GatewayOut[]): number {
 }
 
 function AddGatewayWizard({
-  gatewayId,
+  initialGatewayId,
   candidates,
   gateways,
-  onSelectCandidate,
   onCancel,
   onSaved,
 }: {
-  gatewayId: string;
+  initialGatewayId: string;
   candidates: string[];
   gateways: GatewayOut[];
-  onSelectCandidate: (id: string) => void;
   onCancel: () => void;
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [gatewayId, setGatewayId] = useState(initialGatewayId);
   const [transportType, setTransportType] = useState<"usb" | "tcp" | "simulated">("usb");
   const [devices, setDevices] = useState<DeviceOut[] | null>(null);
   const [selectedPort, setSelectedPort] = useState("");
@@ -158,6 +157,10 @@ function AddGatewayWizard({
         name: name || gatewayId,
         transport_type: transportType,
         connection_params: connectionParams(),
+        // Pre-registro sin proceso vivo aún (sin prueba de conexión): se guarda
+        // deshabilitado para no intentar conectar contra nada; el usuario lo
+        // habilita/conecta desde su panel cuando el proceso ya esté en marcha.
+        enabled: testResult?.ok ?? isKnownCandidate,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["gateways"] });
@@ -172,28 +175,35 @@ function AddGatewayWizard({
         ? tcpHost.trim() !== ""
         : simSeed.trim() !== "";
 
+  // Un gateway_id nuevo (que nunca ha reportado heartbeat) se puede guardar
+  // sin probar conexión: es un pre-registro a la espera de que el proceso
+  // correspondiente arranque con ese GATEWAY_ID. Uno ya conocido por
+  // heartbeat (candidato) exige probar antes de guardar, como siempre.
+  const existing = gateways.find((g) => g.gateway_id === gatewayId);
+  const isKnownCandidate = candidates.includes(gatewayId);
+  const managedConflict = !!existing && existing.managed && existing.deleted_at == null;
+
   return (
     <div className="panel" style={{ margin: "0.75rem", flexShrink: 0 }}>
       <div className="panel-head">
         <span className="panel-title">Nuevo enlace</span>
-        {candidates.length > 1 ? (
-          <select
-            className="input"
-            value={gatewayId}
-            onChange={(e) => {
-              onSelectCandidate(e.target.value);
-              setDevices(null);
-              setTestResult(null);
-            }}
-            title="Hay varios procesos de pasarela sin configurar: elige cuál"
-          >
-            {candidates.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        ) : (
-          <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{gatewayId}</span>
-        )}
+        <input
+          className="input mono"
+          style={{ width: 170 }}
+          list="gateway-id-candidates"
+          placeholder="gateway_id (p. ej. gw-02)"
+          value={gatewayId}
+          onChange={(e) => {
+            setGatewayId(e.target.value.trim());
+            setDevices(null);
+            setTestResult(null);
+          }}
+        />
+        <datalist id="gateway-id-candidates">
+          {candidates.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
         <span className="seg">
           {(["usb", "tcp", "simulated"] as const).map((tt) => (
             <button
@@ -331,15 +341,33 @@ function AddGatewayWizard({
             onChange={(e) => setName(e.target.value)}
           />
           <button
-            className={`btn${testResult?.ok ? " primary" : ""}`}
+            className={`btn${testResult?.ok || !isKnownCandidate ? " primary" : ""}`}
             style={{ marginLeft: "0.5rem" }}
-            disabled={!testResult?.ok || !name.trim() || save.isPending}
+            disabled={managedConflict || (isKnownCandidate && !testResult?.ok) || !name.trim() || !gatewayId.trim() || save.isPending}
             onClick={() => save.mutate()}
-            title={!testResult?.ok ? "Prueba la conexión con éxito antes de guardar" : undefined}
+            title={
+              managedConflict
+                ? "Ya hay un enlace configurado con este identificador"
+                : isKnownCandidate && !testResult?.ok
+                  ? "Prueba la conexión con éxito antes de guardar"
+                  : undefined
+            }
           >
             Guardar enlace
           </button>
           {save.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(save.error)}</p>}
+          {managedConflict && (
+            <p style={{ color: "var(--crit)", fontSize: 12 }}>
+              Ya existe un enlace configurado con «{gatewayId}» — edítalo desde su panel en vez de crear uno nuevo.
+            </p>
+          )}
+          {!managedConflict && !isKnownCandidate && gatewayId.trim() && (
+            <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
+              «{gatewayId}» todavía no ha reportado actividad: se guardará esta configuración a la espera de que
+              arranques ese proceso con <span className="mono">GATEWAY_ID={gatewayId}</span>. Puedes probar la
+              conexión igualmente si el proceso ya está en marcha.
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -502,7 +530,7 @@ export function GatewaysView() {
     queryFn: () => fetchGatewayStats(),
     refetchInterval: 15_000,
   });
-  const [wizardFor, setWizardFor] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const all = gateways.data ?? [];
   const list = all.filter((g) => g.deleted_at == null);
@@ -521,29 +549,19 @@ export function GatewaysView() {
           {connected}/{list.length} conectados
         </span>
         <span style={{ marginLeft: "auto" }} />
-        <button
-          className={`btn${candidates.length > 0 ? " primary" : ""}`}
-          disabled={candidates.length === 0}
-          onClick={() => candidates.length > 0 && setWizardFor(candidates[0])}
-          title={
-            candidates.length > 0
-              ? undefined
-              : "Todos los procesos de pasarela detectados ya están configurados"
-          }
-        >
+        <button className="btn primary" onClick={() => setWizardOpen(true)}>
           + Añadir enlace
         </button>
       </div>
 
-      {wizardFor ? (
+      {wizardOpen ? (
         <div className="ws-scroll">
           <AddGatewayWizard
-            gatewayId={wizardFor}
+            initialGatewayId={candidates[0] ?? ""}
             candidates={candidates}
             gateways={all}
-            onSelectCandidate={setWizardFor}
-            onCancel={() => setWizardFor(null)}
-            onSaved={() => setWizardFor(null)}
+            onCancel={() => setWizardOpen(false)}
+            onSaved={() => setWizardOpen(false)}
           />
         </div>
       ) : (
