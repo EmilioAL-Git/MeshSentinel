@@ -2,15 +2,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import {
   ackAlert,
+  createAlertRule,
   createChannel,
+  deleteAlertRule,
   deleteChannel,
   fetchAlertRules,
   fetchAlerts,
   fetchChannels,
   fetchNodes,
   patchAlertRule,
+  patchChannel,
   testChannel,
   type AlertOut,
+  type AlertRuleOut,
+  type ChannelOut,
   type Severity,
 } from "../api/client";
 import { scopeAlertsToGroup, useGroupNodeIds } from "../context/GroupContext";
@@ -29,6 +34,249 @@ const SEV_COLOR: Record<Severity, string> = {
   WARNING: "var(--warn)",
   CRITICAL: "var(--crit)",
 };
+
+// Cada rule_type usa threshold y/o duration_seconds con un significado
+// distinto (evaluators.py) — la etiqueta y unidad se adaptan por tipo.
+const RULE_FIELD_META: Record<
+  string,
+  {
+    label: string;
+    threshold?: { label: string; step?: number; default: number };
+    duration?: { label: string; toUi: (s: number) => number; fromUi: (v: number) => number; default: number };
+  }
+> = {
+  low_battery: { label: "Batería baja", threshold: { label: "% batería", default: 20 } },
+  snr_degraded: { label: "SNR degradado", threshold: { label: "SNR (dB)", step: 0.5, default: 0 } },
+  node_offline: {
+    label: "Nodo sin actividad",
+    duration: { label: "Minutos sin actividad", toUi: (s) => Math.round(s / 60), fromUi: (m) => m * 60, default: 15 },
+  },
+  gateway_disconnected: {
+    label: "Pasarela desconectada",
+    duration: { label: "Segundos sin heartbeat", toUi: (s) => s, fromUi: (s) => s, default: 120 },
+  },
+};
+
+function RuleEditor({ rule, onSave, onCancel }: { rule: AlertRuleOut; onSave: (changes: Partial<AlertRuleOut>) => void; onCancel: () => void }) {
+  const meta = RULE_FIELD_META[rule.rule_type];
+  const [severity, setSeverity] = useState<Severity>(rule.severity);
+  const [threshold, setThreshold] = useState(rule.threshold ?? 0);
+  const [durationUi, setDurationUi] = useState(meta?.duration ? meta.duration.toUi(rule.duration_seconds ?? 0) : 0);
+  const [cooldown, setCooldown] = useState(rule.cooldown_seconds);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.4rem",
+        padding: "0.5rem 0.75rem 0.7rem",
+        borderBottom: "1px solid var(--border-subtle)",
+        background: "var(--surface-2, rgba(255,255,255,0.03))",
+        fontSize: 12,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Severidad</span>
+        <select className="input" value={severity} onChange={(e) => setSeverity(e.target.value as Severity)}>
+          <option value="INFO">INFO</option>
+          <option value="WARNING">WARNING</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+      </div>
+      {meta?.threshold && (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span className="microlabel" style={{ minWidth: 70 }}>{meta.threshold.label}</span>
+          <input
+            className="input"
+            type="number"
+            step={meta.threshold.step ?? 1}
+            value={threshold}
+            onChange={(e) => setThreshold(Number(e.target.value))}
+          />
+        </div>
+      )}
+      {meta?.duration && (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span className="microlabel" style={{ minWidth: 70 }}>{meta.duration.label}</span>
+          <input className="input" type="number" min={1} value={durationUi} onChange={(e) => setDurationUi(Number(e.target.value))} />
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Enfriamiento (s)</span>
+        <input className="input" type="number" min={0} value={cooldown} onChange={(e) => setCooldown(Number(e.target.value))} />
+      </div>
+      <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
+        <button
+          className="btn"
+          style={{ fontSize: 11 }}
+          onClick={() =>
+            onSave({
+              severity,
+              threshold: meta?.threshold ? threshold : rule.threshold,
+              duration_seconds: meta?.duration ? meta.duration.fromUi(durationUi) : rule.duration_seconds,
+              cooldown_seconds: cooldown,
+            })
+          }
+        >
+          Guardar
+        </button>
+        <button className="btn ghost" style={{ fontSize: 11 }} onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NewRuleForm({ onSave, onCancel }: { onSave: (rule: Omit<AlertRuleOut, "id">) => void; onCancel: () => void }) {
+  const [ruleType, setRuleType] = useState<keyof typeof RULE_FIELD_META>("low_battery");
+  const [name, setName] = useState(RULE_FIELD_META.low_battery.label);
+  const [severity, setSeverity] = useState<Severity>("WARNING");
+  const meta = RULE_FIELD_META[ruleType];
+  const [threshold, setThreshold] = useState(meta.threshold?.default ?? 0);
+  const [durationUi, setDurationUi] = useState(meta.duration?.default ?? 0);
+  const [cooldown, setCooldown] = useState(0);
+
+  const changeType = (t: keyof typeof RULE_FIELD_META) => {
+    setRuleType(t);
+    setName(RULE_FIELD_META[t].label);
+    setThreshold(RULE_FIELD_META[t].threshold?.default ?? 0);
+    setDurationUi(RULE_FIELD_META[t].duration?.default ?? 0);
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.4rem",
+        padding: "0.5rem 0.75rem 0.7rem",
+        borderBottom: "1px solid var(--border-subtle)",
+        background: "var(--surface-2, rgba(255,255,255,0.03))",
+        fontSize: 12,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Tipo</span>
+        <select className="input" value={ruleType} onChange={(e) => changeType(e.target.value as keyof typeof RULE_FIELD_META)}>
+          {Object.entries(RULE_FIELD_META).map(([type, m]) => (
+            <option key={type} value={type}>{m.label}</option>
+          ))}
+        </select>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Nombre</span>
+        <input className="input" style={{ flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Severidad</span>
+        <select className="input" value={severity} onChange={(e) => setSeverity(e.target.value as Severity)}>
+          <option value="INFO">INFO</option>
+          <option value="WARNING">WARNING</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+      </div>
+      {meta.threshold && (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span className="microlabel" style={{ minWidth: 70 }}>{meta.threshold.label}</span>
+          <input
+            className="input"
+            type="number"
+            step={meta.threshold.step ?? 1}
+            value={threshold}
+            onChange={(e) => setThreshold(Number(e.target.value))}
+          />
+        </div>
+      )}
+      {meta.duration && (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span className="microlabel" style={{ minWidth: 70 }}>{meta.duration.label}</span>
+          <input className="input" type="number" min={1} value={durationUi} onChange={(e) => setDurationUi(Number(e.target.value))} />
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Enfriamiento (s)</span>
+        <input className="input" type="number" min={0} value={cooldown} onChange={(e) => setCooldown(Number(e.target.value))} />
+      </div>
+      <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
+        <button
+          className="btn"
+          disabled={!name.trim()}
+          style={{ fontSize: 11 }}
+          onClick={() =>
+            onSave({
+              name: name.trim(),
+              rule_type: ruleType,
+              severity,
+              enabled: true,
+              threshold: meta.threshold ? threshold : null,
+              duration_seconds: meta.duration ? meta.duration.fromUi(durationUi) : null,
+              cooldown_seconds: cooldown,
+              params: {},
+            })
+          }
+        >
+          Crear regla
+        </button>
+        <button className="btn ghost" style={{ fontSize: 11 }} onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ntfy guarda el destino en config.topic, webhook en config.url.
+function channelTarget(c: ChannelOut): string {
+  return c.channel_type === "ntfy" ? String(c.config.topic ?? "") : String(c.config.url ?? "");
+}
+
+function ChannelEditor({ channel, onSave, onCancel }: { channel: ChannelOut; onSave: (changes: Partial<ChannelOut>) => void; onCancel: () => void }) {
+  const [name, setName] = useState(channel.name);
+  const [target, setTarget] = useState(channelTarget(channel));
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.4rem",
+        padding: "0.5rem 0.75rem 0.7rem",
+        borderBottom: "1px solid var(--border-subtle)",
+        background: "var(--surface-2, rgba(255,255,255,0.03))",
+        fontSize: 12,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Nombre</span>
+        <input className="input" style={{ flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>{channel.channel_type === "ntfy" ? "Topic" : "URL"}</span>
+        <input className="input" style={{ flex: 1 }} value={target} onChange={(e) => setTarget(e.target.value)} />
+      </div>
+      <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
+        <button
+          className="btn"
+          disabled={!name.trim() || !target.trim()}
+          style={{ fontSize: 11 }}
+          onClick={() =>
+            onSave({
+              name: name.trim(),
+              config: channel.channel_type === "ntfy" ? { topic: target.trim() } : { url: target.trim() },
+            })
+          }
+        >
+          Guardar
+        </button>
+        <button className="btn ghost" style={{ fontSize: 11 }} onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function AlertRow({
   alert,
@@ -117,9 +365,22 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => patchAlertRule(id, { enabled }),
     onSettled: invalidate,
   });
+  const editRule = useMutation({
+    mutationFn: ({ id, changes }: { id: number; changes: Partial<AlertRuleOut> }) => patchAlertRule(id, changes),
+    onSettled: invalidate,
+  });
+  const newRule = useMutation({ mutationFn: createAlertRule, onSettled: invalidate });
+  const removeRule = useMutation({ mutationFn: deleteAlertRule, onSettled: invalidate });
+  const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
+  const [creatingRule, setCreatingRule] = useState(false);
   const addChannel = useMutation({ mutationFn: createChannel, onSettled: invalidate });
+  const editChannel = useMutation({
+    mutationFn: ({ id, changes }: { id: number; changes: Partial<ChannelOut> }) => patchChannel(id, changes),
+    onSettled: invalidate,
+  });
   const removeChannel = useMutation({ mutationFn: deleteChannel, onSettled: invalidate });
   const test = useMutation({ mutationFn: testChannel });
+  const [editingChannelId, setEditingChannelId] = useState<number | null>(null);
 
   const [chName, setChName] = useState("");
   const [chType, setChType] = useState<"webhook" | "ntfy">("ntfy");
@@ -212,31 +473,83 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
             <div className="panel-head">
               <span className="panel-title">Reglas</span>
               <span className="panel-count">{(rules.data ?? []).length}</span>
+              <button
+                className="btn ghost"
+                style={{ marginLeft: "auto", padding: "0.1rem 0.5rem", fontSize: 11 }}
+                onClick={() => {
+                  setCreatingRule((v) => !v);
+                  setEditingRuleId(null);
+                }}
+              >
+                {creatingRule ? "▲" : "+ Nueva"}
+              </button>
             </div>
             <div className="panel-body flush">
-              {(rules.data ?? []).map((r) => (
-                <label
-                  key={r.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.6rem",
-                    padding: "0.4rem 0.75rem",
-                    borderBottom: "1px solid var(--border-subtle)",
-                    cursor: "pointer",
-                    fontSize: 12,
+              {creatingRule && (
+                <NewRuleForm
+                  onCancel={() => setCreatingRule(false)}
+                  onSave={(rule) => {
+                    newRule.mutate(rule);
+                    setCreatingRule(false);
                   }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={r.enabled}
-                    onChange={(e) => toggleRule.mutate({ id: r.id, enabled: e.target.checked })}
-                  />
-                  <span className="mono" style={{ color: SEV_COLOR[r.severity], fontSize: 10, minWidth: 60 }}>
-                    {r.severity}
-                  </span>
-                  <span style={{ color: r.enabled ? "var(--text)" : "var(--text-faint)" }}>{r.name}</span>
-                </label>
+                />
+              )}
+              {(rules.data ?? []).map((r) => (
+                <div key={r.id}>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.6rem",
+                      padding: "0.4rem 0.75rem",
+                      borderBottom: editingRuleId === r.id ? "none" : "1px solid var(--border-subtle)",
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={r.enabled}
+                      onChange={(e) => toggleRule.mutate({ id: r.id, enabled: e.target.checked })}
+                    />
+                    <span className="mono" style={{ color: SEV_COLOR[r.severity], fontSize: 10, minWidth: 60 }}>
+                      {r.severity}
+                    </span>
+                    <span style={{ color: r.enabled ? "var(--text)" : "var(--text-faint)", flex: 1 }}>{r.name}</span>
+                    <button
+                      className="btn ghost"
+                      style={{ padding: "0.1rem 0.5rem", fontSize: 11 }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setEditingRuleId(editingRuleId === r.id ? null : r.id);
+                        setCreatingRule(false);
+                      }}
+                    >
+                      {editingRuleId === r.id ? "▲" : "Ajustar"}
+                    </button>
+                    <button
+                      className="btn ghost"
+                      style={{ padding: "0.1rem 0.5rem", fontSize: 11 }}
+                      title="Borrar regla"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (window.confirm(`¿Borrar la regla «${r.name}»?`)) removeRule.mutate(r.id);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </label>
+                  {editingRuleId === r.id && (
+                    <RuleEditor
+                      rule={r}
+                      onCancel={() => setEditingRuleId(null)}
+                      onSave={(changes) => {
+                        editRule.mutate({ id: r.id, changes });
+                        setEditingRuleId(null);
+                      }}
+                    />
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -253,13 +566,46 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                 </p>
               )}
               {(channels.data ?? []).map((c) => (
-                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.4rem", fontSize: 12 }}>
-                  <span className="mono">{c.name}</span>
-                  <span className="chip">{c.channel_type}</span>
-                  <span style={{ marginLeft: "auto", display: "flex", gap: "0.3rem" }}>
-                    <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => test.mutate(c.id)}>Probar</button>
-                    <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => removeChannel.mutate(c.id)}>✕</button>
-                  </span>
+                <div key={c.id} style={{ marginBottom: "0.4rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={c.enabled}
+                      title={c.enabled ? "Canal activo" : "Canal desactivado"}
+                      onChange={(e) => editChannel.mutate({ id: c.id, changes: { enabled: e.target.checked } })}
+                    />
+                    <span className="mono" style={{ color: c.enabled ? "var(--text)" : "var(--text-faint)" }}>{c.name}</span>
+                    <span className="chip">{c.channel_type}</span>
+                    <span style={{ marginLeft: "auto", display: "flex", gap: "0.3rem" }}>
+                      <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => test.mutate(c.id)}>Probar</button>
+                      <button
+                        className="btn ghost"
+                        style={{ fontSize: 11 }}
+                        onClick={() => setEditingChannelId(editingChannelId === c.id ? null : c.id)}
+                      >
+                        {editingChannelId === c.id ? "▲" : "Editar"}
+                      </button>
+                      <button
+                        className="btn ghost"
+                        style={{ fontSize: 11 }}
+                        onClick={() => {
+                          if (window.confirm(`¿Borrar el canal «${c.name}»?`)) removeChannel.mutate(c.id);
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  </div>
+                  {editingChannelId === c.id && (
+                    <ChannelEditor
+                      channel={c}
+                      onCancel={() => setEditingChannelId(null)}
+                      onSave={(changes) => {
+                        editChannel.mutate({ id: c.id, changes });
+                        setEditingChannelId(null);
+                      }}
+                    />
+                  )}
                 </div>
               ))}
               {test.isSuccess && <p style={{ color: "var(--ok)", fontSize: 12 }}>Mensaje de prueba enviado.</p>}

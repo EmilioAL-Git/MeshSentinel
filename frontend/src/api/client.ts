@@ -417,6 +417,7 @@ export interface AlertRuleOut {
   threshold: number | null;
   duration_seconds: number | null;
   cooldown_seconds: number;
+  params: Record<string, unknown>;
 }
 
 export interface ChannelOut {
@@ -456,10 +457,14 @@ export interface AlertCountsOut {
 export const fetchAlertCounts = (groupId?: number | null) =>
   get<AlertCountsOut>(`/alerts/counts${groupId != null ? `?group_id=${groupId}` : ""}`);
 export const fetchAlertRules = () => get<AlertRuleOut[]>("/alert-rules");
+export const createAlertRule = (body: Omit<AlertRuleOut, "id">) => send<AlertRuleOut>("POST", "/alert-rules", body);
 export const patchAlertRule = (id: number, changes: Partial<AlertRuleOut>) =>
   send<AlertRuleOut>("PATCH", `/alert-rules/${id}`, changes);
+export const deleteAlertRule = (id: number) => send<void>("DELETE", `/alert-rules/${id}`);
 export const fetchChannels = () => get<ChannelOut[]>("/channels");
 export const createChannel = (body: Omit<ChannelOut, "id">) => send<ChannelOut>("POST", "/channels", body);
+export const patchChannel = (id: number, changes: Partial<Omit<ChannelOut, "id" | "channel_type">>) =>
+  send<ChannelOut>("PATCH", `/channels/${id}`, changes);
 export const deleteChannel = (id: number) => send<void>("DELETE", `/channels/${id}`);
 export const testChannel = (id: number) => send<{ status: string }>("POST", `/channels/${id}/test`);
 
