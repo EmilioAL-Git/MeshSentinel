@@ -275,7 +275,12 @@ function AddGatewayWizard({
             <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
               1 · Buscar dispositivos USB conectados a esta pasarela.
             </p>
-            <button className="btn" disabled={discover.isPending} onClick={() => discover.mutate()}>
+            <button
+              className="btn"
+              disabled={!gatewayId.trim() || discover.isPending}
+              onClick={() => discover.mutate()}
+              title={!gatewayId.trim() ? "Escribe primero el gateway_id del proceso a buscar" : undefined}
+            >
               {discover.isPending ? "Buscando…" : "⌕ Buscar dispositivos"}
             </button>
             {discover.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(discover.error)}</p>}
@@ -315,7 +320,12 @@ function AddGatewayWizard({
 
         <div style={{ marginBottom: "0.8rem" }}>
           <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>2 · Probar la conexión antes de guardar.</p>
-          <button className="btn" disabled={!paramsReady || test.isPending} onClick={() => test.mutate()}>
+          <button
+            className="btn"
+            disabled={!gatewayId.trim() || !paramsReady || test.isPending}
+            onClick={() => test.mutate()}
+            title={!gatewayId.trim() ? "Escribe primero el gateway_id del proceso a probar" : undefined}
+          >
             {test.isPending ? "Probando…" : "▶ Probar conexión"}
           </button>
           {testResult && (
