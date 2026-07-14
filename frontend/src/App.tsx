@@ -242,6 +242,10 @@ export default function App() {
           queryClient.invalidateQueries({ queryKey: ["batch-ops"] });
           queryClient.invalidateQueries({ queryKey: ["alert-counts"] });
           queryClient.invalidateQueries({ queryKey: ["operation-counts"] });
+          // El selector de canales del Chat (y el botón "Directos", que solo
+          // existe con dm_count > 0) debe descubrir canales/DM nuevos que
+          // llegan en vivo — la lista de mensajes no lo necesita (stream WS).
+          queryClient.invalidateQueries({ queryKey: ["chat-channels"] });
         }, 2000);
       }
     }, setWsStatus);

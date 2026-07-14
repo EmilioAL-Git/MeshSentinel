@@ -23,6 +23,7 @@ export interface ChatRow {
   gatewayId?: string;
   rssi: number | null;
   snr: number | null;
+  packetId: number | null;
   direction: string;
 }
 
@@ -49,6 +50,7 @@ export function chatRowFromActivity(e: ActivityEntry): ChatRow | null {
     gatewayId: e.gatewayId,
     rssi: e.rssi ?? null,
     snr: e.snr ?? null,
+    packetId: typeof raw.packet_id === "number" ? raw.packet_id : null,
     direction: "inbound",
   };
 }
@@ -66,8 +68,22 @@ export function chatRowFromApi(m: ChatMessageOut): ChatRow {
     gatewayId: m.gateway_id ?? undefined,
     rssi: m.rssi,
     snr: m.snr,
+    packetId: m.packet_id,
     direction: m.direction,
   };
+}
+
+/** Identidad de CONTENIDO de un mensaje, común a las dos fuentes (fila del
+ * histórico y entrada de Actividad en vivo) — la clave del dedupe
+ * vivo↔histórico. SIN tiempo a propósito: el envelope `activity.event` se
+ * timestampea al emitirse en el backend y `chat_messages.received_at`
+ * conserva el timestamp del envelope del gateway, así que difieren en
+ * milisegundos para el mismo paquete. `packet_id` (id Meshtastic del
+ * paquete, presente en ambas fuentes) es lo que distingue dos mensajes
+ * idénticos legítimos ("ok" dos veces); la pasarela distingue el mismo
+ * paquete oído por dos gateways (dos filas reales, ambas se muestran). */
+export function contentKey(row: ChatRow): string {
+  return `${row.packetId ?? ""}|${row.fromNodeId}|${row.toNodeId ?? ""}|${row.channelIndex}|${row.text}|${row.gatewayId ?? ""}`;
 }
 
 export function channelLabel(row: Pick<ChatRow, "toNodeId" | "channelIndex" | "channelName">): string {

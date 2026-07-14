@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type ActivityEntry } from "../../activity";
 import { fetchChatChannels, fetchChatMessages, type GatewayOut, type NodeSummaryOut } from "../../api/client";
-import { channelLabel, chatRowFromActivity, chatRowFromApi, initials, type ChatRow } from "../../chat";
+import { channelLabel, chatRowFromActivity, chatRowFromApi, contentKey, initials, type ChatRow } from "../../chat";
 import { NodeSelect } from "../NodeSelect";
 
 /**
@@ -14,9 +14,14 @@ import { NodeSelect } from "../NodeSelect";
  * `entries` (el buffer WS que ya mantiene App, narrado por el backend);
  * el histórico paginado usa `/chat/messages` (tabla propia — necesaria para
  * filtrar por canal/DM con columnas reales, cosa que el JSON de Actividad
- * no ofrece). Fusión por marca de agua temporal (no por id: son dos
- * espacios de identidad distintos, event_id narrado vs. PK de la tabla) —
- * el histórico solo pagina hacia atrás, así que no hay solape real.
+ * no ofrece). Fusión con dedupe por CONTENIDO (`contentKey` en chat.ts), no
+ * por id ni por tiempo: el histórico SÍ solapa con el vivo — TanStack Query
+ * refetchea la página 1 al recuperar el foco, el fetch inicial puede
+ * resolverse después de que un mensaje llegue por WS, y la siembra del
+ * buffer de Actividad al recargar trae los mismos mensajes que el
+ * histórico. Ni el event_id (espacios distintos: envelope narrado vs. PK)
+ * ni el timestamp (el activity.event se timestampea al emitirse, la fila al
+ * ingerir el envelope del gateway — difieren en ms) sirven de clave.
  */
 
 const PAGE_SIZE = 100;
@@ -83,13 +88,6 @@ export function ChatConsole({
     return out;
   }, [history.data]);
 
-  // Marca de agua: solo la sesión de este montaje/cambio de filtros entra
-  // por el stream en vivo; el histórico ya cubre todo lo anterior.
-  const watermarkMs = useRef(Date.now());
-  useEffect(() => {
-    watermarkMs.current = Date.now();
-  }, [serverFilters]);
-
   const matchesFilters = useMemo(() => {
     const needle = debouncedSearch.toLowerCase();
     return (row: ChatRow): boolean => {
@@ -112,13 +110,19 @@ export function ChatConsole({
     const out: ChatRow[] = [];
     for (const e of entries) {
       const row = chatRowFromActivity(e);
-      if (row && row.receivedAtMs >= watermarkMs.current && matchesFilters(row)) out.push(row);
+      if (row && matchesFilters(row)) out.push(row);
     }
     return out;
   }, [entries, matchesFilters]);
 
   const rows = useMemo(() => {
-    const merged = [...liveRows, ...historyRows.filter(matchesFilters)];
+    // Dedupe vivo↔histórico por contenido (ver comentario de cabecera):
+    // la fila del histórico gana (trae channel_name y direction reales).
+    const known = new Set(historyRows.map(contentKey));
+    const merged = [
+      ...liveRows.filter((row) => !known.has(contentKey(row))),
+      ...historyRows.filter(matchesFilters),
+    ];
     merged.sort((a, b) => b.receivedAtMs - a.receivedAtMs);
     return merged;
   }, [liveRows, historyRows, matchesFilters]);
