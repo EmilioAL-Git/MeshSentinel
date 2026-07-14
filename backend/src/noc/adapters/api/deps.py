@@ -48,11 +48,15 @@ async def require_auth(request: Request, current_user: CurrentUserDep) -> AuthUs
 RequireAuthDep = Annotated[AuthUser | None, Depends(require_auth)]
 
 
-async def require_admin(current_user: RequireAuthDep) -> AuthUser | None:
+async def require_admin(request: Request, current_user: RequireAuthDep) -> AuthUser | None:
     """Gestión de usuarios (CAMBIO 7): en modo protegido exige is_admin. En
-    modo abierto (current_user puede ser None) deja pasar — es como se hace
-    el bootstrap del primer usuario."""
-    if current_user is not None and not current_user.is_admin:
+    modo abierto deja pasar a TODO el mundo — es como se hace el bootstrap del
+    primer usuario, y un usuario logueado no puede tener menos permisos que un
+    anónimo (antes un no-admin con sesión recibía 403 que podía saltarse
+    cerrando sesión: incoherente, no una barrera real)."""
+    if not await _auth_service(request).is_protected_mode():
+        return current_user
+    if current_user is None or not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Requiere privilegio de administrador")
     return current_user
 

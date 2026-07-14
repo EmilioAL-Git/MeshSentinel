@@ -77,9 +77,11 @@ class Settings(BaseSettings):
     session_cookie_name: str = "ms_session"
     session_idle_hours: int = 12
     session_max_days: int = 7
-    # Desactivable para despliegues sin TLS todavía (docker-compose.yml no
-    # monta HTTPS por defecto); con TLS delante SIEMPRE debe ir a true.
-    cookie_secure: bool = True
+    # El stack por defecto sirve HTTP plano (nginx :80, sin TLS): una cookie
+    # `Secure` es rechazada por el navegador desde cualquier host que no sea
+    # localhost, y el login parecería funcionar (200) sin dejar sesión. Por
+    # eso el default es false; con TLS delante SIEMPRE debe ir a true.
+    cookie_secure: bool = False
     password_min_length: int = 10
     login_rate_limit_window_seconds: int = 900
     login_rate_limit_per_username: int = 5

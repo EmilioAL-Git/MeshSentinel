@@ -186,6 +186,132 @@ async def test_set_password_invalidates_existing_sessions(session_factory):
     assert await service.resolve_session(outcome.token) is None
 
 
+async def test_login_unknown_user_raises_bad_credentials(session_factory):
+    # Además de fallar, recorre la rama del hash de sacrificio (timing):
+    # el username inexistente paga el mismo coste bcrypt que uno real.
+    service = make_service(session_factory)
+    with pytest.raises(AuthError) as exc:
+        await service.login("no-existe", "cualquier-cosa-larga", None, None)
+    assert exc.value.reason == "bad_credentials"
+
+
+def test_verify_password_rejects_over_bcrypt_limit():
+    # hash_password rechaza >72 bytes, así que verify no debe truncar (truncar
+    # aceptaría cualquier sufijo tras el byte 72).
+    h = AuthService.hash_password("x" * 72)
+    assert AuthService.verify_password("x" * 72, h) is True
+    assert AuthService.verify_password("x" * 73, h) is False
+
+
+async def test_sliding_renewal_is_throttled(session_factory):
+    """El touch deslizante solo escribe si el último tiene >1 min: dos
+    resolves seguidos no cambian expires_at; con last_seen_at envejecido
+    a mano, el siguiente resolve sí renueva."""
+    import hashlib
+
+    service = make_service(session_factory)
+    await service.create_user("ealfaro", "Emilio Alfaro", "correcto-y-largo", is_admin=True)
+    outcome = await service.login("ealfaro", "correcto-y-largo", None, None)
+    token_hash = hashlib.sha256(outcome.token.encode()).hexdigest()
+
+    assert await service.resolve_session(outcome.token) is not None
+    async with session_factory() as session:
+        s = await SqlAuthSessionRepository(session).get_by_token_hash(token_hash)
+        first_expiry = s.expires_at
+
+    assert await service.resolve_session(outcome.token) is not None
+    async with session_factory() as session:
+        s = await SqlAuthSessionRepository(session).get_by_token_hash(token_hash)
+        assert s.expires_at == first_expiry  # sin escritura: throttled
+
+    # Envejecer last_seen_at por encima del umbral manteniendo la sesión viva.
+    async with session_factory() as session:
+        sessions = SqlAuthSessionRepository(session)
+        s = await sessions.get_by_token_hash(token_hash)
+        await sessions.touch(s.id, datetime.now(timezone.utc) - timedelta(minutes=5), s.expires_at)
+        await session.commit()
+
+    assert await service.resolve_session(outcome.token) is not None
+    async with session_factory() as session:
+        s = await SqlAuthSessionRepository(session).get_by_token_hash(token_hash)
+        assert s.expires_at != first_expiry  # renovada
+
+
+async def test_login_prunes_expired_sessions_of_everyone(session_factory):
+    import hashlib
+
+    service = make_service(session_factory)
+    await service.create_user("ealfaro", "Emilio Alfaro", "correcto-y-largo", is_admin=True)
+    stale = await service.login("ealfaro", "correcto-y-largo", None, None)
+    stale_hash = hashlib.sha256(stale.token.encode()).hexdigest()
+
+    # Caducar la primera sesión en BD sin presentarla de nuevo.
+    async with session_factory() as session:
+        sessions = SqlAuthSessionRepository(session)
+        s = await sessions.get_by_token_hash(stale_hash)
+        await sessions.touch(
+            s.id, datetime.now(timezone.utc) - timedelta(hours=2), datetime.now(timezone.utc) - timedelta(hours=1)
+        )
+        await session.commit()
+
+    # Un login cualquiera poda las sesiones muertas de todos los usuarios.
+    await service.login("ealfaro", "correcto-y-largo", None, None)
+    async with session_factory() as session:
+        assert await SqlAuthSessionRepository(session).get_by_token_hash(stale_hash) is None
+
+
+# ── Dependencias de la API (modo abierto/protegido) ─────────────────────────
+
+
+def _fake_request(service: AuthService):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(auth=service)))
+
+
+async def test_require_admin_open_mode_lets_everyone_pass(session_factory):
+    """En modo abierto un usuario logueado no-admin no puede tener menos
+    permisos que un anónimo (antes recibía un 403 saltable cerrando sesión)."""
+    from noc.adapters.api.deps import require_admin
+
+    service = make_service(session_factory)
+    admin = await service.create_user("ealfaro", "Emilio Alfaro", "correcto-y-largo", is_admin=True)
+    peon = await service.create_user("peon", "Peón", "correcto-y-largo", is_admin=False)
+    await service.set_enabled(admin.id, False)  # válvula: modo abierto de nuevo
+    assert await service.is_protected_mode() is False
+
+    peon_user = await service.get_user(peon.id)
+    assert await require_admin(_fake_request(service), peon_user) is peon_user
+    assert await require_admin(_fake_request(service), None) is None
+
+
+async def test_require_admin_protected_mode_rejects_non_admin(session_factory):
+    from fastapi import HTTPException
+
+    from noc.adapters.api.deps import require_admin
+
+    service = make_service(session_factory)
+    await service.create_user("ealfaro", "Emilio Alfaro", "correcto-y-largo", is_admin=True)
+    peon = await service.create_user("peon", "Peón", "correcto-y-largo", is_admin=False)
+    assert await service.is_protected_mode() is True
+
+    peon_user = await service.get_user(peon.id)
+    with pytest.raises(HTTPException) as exc:
+        await require_admin(_fake_request(service), peon_user)
+    assert exc.value.status_code == 403
+
+
+async def test_login_log_requires_session_even_in_open_mode(session_factory):
+    from fastapi import HTTPException
+
+    from noc.adapters.api.routers.auth import login_log
+
+    service = make_service(session_factory)
+    with pytest.raises(HTTPException) as exc:
+        await login_log(_fake_request(service), None, limit=100, before_id=None)
+    assert exc.value.status_code == 401
+
+
 # ── Gestión de usuarios ──────────────────────────────────────────────────────
 
 

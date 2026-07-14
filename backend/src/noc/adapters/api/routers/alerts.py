@@ -4,7 +4,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.deps import RequireAuthDep, SessionDep
 from noc.adapters.notifications import CHANNEL_TYPES, build_channel
 from noc.adapters.persistence.alert_repositories import (
     SqlAlertRepository,
@@ -144,14 +144,14 @@ async def list_rules(session: SessionDep) -> list[RuleOut]:
 
 
 @router.post("/alert-rules", response_model=RuleOut, status_code=201)
-async def create_rule(body: RuleIn, session: SessionDep) -> RuleOut:
+async def create_rule(body: RuleIn, session: SessionDep, _user: RequireAuthDep) -> RuleOut:
     async with session.begin():
         rule = await SqlAlertRuleRepository(session).create(AlertRule(**body.model_dump()))
     return RuleOut.from_entity(rule)
 
 
 @router.patch("/alert-rules/{rule_id}", response_model=RuleOut)
-async def update_rule(rule_id: int, body: RulePatch, session: SessionDep) -> RuleOut:
+async def update_rule(rule_id: int, body: RulePatch, session: SessionDep, _user: RequireAuthDep) -> RuleOut:
     changes = body.model_dump(exclude_unset=True)
     async with session.begin():
         rule = await SqlAlertRuleRepository(session).update(rule_id, changes)
@@ -161,13 +161,16 @@ async def update_rule(rule_id: int, body: RulePatch, session: SessionDep) -> Rul
 
 
 @router.delete("/alert-rules/{rule_id}", status_code=204)
-async def delete_rule(rule_id: int, session: SessionDep) -> None:
+async def delete_rule(rule_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
     async with session.begin():
         deleted = await SqlAlertRuleRepository(session).delete(rule_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Rule not found")
 
 
+# En modo protegido, crear/editar/borrar reglas y canales exige sesión
+# (los canales además hacen que el backend haga POST a URLs arbitrarias).
+# El ACK de alertas queda abierto a propósito: es triaje, no configuración.
 # ── Canales ──────────────────────────────────────────────────────────────────
 
 
@@ -178,7 +181,7 @@ async def list_channels(session: SessionDep) -> list[ChannelOut]:
 
 
 @router.post("/channels", response_model=ChannelOut, status_code=201)
-async def create_channel(body: ChannelIn, session: SessionDep) -> ChannelOut:
+async def create_channel(body: ChannelIn, session: SessionDep, _user: RequireAuthDep) -> ChannelOut:
     if body.channel_type not in CHANNEL_TYPES:
         raise HTTPException(status_code=422, detail=f"Unknown channel_type: {body.channel_type}")
     async with session.begin():
@@ -189,7 +192,7 @@ async def create_channel(body: ChannelIn, session: SessionDep) -> ChannelOut:
 
 
 @router.patch("/channels/{channel_id}", response_model=ChannelOut)
-async def update_channel(channel_id: int, body: ChannelPatch, session: SessionDep) -> ChannelOut:
+async def update_channel(channel_id: int, body: ChannelPatch, session: SessionDep, _user: RequireAuthDep) -> ChannelOut:
     async with session.begin():
         channel = await SqlChannelRepository(session).update(channel_id, body.model_dump(exclude_unset=True))
     if channel is None:
@@ -198,7 +201,7 @@ async def update_channel(channel_id: int, body: ChannelPatch, session: SessionDe
 
 
 @router.delete("/channels/{channel_id}", status_code=204)
-async def delete_channel(channel_id: int, session: SessionDep) -> None:
+async def delete_channel(channel_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
     async with session.begin():
         deleted = await SqlChannelRepository(session).delete(channel_id)
     if not deleted:
@@ -206,7 +209,7 @@ async def delete_channel(channel_id: int, session: SessionDep) -> None:
 
 
 @router.post("/channels/{channel_id}/test")
-async def test_channel(channel_id: int, session: SessionDep) -> dict[str, str]:
+async def test_channel(channel_id: int, session: SessionDep, _user: RequireAuthDep) -> dict[str, str]:
     config = await SqlChannelRepository(session).get(channel_id)
     if config is None:
         raise HTTPException(status_code=404, detail="Channel not found")

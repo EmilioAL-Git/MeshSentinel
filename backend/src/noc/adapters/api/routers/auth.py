@@ -222,17 +222,21 @@ async def delete_user(user_id: int, request: Request, _admin: RequireAdminDep) -
 # ── Login log (CAMBIO 4) ────────────────────────────────────────────────────
 # Contiene IPs y user-agents de intentos de login: a diferencia del resto de
 # GET del sistema (siempre públicos, filosofía de monitorización abierta),
-# esto es auditoría de seguridad de la propia autenticación — exige sesión,
-# pero sin exigir is_admin (no es gestión de usuarios).
+# esto es auditoría de seguridad de la propia autenticación — exige sesión
+# SIEMPRE, incluso en modo abierto (RequireAuthDep no serviría: en modo
+# abierto deja pasar sin sesión), pero sin exigir is_admin (no es gestión
+# de usuarios).
 
 
 @router.get("/login-log", response_model=list[LoginLogOut])
 async def login_log(
     request: Request,
-    _user: RequireAuthDep,
+    current_user: CurrentUserDep,
     limit: int = Query(default=100, ge=1, le=500),
     before_id: int | None = Query(default=None, ge=1),
 ) -> list[LoginLogOut]:
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
     async with _db(request).session_factory() as session:
         entries = await SqlAuthLoginLogRepository(session).list_page(limit, before_id)
     return [LoginLogOut(**{f.name: getattr(e, f.name) for f in fields(e)}) for e in entries]

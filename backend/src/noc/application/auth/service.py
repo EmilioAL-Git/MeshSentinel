@@ -30,6 +30,16 @@ logger = logging.getLogger("noc.auth")
 
 _BCRYPT_MAX_BYTES = 72
 
+# Hash de sacrificio: cuando el usuario no existe se verifica contra esto en
+# vez de saltarse bcrypt, para que el tiempo de respuesta no delate qué
+# usernames existen (oráculo de enumeración por timing).
+_DUMMY_HASH = bcrypt.hashpw(b"meshsentinel-dummy", bcrypt.gensalt()).decode("ascii")
+
+# Renovación deslizante como máximo una vez por minuto: sin este umbral cada
+# request autenticada escribe en BD (touch+commit), y con el polling del
+# frontend eso compite sin motivo con el escritor del activity_log en SQLite.
+_TOUCH_MIN_INTERVAL = timedelta(seconds=60)
+
 
 class AuthError(Exception):
     def __init__(self, reason: str, message: str) -> None:
@@ -91,8 +101,14 @@ class AuthService:
 
     @staticmethod
     def verify_password(password: str, password_hash: str) -> bool:
+        raw = password.encode("utf-8")
+        # hash_password rechaza >72 bytes, así que ningún hash almacenado puede
+        # corresponder a una contraseña más larga: rechazar en vez de truncar
+        # (truncar aceptaría cualquier sufijo tras el byte 72).
+        if len(raw) > _BCRYPT_MAX_BYTES:
+            return False
         try:
-            return bcrypt.checkpw(password.encode("utf-8")[:_BCRYPT_MAX_BYTES], password_hash.encode("ascii"))
+            return bcrypt.checkpw(raw, password_hash.encode("ascii"))
         except ValueError:
             return False
 
@@ -150,6 +166,10 @@ class AuthService:
                 raise
 
             user = await users.get_by_username(username)
+            if user is None:
+                # Coste bcrypt también para usernames inexistentes: sin esto el
+                # tiempo de respuesta delata qué usuarios existen (timing).
+                self.verify_password(password, _DUMMY_HASH)
             if user is None or not self.verify_password(password, user.password_hash):
                 await self._record_failure(username, ip)
                 await logs.create(
@@ -176,6 +196,12 @@ class AuthService:
             now = datetime.now(timezone.utc)
             token = secrets.token_urlsafe(32)
             expires_at = now + timedelta(hours=self._settings.session_idle_hours)
+            # Poda oportunista: las sesiones caducadas solo se borraban al
+            # volver a presentarse su token, así que las abandonadas se
+            # acumulaban para siempre. Cada login limpia las muertas de todos.
+            await SqlAuthSessionRepository(session).delete_expired(
+                now, created_before=now - timedelta(days=self._settings.session_max_days)
+            )
             await SqlAuthSessionRepository(session).create(
                 AuthSession(user_id=user.id or 0, token_hash=_hash_token(token), expires_at=expires_at, ip=ip, user_agent=user_agent)
             )
@@ -236,10 +262,16 @@ class AuthService:
                 await session.commit()
                 return None
 
-            new_expiry = min(now + timedelta(hours=self._settings.session_idle_hours), absolute_deadline)
-            assert s.id is not None
-            await sessions.touch(s.id, now, new_expiry)
-            await session.commit()
+            # Renovación deslizante con throttle: solo escribe si el último
+            # touch tiene más de _TOUCH_MIN_INTERVAL — la precisión perdida
+            # (≤1 min sobre 12 h de idle) es irrelevante y evita un
+            # write+commit por request con el polling del frontend.
+            last_seen = _as_utc(s.last_seen_at) or created_at
+            if now - last_seen >= _TOUCH_MIN_INTERVAL:
+                new_expiry = min(now + timedelta(hours=self._settings.session_idle_hours), absolute_deadline)
+                assert s.id is not None
+                await sessions.touch(s.id, now, new_expiry)
+                await session.commit()
             return user
 
     # ── Gestión de usuarios ──────────────────────────────────────────────

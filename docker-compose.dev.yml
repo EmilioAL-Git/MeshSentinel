@@ -1,12 +1,19 @@
 # Desarrollo: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Los puertos de infraestructura (BD, Redis, API directa) se ligan a
+# 127.0.0.1: son comodidades de desarrollo, no servicios para la LAN. La API
+# directa además confía en X-Real-IP (rate limit de login / login-log), que
+# solo es fiable cuando la fija el nginx de delante — expuesta a la red, la
+# cabecera sería falsificable. La UI de dev (:5173) sí queda abierta: su
+# proxy de Vite reenvía /api por el lado servidor.
 services:
   postgres:
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   redis:
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   backend:
     build:
@@ -19,7 +26,7 @@ services:
       - ./backend/src:/app/src
       - ./backend/alembic:/app/alembic
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
   gateway:
     environment:

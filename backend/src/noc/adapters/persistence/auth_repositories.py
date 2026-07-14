@@ -121,6 +121,15 @@ class SqlAuthSessionRepository:
     async def delete_for_user(self, user_id: int) -> None:
         await self._session.execute(delete(AuthSessionModel).where(AuthSessionModel.user_id == user_id))
 
+    async def delete_expired(self, now: datetime, created_before: datetime) -> int:
+        """Borra sesiones muertas de cualquier usuario: caducadas por
+        inactividad (expires_at) o por el tope absoluto (created_at)."""
+        stmt = delete(AuthSessionModel).where(
+            (AuthSessionModel.expires_at < now) | (AuthSessionModel.created_at < created_before)
+        )
+        result = await self._session.execute(stmt)
+        return result.rowcount or 0
+
 
 class SqlAuthLoginLogRepository:
     def __init__(self, session: AsyncSession) -> None:

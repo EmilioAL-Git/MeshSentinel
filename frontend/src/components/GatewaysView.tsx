@@ -145,13 +145,21 @@ function AddGatewayWizard({
 
   const paramsReady = transportType === "usb" ? selectedPort !== "" : tcpHost.trim() !== "";
 
-  // Un gateway_id nuevo (que nunca ha reportado heartbeat) se puede guardar
-  // sin probar conexión: es un pre-registro a la espera de que el proceso
-  // correspondiente arranque con ese GATEWAY_ID. Uno ya conocido por
-  // heartbeat (candidato) exige probar antes de guardar, como siempre.
+  // Un gateway_id que nunca ha reportado heartbeat se puede guardar sin
+  // probar conexión: es un pre-registro a la espera de que el proceso
+  // correspondiente arranque con ese GATEWAY_ID. Uno ya visto en vivo exige
+  // probar antes de guardar, como siempre. «Nunca visto» se deriva del estado
+  // de la fila, no de la lista de candidatos: una fila creada por pre-registro
+  // conserva status "unassigned" y sin nodo local/historial hasta que su
+  // proceso reporta de verdad — así un pre-registro con errata se puede
+  // volver a guardar (o re-crear tras borrarlo) sin exigir una prueba contra
+  // un proceso que aún no existe.
   const existing = gateways.find((g) => g.gateway_id === gatewayId);
-  const isKnownCandidate = candidates.includes(gatewayId);
-  const managedConflict = !!existing && existing.managed && existing.deleted_at == null;
+  const everSeen =
+    !!existing &&
+    (existing.status !== "unassigned" || existing.local_node_id != null || existing.last_connected_at != null);
+  const isKnownCandidate = everSeen;
+  const managedConflict = !!existing && existing.managed && existing.deleted_at == null && everSeen;
 
   return (
     <div className="panel" style={{ margin: "0.75rem", flexShrink: 0 }}>
@@ -307,14 +315,26 @@ function AddGatewayWizard({
           <button
             className={`btn${testResult?.ok || !isKnownCandidate ? " primary" : ""}`}
             style={{ marginLeft: "0.5rem" }}
-            disabled={managedConflict || (isKnownCandidate && !testResult?.ok) || !name.trim() || !gatewayId.trim() || save.isPending}
+            disabled={
+              managedConflict ||
+              (isKnownCandidate && !testResult?.ok) ||
+              // TCP sin host guardaría {host: ""} y el connect posterior
+              // revienta en el transporte (fail-fast, ADR 0023); USB sin
+              // puerto sí es válido: params vacíos = autodetección al arrancar.
+              (transportType === "tcp" && !paramsReady) ||
+              !name.trim() ||
+              !gatewayId.trim() ||
+              save.isPending
+            }
             onClick={() => save.mutate()}
             title={
               managedConflict
                 ? "Ya hay un enlace configurado con este identificador"
                 : isKnownCandidate && !testResult?.ok
                   ? "Prueba la conexión con éxito antes de guardar"
-                  : undefined
+                  : transportType === "tcp" && !paramsReady
+                    ? "Introduce el host del nodo TCP"
+                    : undefined
             }
           >
             Guardar enlace
