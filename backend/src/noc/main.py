@@ -13,6 +13,7 @@ from noc.adapters.api.routers import (
     admin_remote_flags,
     alerts,
     auth as auth_router,
+    chat,
     dashboard,
     gateways,
     health,
@@ -197,6 +198,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_profiles.router, prefix=settings.api_v1_prefix)
     app.include_router(organization.router, prefix=settings.api_v1_prefix)
     app.include_router(activity_router.router, prefix=settings.api_v1_prefix)
+    app.include_router(chat.router, prefix=settings.api_v1_prefix)
     app.include_router(topology.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app

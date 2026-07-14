@@ -26,6 +26,7 @@ import {
 } from "./api/client";
 import { ActivityConsole } from "./components/ActivityConsole";
 import { AlertsView } from "./components/AlertsView";
+import { ChatConsole } from "./components/chat/ChatConsole";
 import { ConfigEditor } from "./components/ConfigEditor";
 import { FleetView } from "./components/fleet/FleetView";
 import { GatewaysView } from "./components/GatewaysView";
@@ -46,6 +47,7 @@ import { StatusBar } from "./components/shell/StatusBar";
 import { toast, ToastHost } from "./components/shell/Toast";
 import { useAuth } from "./context/AuthContext";
 import { useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
+import { usePersistedState } from "./hooks/usePersistedState";
 import { computeFleetGroupMetrics, computeGroupAttention, computeGroupStatus, scopeGatewaysToGroup } from "./components/fleet/groupStats";
 import { consumeFinished } from "./opTracker";
 import { t } from "./tokens";
@@ -206,6 +208,7 @@ export default function App() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [openBatchId, setOpenBatchId] = useState<number | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [registerTab, setRegisterTab] = usePersistedState<"activity" | "chat">("registro.tab", "activity");
   const invalidateTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -620,11 +623,33 @@ export default function App() {
           )}
 
           {view === "activity" && (
-            <ActivityConsole
-              entries={activity}
-              summaries={summaries}
-              gateways={gateways.data ?? []}
-            />
+            <div style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
+              <div className="toolbar">
+                <span className="seg">
+                  <button
+                    className={registerTab === "activity" ? "on" : undefined}
+                    onClick={() => setRegisterTab("activity")}
+                    title="Registro cronológico completo de paquetes"
+                  >
+                    Actividad
+                  </button>
+                  <button
+                    className={registerTab === "chat" ? "on" : undefined}
+                    onClick={() => setRegisterTab("chat")}
+                    title="Monitor de mensajes de texto de la red"
+                  >
+                    Chat
+                  </button>
+                </span>
+              </div>
+              <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+                {registerTab === "activity" ? (
+                  <ActivityConsole entries={activity} summaries={summaries} gateways={gateways.data ?? []} />
+                ) : (
+                  <ChatConsole entries={activity} summaries={summaries} gateways={gateways.data ?? []} />
+                )}
+              </div>
+            </div>
           )}
 
           {view === "gateways" && <GatewaysView />}

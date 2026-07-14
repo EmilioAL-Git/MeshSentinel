@@ -901,6 +901,65 @@ export function fetchActivityLog(
 }
 
 /**
+ * Chat: monitor de TEXT_MESSAGE_APP (mismo paquete que Actividad, tabla
+ * propia con columnas estructuradas para el selector de canales/DM).
+ */
+export interface ChatMessageOut {
+  id: number;
+  from_node_id: string;
+  to_node_id: string | null;
+  channel_index: number;
+  channel_name: string | null;
+  text: string;
+  gateway_id: string | null;
+  rssi: number | null;
+  snr: number | null;
+  hops_away: number | null;
+  hop_limit: number | null;
+  hop_start: number | null;
+  packet_id: number | null;
+  direction: string;
+  received_at: string | null;
+}
+
+export function fetchChatMessages(
+  limit = 100,
+  opts: {
+    beforeId?: number;
+    channelIndex?: number;
+    dmOnly?: boolean;
+    broadcastOnly?: boolean;
+    nodeId?: string;
+    gatewayId?: string;
+    q?: string;
+  } = {},
+): Promise<ChatMessageOut[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (opts.beforeId != null) params.set("before_id", String(opts.beforeId));
+  if (opts.channelIndex != null) params.set("channel_index", String(opts.channelIndex));
+  if (opts.dmOnly) params.set("dm_only", "true");
+  if (opts.broadcastOnly) params.set("broadcast_only", "true");
+  if (opts.nodeId) params.set("node_id", opts.nodeId);
+  if (opts.gatewayId) params.set("gateway_id", opts.gatewayId);
+  if (opts.q) params.set("q", opts.q);
+  return get<ChatMessageOut[]>(`/chat/messages?${params}`);
+}
+
+export interface ChatChannelOut {
+  channel_index: number;
+  channel_name: string | null;
+  message_count: number;
+  last_message_at: string | null;
+}
+
+export interface ChatChannelsOut {
+  channels: ChatChannelOut[];
+  dm_count: number;
+}
+
+export const fetchChatChannels = () => get<ChatChannelsOut>("/chat/channels");
+
+/**
  * Estado de la conexión de eventos, de primera clase para la UI (v0.7 §11.2):
  * antes el socket moría en silencio y la interfaz se quedaba congelada sin
  * avisar. `disconnectedAt` permite mostrar "datos congelados desde HH:MM:SS".

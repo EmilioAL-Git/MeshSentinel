@@ -349,6 +349,41 @@ class TelemetryModel(Base):
     gateway_id: Mapped[str | None] = mapped_column(String(64))
 
 
+class ChatMessageModel(Base):
+    """Chat: monitor de TEXT_MESSAGE_APP (mismo paquete que narra
+    `activity_log`, tabla propia por las columnas estructuradas que necesita
+    el selector de canales/DM y por ser el punto de apoyo de una futura fase
+    de envío — ver `domain/chat/entities.py:ChatMessage`)."""
+
+    __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("ix_chat_messages_channel_received", "channel_index", "received_at"),
+        Index("ix_chat_messages_from_received", "from_node_id", "received_at"),
+        Index("ix_chat_messages_to_received", "to_node_id", "received_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    from_node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), nullable=False)
+    to_node_id: Mapped[str | None] = mapped_column(String(16))
+    channel_index: Mapped[int] = mapped_column(Integer, default=0)
+    channel_name: Mapped[str | None] = mapped_column(String(64))
+    text: Mapped[str] = mapped_column(String(512))
+    gateway_id: Mapped[str | None] = mapped_column(String(64))
+    rssi: Mapped[int | None] = mapped_column(Integer)
+    snr: Mapped[float | None] = mapped_column(Float)
+    hops_away: Mapped[int | None] = mapped_column(Integer)
+    hop_limit: Mapped[int | None] = mapped_column(Integer)
+    hop_start: Mapped[int | None] = mapped_column(Integer)
+    encrypted: Mapped[bool | None] = mapped_column(Boolean)
+    packet_id: Mapped[int | None] = mapped_column(BigInteger)
+    direction: Mapped[str] = mapped_column(String(8), default="inbound")
+    delivery_status: Mapped[str | None] = mapped_column(String(16))
+    reply_to_id: Mapped[int | None] = mapped_column(ForeignKey("chat_messages.id", ondelete="SET NULL"))
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    raw: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class AuthUserModel(Base):
     """Usuario de MeshSentinel (auth). Sin RBAC: `is_admin` es el único
     privilegio especial y solo gatea la gestión de usuarios — todas las

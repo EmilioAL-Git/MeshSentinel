@@ -11,7 +11,10 @@
     "text": { "type": "string", "maxLength": 512 },
     "snr": { "type": ["number", "null"] },
     "rssi": { "type": ["integer", "null"] },
-    "hops_away": { "type": ["integer", "null"], "minimum": 0 }
+    "hops_away": { "type": ["integer", "null"], "minimum": 0 },
+    "packet_id": { "type": ["integer", "null"], "description": "id de paquete Meshtastic (protobuf), no correlativo con el Registro" },
+    "hop_limit": { "type": ["integer", "null"], "minimum": 0 },
+    "hop_start": { "type": ["integer", "null"], "minimum": 0 }
   },
   "additionalProperties": false
 }

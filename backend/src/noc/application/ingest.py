@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from noc.adapters.persistence.chat_repositories import SqlChatRepository
 from noc.adapters.persistence.repositories import (
     SqlGatewayRepository,
     SqlNeighborRepository,
@@ -23,6 +24,7 @@ from noc.application import activity_events
 from noc.application.activity import activity
 from noc.application.dashboard import is_stale
 from noc.application.gateway_link_selection import GatewayLinkCandidate, select_primary_link
+from noc.domain.chat.entities import ChatMessage
 from noc.domain.nodes.entities import (
     GatewayInfo,
     Node,
@@ -331,6 +333,24 @@ class IngestService:
         to_label = _node_label(await node_repo.get(to_id), to_id) if to_id else None
         await activity.emit_activity(
             activity_events.render_message(from_id, label, p, to_label, gateway_id)
+        )
+        # Chat: mismo paquete, misma transacción — ver domain/chat/entities.py.
+        await SqlChatRepository(session).add(
+            ChatMessage(
+                from_node_id=from_id,
+                to_node_id=to_id,
+                channel_index=p.get("channel_index", 0),
+                text=p.get("text", ""),
+                gateway_id=gateway_id,
+                rssi=p.get("rssi"),
+                snr=p.get("snr"),
+                hops_away=p.get("hops_away"),
+                hop_limit=p.get("hop_limit"),
+                hop_start=p.get("hop_start"),
+                packet_id=p.get("packet_id"),
+                raw=p,
+                received_at=ts,
+            )
         )
 
     async def _on_neighbors(

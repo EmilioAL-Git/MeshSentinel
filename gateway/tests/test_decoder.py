@@ -153,6 +153,9 @@ def test_text_message_packet():
     assert payload["to_node_id"] == "!deadbeef"
     assert payload["channel_index"] == 1
     assert payload["rssi"] == -82
+    assert payload["packet_id"] == 123456
+    assert payload["hop_limit"] == 2
+    assert payload["hop_start"] == 3
 
 
 def test_position_and_telemetry_carry_radio_metadata():

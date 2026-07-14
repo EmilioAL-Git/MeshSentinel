@@ -168,6 +168,9 @@ def decode_packet(packet: dict[str, Any]) -> DecodedEvent | None:
                 "snr": meta["snr"],
                 "rssi": meta["rssi"],
                 "hops_away": meta["hops_away"],
+                "packet_id": packet.get("id"),
+                "hop_limit": packet.get("hopLimit"),
+                "hop_start": packet.get("hopStart"),
             },
         )
 
