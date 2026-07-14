@@ -78,21 +78,6 @@ function Field({ k, v, title }: { k: string; v: React.ReactNode; title?: string 
 
 // ── Asistente: Buscar dispositivos → Seleccionar → Probar conexión → Guardar ─
 
-/** Propone una semilla exclusiva no usada por ninguna pasarela simulada ya
- * configurada (M6.2): dos procesos con la misma semilla generan la MISMA
- * malla ficticia y se pisan. */
-function suggestSeed(gateways: GatewayOut[]): number {
-  const used = new Set(
-    gateways
-      .map((g) => Number(g.connection_params?.seed))
-      .filter((s) => Number.isFinite(s)),
-  );
-  used.add(42); // valor por defecto del proceso: evitar chocar con .env
-  let seed = 43;
-  while (used.has(seed)) seed += 1;
-  return seed;
-}
-
 function AddGatewayWizard({
   initialGatewayId,
   candidates,
@@ -108,27 +93,17 @@ function AddGatewayWizard({
 }) {
   const queryClient = useQueryClient();
   const [gatewayId, setGatewayId] = useState(initialGatewayId);
-  const [transportType, setTransportType] = useState<"usb" | "tcp" | "simulated">("usb");
+  const [transportType, setTransportType] = useState<"usb" | "tcp">("usb");
   const [devices, setDevices] = useState<DeviceOut[] | null>(null);
   const [selectedPort, setSelectedPort] = useState("");
   const [tcpHost, setTcpHost] = useState("");
   const [tcpPort, setTcpPort] = useState("4403");
-  const [simSeed, setSimSeed] = useState(String(suggestSeed(gateways)));
-  const [simNodeCount, setSimNodeCount] = useState("12");
-  const [simSharedSeed, setSimSharedSeed] = useState("0");
-  const [simSharedNodeCount, setSimSharedNodeCount] = useState("4");
   const [testResult, setTestResult] = useState<TestConnectionResultOut | null>(null);
   const [name, setName] = useState("");
 
   const connectionParams = (): Record<string, unknown> => {
     if (transportType === "usb") return selectedPort ? { device: selectedPort } : {};
-    if (transportType === "tcp") return { host: tcpHost.trim(), port: Number(tcpPort) || 4403 };
-    return {
-      seed: Number(simSeed) || 42,
-      node_count: Number(simNodeCount) || 12,
-      shared_seed: Number(simSharedSeed) || 0,
-      shared_node_count: Number(simSharedNodeCount) || 4,
-    };
+    return { host: tcpHost.trim(), port: Number(tcpPort) || 4403 };
   };
 
   const discover = useMutation({
@@ -168,12 +143,7 @@ function AddGatewayWizard({
     },
   });
 
-  const paramsReady =
-    transportType === "usb"
-      ? selectedPort !== ""
-      : transportType === "tcp"
-        ? tcpHost.trim() !== ""
-        : simSeed.trim() !== "";
+  const paramsReady = transportType === "usb" ? selectedPort !== "" : tcpHost.trim() !== "";
 
   // Un gateway_id nuevo (que nunca ha reportado heartbeat) se puede guardar
   // sin probar conexión: es un pre-registro a la espera de que el proceso
@@ -205,7 +175,7 @@ function AddGatewayWizard({
           ))}
         </datalist>
         <span className="seg">
-          {(["usb", "tcp", "simulated"] as const).map((tt) => (
+          {(["usb", "tcp"] as const).map((tt) => (
             <button
               key={tt}
               className={transportType === tt ? "on" : undefined}
@@ -222,22 +192,6 @@ function AddGatewayWizard({
         <button className="btn ghost" onClick={onCancel}>✕ Cancelar</button>
       </div>
       <div className="panel-body">
-        {transportType === "simulated" && (
-          <div style={{ marginBottom: "0.8rem" }}>
-            <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
-              1 · Parámetros de la malla simulada. La semilla propuesta no está usada por ninguna otra
-              pasarela; una <em>semilla compartida</em> igual en varias pasarelas genera nodos comunes
-              (SHRxx) para validar Multi-Gateway.
-            </p>
-            <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", fontSize: 12 }}>
-              <label>Semilla <input className="input" style={{ width: 80 }} type="number" value={simSeed} onChange={(e) => { setSimSeed(e.target.value); setTestResult(null); }} /></label>
-              <label>Nodos <input className="input" style={{ width: 70 }} type="number" value={simNodeCount} onChange={(e) => { setSimNodeCount(e.target.value); setTestResult(null); }} /></label>
-              <label title="0 = sin nodos compartidos">Semilla compartida <input className="input" style={{ width: 80 }} type="number" value={simSharedSeed} onChange={(e) => { setSimSharedSeed(e.target.value); setTestResult(null); }} /></label>
-              <label>Nodos compartidos <input className="input" style={{ width: 70 }} type="number" value={simSharedNodeCount} onChange={(e) => { setSimSharedNodeCount(e.target.value); setTestResult(null); }} /></label>
-            </div>
-          </div>
-        )}
-
         {transportType === "tcp" && (
           <div style={{ marginBottom: "0.8rem" }}>
             <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
