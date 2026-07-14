@@ -152,6 +152,14 @@ def test_render_traceroute_route_as_arrows():
     assert event.description == "EA2ABC → EA2XYZ → EA2DEF"
 
 
+def test_render_traceroute_direct_without_hops():
+    """Traceroute directo (route=[] — visto en producción): se narra como
+    enlace directo, nunca se descarta ni queda con descripción vacía."""
+    event = ae.render_traceroute(NODE, "EA2ABC", [], None, {"snr": 13.5})
+    assert event.packet_type == "Traceroute"
+    assert event.description == "directo (sin saltos intermedios)"
+
+
 def test_render_waypoint_packet():
     p = {"name": "Refugio Sur", "description": "Punto de encuentro", "latitude": 40.4, "longitude": -3.7}
     event = ae.render_waypoint(NODE, "EA2ABC", p, None)
@@ -198,7 +206,9 @@ def test_render_operation_vocabulary_and_priorities():
 def test_render_batch_vocabulary():
     created = ae.render_batch(7, "región EU", "created", 12)
     assert created.severity == "important"
-    assert created.title == "Lanzado el lote «región EU» sobre 12 nodos"
+    assert created.title == "Sistema lanzó el lote «región EU» sobre 12 nodos"
+    created_by_user = ae.render_batch(7, "región EU", "created", 12, actor_label="Emilio Alfaro")
+    assert created_by_user.title == "Emilio Alfaro lanzó el lote «región EU» sobre 12 nodos"
     errors = ae.render_batch(7, "región EU", "completed_with_errors", 12)
     assert errors.severity == "critical"
 
@@ -241,6 +251,54 @@ class Recorder:
     @property
     def diary(self) -> list[dict]:
         return [e["payload"] for e in self.events if e["event_type"] == "activity.event"]
+
+
+async def test_ingest_own_gateway_device_telemetry_is_not_narrated(session_factory):
+    """La telemetría de dispositivo del NODO LOCAL del gateway que la reporta
+    no genera entrada en el Registro (auto-reporte frecuente por la API, no
+    tráfico LoRa — inunda el diario), pero SÍ se persiste; oída por OTRA
+    pasarela sí se narra (tráfico de malla real)."""
+    recorder = Recorder()
+    activity.attach(recorder)
+    try:
+        ingest = IngestService(session_factory)
+        # gw-test declara su nodo local vía heartbeat
+        await ingest.handle_event(
+            make_event(
+                "gateway.status",
+                {"status": "connected", "transport": "usb", "local_node_id": NODE},
+            )
+        )
+        telemetry = {"node_id": NODE, "kind": "device", "battery_level": 90}
+        # Auto-reporte del nodo local por su propio gateway: mudo en el diario
+        await ingest.handle_event(make_event("telemetry.received", telemetry))
+        # El mismo nodo oído por OTRA pasarela: tráfico de malla, se narra
+        await ingest.handle_event(
+            make_event("telemetry.received", telemetry, gateway_id="gw-otra")
+        )
+        # Telemetría ambiental del nodo local: no es el auto-reporte device, se narra
+        await ingest.handle_event(
+            make_event(
+                "telemetry.received",
+                {"node_id": NODE, "kind": "environment", "temperature_c": 21.0},
+            )
+        )
+    finally:
+        activity.attach(None)
+
+    diary = [d for d in recorder.diary if d.get("source") == "mesh"]
+    assert [d["packet_type"] for d in diary] == [
+        "Telemetría del dispositivo",  # gw-otra
+        "Telemetría ambiental",  # local, pero no device
+    ]
+    assert [d["gateway_id"] for d in diary] == ["gw-otra", "gw-test"]
+
+    # La telemetría silenciada SÍ se persistió (las tres filas)
+    async with session_factory() as session:
+        from noc.adapters.persistence.repositories import SqlTelemetryRepository
+
+        rows = await SqlTelemetryRepository(session).list_for_node(NODE, 10, None)
+        assert len(rows) == 3
 
 
 async def test_ingest_node_info_always_plus_new_node_fact(session_factory):

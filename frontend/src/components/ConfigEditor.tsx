@@ -19,6 +19,7 @@ import { NodeSelect } from "./NodeSelect";
 import { GatewaySelect } from "./shell/GatewaySelect";
 import { toast } from "./shell/Toast";
 import { styles } from "../styles";
+import { relativeTime } from "../time";
 
 interface Props {
   summaries: NodeSummaryOut[];
@@ -146,14 +147,6 @@ export function FieldControl({
   );
 }
 
-function relativeTime(iso: string | null): string {
-  if (!iso) return "nunca leído";
-  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return `hace ${Math.round(seconds)}s`;
-  if (seconds < 3600) return `hace ${Math.round(seconds / 60)}m`;
-  return `hace ${Math.round(seconds / 3600)}h`;
-}
-
 function SectionEditor({
   section,
   snapshot,
@@ -177,7 +170,7 @@ function SectionEditor({
         </span>
         <span style={{ ...styles.dim, fontSize: "0.85rem" }}>{section.description}</span>
         <span style={{ marginLeft: "auto", ...styles.dim, fontSize: "0.8rem" }}>
-          Leído {relativeTime(snapshot?.last_read_at ?? null)}
+          {snapshot?.last_read_at ? `Leído ${relativeTime(snapshot.last_read_at)}` : "Nunca leído"}
         </span>
         <button style={btn} onClick={onRefresh}>Refrescar</button>
       </div>

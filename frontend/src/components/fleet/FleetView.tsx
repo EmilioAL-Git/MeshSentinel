@@ -9,6 +9,7 @@ import {
   type TagOut,
 } from "../../api/client";
 import { AddToGroupMenu } from "./AddToGroupMenu";
+import { AssignNodeTypeMenu } from "./AssignNodeTypeMenu";
 import { FleetBlocks } from "./FleetBlocks";
 import { GroupBar } from "./GroupBar";
 import { computeFleetGroupMetrics } from "./groupStats";
@@ -47,6 +48,7 @@ export function FleetView({
   checkedIds,
   onCheckedChange,
   onCreateBatch,
+  lowBatteryThreshold,
 }: {
   summaries: NodeSummaryOut[];
   allSummaries: NodeSummaryOut[];
@@ -70,10 +72,27 @@ export function FleetView({
   checkedIds: Set<string>;
   onCheckedChange: (ids: Set<string>) => void;
   onCreateBatch: () => void;
+  /** Umbral de batería baja de la red (thresholds del backend) — nunca un
+   * valor hardcodeado aquí (hardening). */
+  lowBatteryThreshold: number;
 }) {
   const set = (patch: NodeFilterParams) => onFiltersChange({ ...filters, ...patch });
   const hasFilters = Object.values(filters).some((v) => v !== undefined && v !== "" && v !== false);
   const isGrouped = activeGroup != null;
+
+  // Orden ESTABLE del roster (hardening): el backend ordena por
+  // last_seen_at desc, que reordena filas bajo el cursor con cada refetch —
+  // inaceptable en una tabla donde se arman lotes con checkboxes. Aquí se
+  // ordena por nombre (desempate por id); la actividad se muestra como
+  // indicador (columna "Visto" + pulso de recencia), nunca como criterio
+  // de orden.
+  const stableSummaries = useMemo(() => {
+    const key = (s: NodeSummaryOut) =>
+      (s.node.short_name ?? s.node.long_name ?? s.node.node_id).toLowerCase();
+    return [...summaries].sort(
+      (a, b) => key(a).localeCompare(key(b)) || a.node.node_id.localeCompare(b.node.node_id),
+    );
+  }, [summaries]);
 
   // Memoizados: con miles de nodos, recorrer `summaries`/`allSummaries` en
   // cada render (incl. los que no cambian ni datos ni selección) deja de
@@ -83,9 +102,9 @@ export function FleetView({
     () =>
       summaries.filter((s) => {
         const b = s.last_device_telemetry?.battery_level;
-        return b != null && b <= 20 && b <= 100;
+        return b != null && b <= 100 && b < lowBatteryThreshold;
       }).length,
-    [summaries],
+    [summaries, lowBatteryThreshold],
   );
   const favCount = useMemo(() => allSummaries.filter((s) => s.node.is_favorite).length, [allSummaries]);
   const groupMetrics = useMemo(() => computeFleetGroupMetrics(summaries, alerts), [summaries, alerts]);
@@ -104,7 +123,12 @@ export function FleetView({
   return (
     <div className="ws">
       {isGrouped && activeGroup && (
-        <GroupBar group={activeGroup} metrics={groupMetrics} gatewayStats={groupGatewayStats} />
+        <GroupBar
+          group={activeGroup}
+          metrics={groupMetrics}
+          gatewayStats={groupGatewayStats}
+          lowBatteryThreshold={lowBatteryThreshold}
+        />
       )}
 
       {/* Constantes de la flota */}
@@ -125,7 +149,7 @@ export function FleetView({
         </div>
         <div className="kpi">
           <div className="v" style={{ color: lowBattery > 0 ? "var(--warn)" : "var(--text)" }}>{lowBattery}</div>
-          <div className="k">Batería ≤20%</div>
+          <div className="k">Batería &lt;{lowBatteryThreshold}%</div>
         </div>
         <div className="kpi">
           <div className="v">{favCount}</div>
@@ -244,7 +268,7 @@ export function FleetView({
           )}
           {!loading && summaries.length > 0 && isGrouped && (
             <FleetBlocks
-              summaries={summaries}
+              summaries={stableSummaries}
               gatewayNodeIds={gatewayNodeIds}
               selected={selected}
               focusId={focusId}
@@ -253,6 +277,7 @@ export function FleetView({
               onToggleFavorite={onToggleFavorite}
               onToggleIgnored={onToggleIgnored}
               onCheckedChange={onCheckedChange}
+              lowBatteryThreshold={lowBatteryThreshold}
             />
           )}
           {!loading && summaries.length > 0 && !isGrouped && (
@@ -268,7 +293,7 @@ export function FleetView({
                   onCheckedChange(next);
                 }}
               />
-              {summaries.map((summary) => (
+              {stableSummaries.map((summary) => (
                 <FleetRow
                   key={summary.node.node_id}
                   summary={summary}
@@ -279,6 +304,7 @@ export function FleetView({
                   onToggleFavorite={onToggleFavorite}
                   onToggleIgnored={onToggleIgnored}
                   onToggleChecked={toggleChecked}
+                  lowBatteryThreshold={lowBatteryThreshold}
                 />
               ))}
             </>
@@ -330,6 +356,7 @@ export function FleetView({
               desarmar todo
             </button>
             <AddToGroupMenu selectedIds={[...checkedIds]} groups={groups} allSummaries={allSummaries} />
+            <AssignNodeTypeMenu selectedIds={[...checkedIds]} />
             <span style={{ marginLeft: "auto" }} />
             <button className="btn primary" onClick={onCreateBatch}>
               ▶ Crear lote ({checkedIds.size})

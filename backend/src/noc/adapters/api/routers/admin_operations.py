@@ -13,13 +13,14 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.deps import RequireAuthDep, SessionDep
 from noc.adapters.api.schemas import GatewaySelectionIn
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
 from noc.application.admin.gateway_routing import resolve_gateway
 from noc.application.admin.registry import OPERATIONS, validate_operation
+from noc.application.auth.actor import ActorContext, actor_label_for
 from noc.config import get_settings
 from noc.domain.admin.entities import AdminOperation
 
@@ -88,10 +89,14 @@ class OperationOut(BaseModel):
     finished_at: datetime | None
     duration_ms: int | None
     gateway_note: str | None
+    actor_label: str
 
     @classmethod
     def from_entity(cls, op: AdminOperation) -> "OperationOut":
-        return cls(**{f: getattr(op, f) for f in cls.model_fields})
+        return cls(
+            **{f: getattr(op, f) for f in cls.model_fields if f != "actor_label"},
+            actor_label=actor_label_for(op),
+        )
 
 
 @router.get("/capabilities", response_model=list[CapabilityOut])
@@ -103,8 +108,9 @@ async def capabilities() -> list[CapabilityOut]:
 
 
 @router.post("/operations", response_model=OperationOut, status_code=201)
-async def create_operation(body: OperationIn, session: SessionDep) -> OperationOut:
+async def create_operation(body: OperationIn, session: SessionDep, current_user: RequireAuthDep) -> OperationOut:
     settings = get_settings()
+    actor = ActorContext.for_user(current_user)
     try:
         params = validate_operation(body.operation_type, body.params)
     except ValueError as exc:
@@ -135,13 +141,34 @@ async def create_operation(body: OperationIn, session: SessionDep) -> OperationO
             params=params,
             timeout_seconds=body.timeout_seconds or settings.admin_default_timeout_seconds,
             max_attempts=body.max_attempts or settings.admin_max_attempts,
-            created_by="admin",  # RBAC futuro: el campo ya viaja (diseño §8)
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            actor_username=actor.actor_username,
+            actor_display_name=actor.actor_display_name,
             gateway_note=resolution.note,
         )
     )
     await session.commit()
     await activity.operation(op, "created")
     return OperationOut.from_entity(op)
+
+
+class OperationCountsOut(BaseModel):
+    """Agregados reales de operaciones no terminales (hardening): fuente de
+    los contadores del HUD/StatusBar/insignias — nunca una lista truncada."""
+
+    pending: int
+    queued: int
+    running: int
+    active: int
+
+
+# OJO: registrado ANTES de /operations/{op_id} — el path param es int y
+# "counts" no debe intentar parsearse como id (mismo patrón que /gateways/stats)
+@router.get("/operations/counts", response_model=OperationCountsOut)
+async def operation_counts(session: SessionDep, group_id: int | None = None) -> OperationCountsOut:
+    counts = await SqlAdminOperationRepository(session).active_counts(group_id)
+    return OperationCountsOut(**{f: counts.get(f, 0) for f in OperationCountsOut.model_fields})
 
 
 @router.get("/operations", response_model=list[OperationOut])
@@ -164,7 +191,7 @@ async def get_operation(op_id: int, session: SessionDep) -> OperationOut:
 
 
 @router.post("/operations/{op_id}/cancel", response_model=OperationOut)
-async def cancel_operation(op_id: int, session: SessionDep) -> OperationOut:
+async def cancel_operation(op_id: int, session: SessionDep, _user: RequireAuthDep) -> OperationOut:
     async with session.begin():
         repo = SqlAdminOperationRepository(session)
         op = await repo.get(op_id)
@@ -181,7 +208,7 @@ async def cancel_operation(op_id: int, session: SessionDep) -> OperationOut:
 
 
 @router.post("/operations/{op_id}/retry", response_model=OperationOut)
-async def retry_operation(op_id: int, session: SessionDep) -> OperationOut:
+async def retry_operation(op_id: int, session: SessionDep, _user: RequireAuthDep) -> OperationOut:
     async with session.begin():
         repo = SqlAdminOperationRepository(session)
         op = await repo.get(op_id)

@@ -143,6 +143,7 @@ function OpRow({
   return (
     <div
       className={flash ? "noc-flash" : undefined}
+      title={`por ${op.actor_label}`}
       style={{
         ...rowStyle,
         background: focusId != null && op.target_node_id === focusId ? t.accentTint : undefined,
@@ -158,6 +159,11 @@ function OpRow({
         {nodeName(op.target_node_id)}
       </span>
       <span style={{ color: t.textFaint, fontFamily: t.fontMono, fontSize: 11 }}>{op.gateway_id}</span>
+      <span
+        style={{ color: t.textFaint, fontSize: 10.5, maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+      >
+        por {op.actor_label}
+      </span>
       <OpChip op={op} />
       {showTime && (
         <span style={{ color: t.textFaint, fontFamily: t.fontMono, fontSize: 11 }}>
@@ -253,6 +259,7 @@ function ActiveBatchCard({
         <span style={{ ...chipStyle(BATCH_STATUS_COLOR[batch.status]), fontSize: 10.5 }}>
           {BATCH_STATUS_LABEL[batch.status]}
         </span>
+        <span style={{ color: t.textFaint, fontSize: 10.5 }}>por {batch.actor_label}</span>
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
           {batch.status === "running" && (
             <button style={smallBtn} onClick={() => doPause.mutate()}>⏸ Pausar</button>
@@ -377,6 +384,7 @@ function HistoryBatchCard({
         <span style={{ ...chipStyle(BATCH_STATUS_COLOR[batch.status]), fontSize: 10.5 }}>
           {BATCH_STATUS_LABEL[batch.status]}
         </span>
+        <span style={{ color: t.textFaint, fontSize: 10.5 }}>por {batch.actor_label}</span>
         <span style={{ marginLeft: "auto", color: t.textFaint, fontFamily: t.fontMono, fontSize: 11 }}>
           {relativeTime(batch.finished_at ?? batch.created_at)}
         </span>

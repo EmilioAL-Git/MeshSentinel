@@ -8,6 +8,7 @@ from noc.domain.nodes.entities import (
     GatewayInfo,
     Node,
     NodeGatewayLink,
+    NodeNeighbor,
     NodeSummary,
     Position,
     Tag,
@@ -48,6 +49,13 @@ class PreferredGatewayIn(BaseModel):
 class NodeTypeIn(BaseModel):
     """Clasificación manual (Inspector, Organización): null = "Automático"."""
 
+    node_type: Literal["gateway", "infra", "fixed", "user", "unclassified"] | None = None
+
+
+class NodeTypeBulkIn(BaseModel):
+    """Igual que NodeTypeIn pero para selección múltiple (Flota)."""
+
+    node_ids: list[str]
     node_type: Literal["gateway", "infra", "fixed", "user", "unclassified"] | None = None
 
 
@@ -155,6 +163,29 @@ class NodeGatewayLinkOut(BaseModel):
             and not is_stale(link.last_heard_at, offline_threshold)
         )
         return cls(**data, active=active, primary=link.gateway_id == primary_gateway_id)
+
+
+class NeighborOut(BaseModel):
+    """Enlace nodo<->nodo real (NEIGHBORINFO_APP), motor-de-reglas-y-topologia.md §2."""
+
+    node_id: str
+    neighbor_id: str
+    snr: float | None
+    received_at: datetime | None
+    gateway_id: str | None
+    # Mismo criterio que NodeGatewayLinkOut.active: vigente según el umbral
+    # de offline, para que el mapa distinga topología viva de histórica.
+    active: bool = False
+
+    @classmethod
+    def from_entity(cls, n: NodeNeighbor, offline_threshold: int | None = None) -> "NeighborOut":
+        data = {f: getattr(n, f) for f in cls.model_fields if f != "active"}
+        active = (
+            offline_threshold is not None
+            and n.received_at is not None
+            and not is_stale(n.received_at, offline_threshold)
+        )
+        return cls(**data, active=active)
 
 
 class NodeSummaryOut(BaseModel):

@@ -75,6 +75,23 @@ class Telemetry:
 
 
 @dataclass(slots=True)
+class NodeNeighbor:
+    """Enlace nodo<->nodo real, oído por NEIGHBORINFO_APP (append-only).
+
+    Paralelo exacto a `Position`/`Telemetry`: "lo último" se resuelve con
+    row_number() por (node_id, neighbor_id), nunca se sobreescribe.
+    Requiere que el firmware tenga el módulo NeighborInfo activado; sin él
+    esta tabla simplemente queda vacía (ver docs/design/motor-de-reglas-y-topologia.md §2).
+    """
+
+    node_id: str
+    neighbor_id: str
+    snr: float | None = None
+    received_at: datetime | None = None
+    gateway_id: str | None = None
+
+
+@dataclass(slots=True)
 class NodeGatewayLink:
     """Estado actual (no histórico) de la relación N:M nodo<->pasarela (M6.1).
 

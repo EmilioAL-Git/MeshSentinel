@@ -106,6 +106,16 @@ export interface NodeSummaryOut {
   gateway_links: NodeGatewayLinkOut[];
 }
 
+/** Enlace nodo<->nodo real (NEIGHBORINFO_APP), topología de malla. */
+export interface NeighborOut {
+  node_id: string;
+  neighbor_id: string;
+  snr: number | null;
+  received_at: string | null;
+  gateway_id: string | null;
+  active: boolean;
+}
+
 /** Nº de pasarelas que oyen al nodo ahora mismo (enlaces activos). */
 export function activeGatewayCount(s: NodeSummaryOut): number {
   return s.gateway_links.filter((l) => l.active).length;
@@ -151,8 +161,21 @@ export interface GatewayOut {
   last_error_at: string | null;
 }
 
+// ── Interceptor global de 401 (autenticación) ───────────────────────────────
+// Un único punto para las ~40 mutaciones de este cliente: no se toca ningún
+// call site. Al recibir 401 se avisa a quien esté escuchando (AuthContext
+// abre el modal de login) y el error sigue propagándose normalmente — la
+// mutación en curso falla igual que antes (toast/estado de error), el
+// operador reintenta la acción tras iniciar sesión.
+type UnauthorizedListener = () => void;
+let unauthorizedListener: UnauthorizedListener | null = null;
+export function onUnauthorized(listener: UnauthorizedListener | null): void {
+  unauthorizedListener = listener;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`/api/v1${path}`);
+  if (res.status === 401) unauthorizedListener?.();
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${path}`);
   return res.json();
 }
@@ -176,6 +199,12 @@ export const fetchNodeTelemetry = (id: string, limit = 50, kind?: "device" | "en
   );
 export const fetchNodeGateways = (id: string) =>
   get<NodeGatewayLinkOut[]>(`/nodes/${encodeURIComponent(id)}/gateways`);
+/** Vecindario actual del nodo: último enlace por vecino, sin duplicados. */
+export const fetchNodeNeighbors = (id: string) =>
+  get<NeighborOut[]>(`/nodes/${encodeURIComponent(id)}/neighbors`);
+/** Topología: último enlace nodo<->nodo por par, oído en las últimas `sinceHours` (24 por defecto). */
+export const fetchTopology = (sinceHours?: number) =>
+  get<NeighborOut[]>(`/topology${sinceHours ? `?since_hours=${sinceHours}` : ""}`);
 export const fetchGateways = (includeDeleted = false) =>
   get<GatewayOut[]>(`/gateways${includeDeleted ? "?include_deleted=true" : ""}`);
 
@@ -288,6 +317,11 @@ export const setNodePreferredGateway = (id: string, gatewayId: string | null) =>
   send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/preferred-gateway`, { gateway_id: gatewayId });
 export const setNodeTypeOverride = (id: string, nodeType: string | null) =>
   send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/node-type`, { node_type: nodeType });
+export interface NodeTypeBulkOut {
+  updated: number;
+}
+export const setNodeTypeOverrideBulk = (nodeIds: string[], nodeType: string | null) =>
+  send<NodeTypeBulkOut>("PUT", `/nodes/node-type/bulk`, { node_ids: nodeIds, node_type: nodeType });
 export const setGroupPreferredGateway = (id: number, gatewayId: string | null) =>
   send<GroupOut>("PUT", `/groups/${id}/preferred-gateway`, { gateway_id: gatewayId });
 export const addGroupMember = (groupId: number, node_id: string) =>
@@ -399,6 +433,7 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401) unauthorizedListener?.();
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`HTTP ${res.status}: ${detail || path}`);
@@ -409,6 +444,17 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 export const fetchAlerts = (status?: string, limit = 100) =>
   get<AlertOut[]>(`/alerts?limit=${limit}${status ? `&status=${status}` : ""}`);
 export const ackAlert = (id: number) => send<AlertOut>("POST", `/alerts/${id}/ack`);
+
+/** Agregados reales de alertas activas (hardening): la fuente de los
+ * contadores del HUD/StatusBar/insignias — nunca una lista truncada. */
+export interface AlertCountsOut {
+  active: number;
+  firing: number;
+  acknowledged: number;
+  critical_active: number;
+}
+export const fetchAlertCounts = (groupId?: number | null) =>
+  get<AlertCountsOut>(`/alerts/counts${groupId != null ? `?group_id=${groupId}` : ""}`);
 export const fetchAlertRules = () => get<AlertRuleOut[]>("/alert-rules");
 export const patchAlertRule = (id: number, changes: Partial<AlertRuleOut>) =>
   send<AlertRuleOut>("PATCH", `/alert-rules/${id}`, changes);
@@ -471,11 +517,24 @@ export interface OperationOut {
   finished_at: string | null;
   duration_ms: number | null;
   gateway_note: string | null;
+  /** Resuelto en backend (resolve_actor_label): nunca reconstruir en React. */
+  actor_label: string;
 }
 
 export const fetchCapabilities = () => get<CapabilityOut[]>("/admin/capabilities");
 export const fetchOperations = (status?: string, limit = 100) =>
   get<OperationOut[]>(`/admin/operations?limit=${limit}${status ? `&status=${status}` : ""}`);
+
+/** Agregados reales de operaciones no terminales (hardening) — misma
+ * filosofía que fetchAlertCounts. */
+export interface OperationCountsOut {
+  pending: number;
+  queued: number;
+  running: number;
+  active: number;
+}
+export const fetchOperationCounts = (groupId?: number | null) =>
+  get<OperationCountsOut>(`/admin/operations/counts${groupId != null ? `?group_id=${groupId}` : ""}`);
 export const createOperation = (body: {
   node_id: string;
   operation_type: string;
@@ -621,6 +680,7 @@ export interface BatchOut {
   node_count: number;
   status: BatchStatus;
   created_by: string;
+  actor_label: string;
   created_at: string | null;
   started_at: string | null;
   finished_at: string | null;
@@ -647,6 +707,9 @@ export const previewBatch = (body: {
   operation_type: string;
   params: Record<string, unknown>;
   scope: BatchScopeIn;
+  // Hardening: la simulación viaja con la MISMA selección de gateway que la
+  // ejecución — el dry-run nunca puede divergir de lo que se va a ejecutar.
+  gateway_selection?: GatewaySelectionIn;
 }) => send<BatchPreviewOut>("POST", "/admin/batches/preview", body);
 export const createBatch = (body: {
   name: string;
@@ -803,6 +866,35 @@ export interface NocEvent {
   payload: Record<string, unknown>;
 }
 
+/** Entrada del Registro persistente (hardening): el mismo envelope
+ * `activity.event` del WS más su `log_id` para paginar hacia atrás. */
+export interface ActivityLogItemOut extends NocEvent {
+  log_id: number;
+}
+
+export function fetchActivityLog(
+  limit = 300,
+  opts: {
+    beforeId?: number;
+    nodeId?: string;
+    source?: string;
+    gatewayId?: string;
+    groupId?: number | null;
+    q?: string;
+    internalType?: string;
+  } = {},
+): Promise<ActivityLogItemOut[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (opts.beforeId != null) params.set("before_id", String(opts.beforeId));
+  if (opts.nodeId) params.set("node_id", opts.nodeId);
+  if (opts.source) params.set("source", opts.source);
+  if (opts.gatewayId) params.set("gateway_id", opts.gatewayId);
+  if (opts.groupId != null) params.set("group_id", String(opts.groupId));
+  if (opts.q) params.set("q", opts.q);
+  if (opts.internalType) params.set("internal_type", opts.internalType);
+  return get<ActivityLogItemOut[]>(`/activity?${params}`);
+}
+
 /**
  * Estado de la conexión de eventos, de primera clase para la UI (v0.7 §11.2):
  * antes el socket moría en silencio y la interfaz se quedaba congelada sin
@@ -869,3 +961,61 @@ export function openEventsSocket(
     },
   };
 }
+
+// ── Autenticación ────────────────────────────────────────────────────────────
+// Monitorización siempre abierta; estos endpoints son los únicos que exigen
+// sesión (login/gestión de usuarios) o la usan si existe (me/login-log).
+
+export interface AuthUserOut {
+  id: number;
+  username: string;
+  display_name: string;
+  is_admin: boolean;
+  enabled: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  last_login_at: string | null;
+}
+
+export interface MeOut {
+  authenticated: boolean;
+  protected_mode: boolean;
+  user: AuthUserOut | null;
+}
+
+export const fetchMe = () => get<MeOut>("/auth/me");
+export const login = (username: string, password: string) =>
+  send<AuthUserOut>("POST", "/auth/login", { username, password });
+export const logout = () => send<void>("POST", "/auth/logout");
+export const updateMyDisplayName = (display_name: string) =>
+  send<AuthUserOut>("PATCH", "/auth/me", { display_name });
+export const changeMyPassword = (password: string) => send<void>("PUT", "/auth/me/password", { password });
+
+// ── Gestión de usuarios (solo is_admin en el backend; sin más RBAC) ─────────
+
+export const fetchUsers = () => get<AuthUserOut[]>("/auth/users");
+export const createUser = (body: { username: string; display_name: string; password: string; is_admin: boolean }) =>
+  send<AuthUserOut>("POST", "/auth/users", body);
+export const updateUser = (id: number, body: { display_name?: string; is_admin?: boolean }) =>
+  send<AuthUserOut>("PUT", `/auth/users/${id}`, body);
+export const setUserEnabled = (id: number, enabled: boolean) =>
+  send<AuthUserOut>("PUT", `/auth/users/${id}/enabled`, { enabled });
+export const setUserPassword = (id: number, password: string) =>
+  send<void>("PUT", `/auth/users/${id}/password`, { password });
+export const deleteUser = (id: number) => send<void>("DELETE", `/auth/users/${id}`);
+
+// ── Login log (solo lectura, paginado) ──────────────────────────────────────
+
+export interface LoginLogEntryOut {
+  id: number;
+  user_id: number | null;
+  username: string;
+  event: string;
+  reason: string | null;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string | null;
+}
+
+export const fetchLoginLog = (limit = 100, beforeId?: number | null) =>
+  get<LoginLogEntryOut[]>(`/auth/login-log?limit=${limit}${beforeId != null ? `&before_id=${beforeId}` : ""}`);

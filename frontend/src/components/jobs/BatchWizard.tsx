@@ -93,8 +93,15 @@ export function BatchWizard({
       : paramFields.every((f) => !f.required || (otherFieldValues[f.name] ?? "").trim() !== "");
 
   const doPreview = useMutation({
+    // Hardening: la simulación viaja con la MISMA selección de gateway que
+    // la ejecución — el backend usa el mismo resolver en ambas.
     mutationFn: () =>
-      previewBatch({ operation_type: opType, params: buildParams(), scope: { node_ids: selectedIds } }),
+      previewBatch({
+        operation_type: opType,
+        params: buildParams(),
+        scope: { node_ids: selectedIds },
+        gateway_selection: gatewaySelection,
+      }),
     onSuccess: setPreview,
   });
   const doCreate = useMutation({
@@ -218,7 +225,16 @@ export function BatchWizard({
             )}
           </>
         )}
-        <GatewaySelect value={gatewaySelection} onChange={setGatewaySelection} gateways={gateways.data ?? []} />
+        {/* Cambiar la pasarela invalida la simulación: lo confirmado debe ser
+            exactamente lo que se ejecuta (hardening) */}
+        <GatewaySelect
+          value={gatewaySelection}
+          onChange={(sel) => {
+            setGatewaySelection(sel);
+            setPreview(null);
+          }}
+          gateways={gateways.data ?? []}
+        />
         <button
           style={btn}
           disabled={!paramsReady || selectedIds.length === 0 || doPreview.isPending}

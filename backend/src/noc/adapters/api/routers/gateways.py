@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.deps import RequireAuthDep, SessionDep
 from noc.adapters.api.schemas import GatewayOut
 from noc.adapters.persistence.organization_repositories import SqlGroupRepository
 from noc.adapters.persistence.repositories import (
@@ -21,6 +21,9 @@ from noc.adapters.persistence.repositories import (
     SqlNodeGatewayLinkRepository,
     SqlNodeRepository,
 )
+from noc.application.activity import activity
+from noc.application.activity_events import render_gateway_action
+from noc.application.auth.actor import ActorContext, resolve_actor_label
 from noc.application.gateway_stats import GatewayStats, compute_multi_gateway_stats, scope_to_members
 from noc.application.gateways.service import GatewayService
 from noc.config import get_settings
@@ -30,6 +33,14 @@ router = APIRouter(prefix="/gateways", tags=["gateways"])
 
 def _service(request: Request) -> GatewayService:
     return request.app.state.gateways
+
+
+async def _narrate(action: str, gateway_id: str, name: str | None, current_user) -> None:
+    actor = ActorContext.for_user(current_user)
+    label = resolve_actor_label(actor.actor_type, actor.actor_display_name, None)
+    event = render_gateway_action(action, gateway_id, name, label)
+    if event is not None:
+        await activity.emit_activity(event)
 
 
 class DeviceOut(BaseModel):
@@ -141,61 +152,73 @@ async def get_gateway(gateway_id: str, session: SessionDep) -> GatewayOut:
 
 
 @router.post("/{gateway_id}/discover", response_model=list[DeviceOut])
-async def discover_devices(gateway_id: str, request: Request) -> list[DeviceOut]:
+async def discover_devices(gateway_id: str, request: Request, _user: RequireAuthDep) -> list[DeviceOut]:
     devices = await _service(request).discover(gateway_id)
     return [DeviceOut(**d) for d in devices]
 
 
 @router.post("/{gateway_id}/test-connection", response_model=TestConnectionOut)
-async def test_connection(gateway_id: str, body: TestConnectionIn, request: Request) -> TestConnectionOut:
+async def test_connection(
+    gateway_id: str, body: TestConnectionIn, request: Request, _user: RequireAuthDep
+) -> TestConnectionOut:
     result = await _service(request).test_connection(gateway_id, body.transport_type, body.connection_params)
     return TestConnectionOut(**{f: result.get(f) for f in TestConnectionOut.model_fields})
 
 
 @router.post("/{gateway_id}/configure", response_model=GatewayOut)
-async def configure_gateway(gateway_id: str, body: GatewayConfigureIn, request: Request) -> GatewayOut:
+async def configure_gateway(
+    gateway_id: str, body: GatewayConfigureIn, request: Request, current_user: RequireAuthDep
+) -> GatewayOut:
     info = await _service(request).configure(
         gateway_id, body.name, body.transport_type, body.connection_params, body.enabled, body.priority
     )
+    await _narrate("configure", gateway_id, info.name, current_user)
     return GatewayOut.from_entity(info)
 
 
 @router.post("/{gateway_id}/import", response_model=GatewayOut)
-async def import_gateway(gateway_id: str, request: Request) -> GatewayOut:
+async def import_gateway(gateway_id: str, request: Request, current_user: RequireAuthDep) -> GatewayOut:
     info = await _service(request).import_legacy(gateway_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Gateway not found")
+    await _narrate("import", gateway_id, info.name, current_user)
     return GatewayOut.from_entity(info)
 
 
 @router.put("/{gateway_id}", response_model=GatewayOut)
-async def update_gateway(gateway_id: str, body: GatewayUpdateIn, request: Request) -> GatewayOut:
+async def update_gateway(
+    gateway_id: str, body: GatewayUpdateIn, request: Request, current_user: RequireAuthDep
+) -> GatewayOut:
     info = await _service(request).update(
         gateway_id, body.name, body.transport_type, body.connection_params, body.enabled, body.priority
     )
     if info is None:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")
+    await _narrate("update", gateway_id, info.name, current_user)
     return GatewayOut.from_entity(info)
 
 
 @router.post("/{gateway_id}/connect", response_model=GatewayOut)
-async def connect_gateway(gateway_id: str, request: Request) -> GatewayOut:
+async def connect_gateway(gateway_id: str, request: Request, current_user: RequireAuthDep) -> GatewayOut:
     info = await _service(request).connect(gateway_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")
+    await _narrate("connect", gateway_id, info.name, current_user)
     return GatewayOut.from_entity(info)
 
 
 @router.post("/{gateway_id}/disconnect", response_model=GatewayOut)
-async def disconnect_gateway(gateway_id: str, request: Request) -> GatewayOut:
+async def disconnect_gateway(gateway_id: str, request: Request, current_user: RequireAuthDep) -> GatewayOut:
     info = await _service(request).disconnect(gateway_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")
+    await _narrate("disconnect", gateway_id, info.name, current_user)
     return GatewayOut.from_entity(info)
 
 
 @router.delete("/{gateway_id}", status_code=204)
-async def delete_gateway(gateway_id: str, request: Request) -> None:
+async def delete_gateway(gateway_id: str, request: Request, current_user: RequireAuthDep) -> None:
     deleted = await _service(request).delete(gateway_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")
+    await _narrate("delete", gateway_id, None, current_user)

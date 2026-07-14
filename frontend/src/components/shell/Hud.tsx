@@ -1,5 +1,10 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { AlertOut, DashboardSummaryOut, GatewayOut, OperationOut } from "../../api/client";
+import type {
+  AlertCountsOut,
+  DashboardSummaryOut,
+  GatewayOut,
+  OperationCountsOut,
+} from "../../api/client";
 import { healthColor, t } from "../../tokens";
 
 /**
@@ -59,27 +64,28 @@ function Item({
 export function Hud({
   summary,
   gateways,
-  alerts,
-  operations,
+  alertCounts,
+  operationCounts,
   onGoTo,
 }: {
   summary: DashboardSummaryOut | undefined;
   gateways: GatewayOut[];
-  alerts: AlertOut[];
-  operations: OperationOut[];
+  /** Agregados reales del backend (hardening) — nunca listas truncadas. */
+  alertCounts: AlertCountsOut | undefined;
+  operationCounts: OperationCountsOut | undefined;
   onGoTo: (view: "ops" | "nodes" | "gateways" | "alerts" | "jobs") => void;
 }) {
   const enabled = gateways.filter((g) => g.enabled && g.deleted_at == null);
   const down = enabled.filter((g) => g.status !== "connected");
 
-  const active = alerts.filter((a) => a.status !== "resolved");
-  const firing = active.filter((a) => a.status === "firing").length;
-  const acked = active.length - firing;
-  const hasCrit = active.some((a) => a.severity === "CRITICAL");
-  const alertColor = active.length === 0 ? t.textDim : hasCrit ? t.crit : t.warn;
+  const activeAlerts = alertCounts?.active ?? 0;
+  const firing = alertCounts?.firing ?? 0;
+  const acked = alertCounts?.acknowledged ?? 0;
+  const hasCrit = (alertCounts?.critical_active ?? 0) > 0;
+  const alertColor = activeAlerts === 0 ? t.textDim : hasCrit ? t.crit : t.warn;
 
-  const running = operations.filter((o) => o.status === "running").length;
-  const queued = operations.filter((o) => o.status === "pending" || o.status === "queued").length;
+  const running = operationCounts?.running ?? 0;
+  const queued = (operationCounts?.pending ?? 0) + (operationCounts?.queued ?? 0);
 
   const status = summary?.status;
   // Interpretación de la salud: el primer motivo que la explica, no otro número
@@ -126,9 +132,9 @@ export function Hud({
       <Item
         title="Alertas activas (nuevas = sin reconocer)"
         onClick={() => onGoTo("alerts")}
-        value={<span style={{ color: alertColor }}>⚠ {active.length}</span>}
-        sub={active.length === 0 ? "sin alertas" : `${firing} nuevas · ${acked} ACK`}
-        subColor={active.length > 0 ? alertColor : undefined}
+        value={<span style={{ color: alertColor }}>⚠ {activeAlerts}</span>}
+        sub={activeAlerts === 0 ? "sin alertas" : `${firing} nuevas · ${acked} ACK`}
+        subColor={activeAlerts > 0 ? alertColor : undefined}
       />
       <Item
         title="Operaciones de administración remota"

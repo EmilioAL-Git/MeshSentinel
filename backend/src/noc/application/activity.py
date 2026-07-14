@@ -15,6 +15,7 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from noc.application.activity_events import ActivityEvent, render_batch, render_operation
+from noc.application.auth.actor import actor_label_for
 from noc.application.envelopes import SYSTEM_SOURCE, make_event_envelope
 from noc.domain.admin.entities import AdminBatch, AdminOperation
 
@@ -25,6 +26,10 @@ Publisher = Callable[[dict[str, Any]], Awaitable[None]]
 # admin; se inyecta en el arranque igual que el publisher. Sin ella, la
 # narrativa usa el node_id crudo como etiqueta.
 NodeLabeler = Callable[[str], Awaitable[str]]
+# Persistencia del Registro (hardening): callable SÍNCRONO y no bloqueante
+# (encola hacia ActivityLogWriter) — nunca una corrutina, para no acoplar la
+# emisión a la latencia de la BD.
+Store = Callable[[dict[str, Any]], None]
 
 
 class ActivityPublisher:
@@ -34,12 +39,16 @@ class ActivityPublisher:
     def __init__(self) -> None:
         self._publish: Publisher | None = None
         self._labeler: NodeLabeler | None = None
+        self._store: Store | None = None
 
     def attach(self, publish: Publisher | None) -> None:
         self._publish = publish
 
     def attach_labeler(self, labeler: NodeLabeler | None) -> None:
         self._labeler = labeler
+
+    def attach_store(self, store: Store | None) -> None:
+        self._store = store
 
     async def _label(self, node_id: str) -> str:
         if self._labeler is None:
@@ -51,22 +60,32 @@ class ActivityPublisher:
             return node_id
 
     async def emit_activity(self, event: ActivityEvent) -> None:
-        """Publica un hecho del diario operativo (Actividad 2.0 Fase 1)."""
-        await self.emit(
+        """Publica un hecho del diario operativo (Actividad 2.0 Fase 1) y lo
+        persiste (hardening): un ÚNICO envelope para el WS y para la BD, de
+        forma que el frontend siembre su buffer con el mismo parser."""
+        envelope = make_event_envelope(
             "activity.event", event.to_payload(), gateway_id=event.gateway_id or SYSTEM_SOURCE
         )
+        if self._store is not None:
+            try:
+                self._store(envelope)
+            except Exception:
+                logger.exception("activity store failed")
+        await self._publish_envelope(envelope)
 
     async def emit(
         self, event_type: str, payload: dict[str, Any], gateway_id: str = SYSTEM_SOURCE
     ) -> None:
+        await self._publish_envelope(make_event_envelope(event_type, payload, gateway_id=gateway_id))
+
+    async def _publish_envelope(self, envelope: dict[str, Any]) -> None:
         if self._publish is None:
             return
-        event = make_event_envelope(event_type, payload, gateway_id=gateway_id)
         try:
-            await self._publish(event)
+            await self._publish(envelope)
         except Exception:
             # La actividad nunca debe tumbar el pipeline
-            logger.exception("activity emit failed (%s)", event_type)
+            logger.exception("activity emit failed (%s)", envelope.get("event_type"))
 
     async def operation(self, op: AdminOperation, state: str, **extra: Any) -> None:
         payload: dict[str, Any] = {
@@ -98,6 +117,7 @@ class ActivityPublisher:
             error=extra.get("error"),
             attempts=op.attempts,
             max_attempts=op.max_attempts,
+            actor_label=actor_label_for(op),
         )
         if narrative is not None:
             await self.emit_activity(narrative)
@@ -113,7 +133,7 @@ class ActivityPublisher:
         payload.update(extra)
         await self.emit("admin.batch", payload)
 
-        narrative = render_batch(batch.id, batch.name, state, len(batch.node_ids))
+        narrative = render_batch(batch.id, batch.name, state, len(batch.node_ids), actor_label_for(batch))
         if narrative is not None:
             await self.emit_activity(narrative)
 

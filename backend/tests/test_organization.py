@@ -78,6 +78,22 @@ async def test_node_type_override(session_factory):
         assert node.node_type_override is None
 
 
+async def test_node_type_override_bulk(session_factory):
+    """Igual que test_node_type_override pero para la selección múltiple de Flota."""
+    await seed(session_factory)
+    async with session_factory() as session, session.begin():
+        repo = SqlNodeRepository(session)
+        updated = await repo.set_node_type_override_bulk([NODES[0], NODES[1]], "infra")
+        assert updated == 2
+        assert await repo.set_node_type_override_bulk([], "infra") == 0
+
+    async with session_factory() as session:
+        repo = SqlNodeRepository(session)
+        assert (await repo.get(NODES[0])).node_type_override == "infra"
+        assert (await repo.get(NODES[1])).node_type_override == "infra"
+        assert (await repo.get(NODES[2])).node_type_override is None
+
+
 async def test_sighting_upsert_preserves_noc_metadata(session_factory):
     """Crítico: un node.seen posterior no debe pisar favoritos/ignorados."""
     await seed(session_factory)

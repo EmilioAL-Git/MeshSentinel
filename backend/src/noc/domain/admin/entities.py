@@ -48,7 +48,13 @@ class AdminBatch:
     node_ids: list[str] = field(default_factory=list)
     scope_description: dict[str, Any] | None = None
     status: BatchStatus = "running"
+    # Legado (auth): sustituido por actor_* — se conserva por compatibilidad,
+    # ver resolve_actor_label en application/auth/actor.py.
     created_by: str = "admin"
+    actor_type: str = "system"
+    actor_id: int | None = None
+    actor_username: str | None = None
+    actor_display_name: str | None = None
     id: int | None = None
     created_at: datetime | None = None
     started_at: datetime | None = None
@@ -101,7 +107,13 @@ class AdminOperation:
     next_attempt_at: datetime | None = None
     result: dict[str, Any] | None = None
     error: str | None = None
+    # Legado (auth): sustituido por actor_* — se conserva por compatibilidad,
+    # ver resolve_actor_label en application/auth/actor.py.
     created_by: str = "admin"
+    actor_type: str = "system"
+    actor_id: int | None = None
+    actor_username: str | None = None
+    actor_display_name: str | None = None
     id: int | None = None
     created_at: datetime | None = None
     queued_at: datetime | None = None

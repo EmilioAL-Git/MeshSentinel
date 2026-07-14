@@ -13,9 +13,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.deps import RequireAuthDep, SessionDep
 from noc.adapters.api.routers.admin_batches import BatchOut
 from noc.adapters.persistence.profile_repositories import SqlConfigProfileRepository
+from noc.application.auth.actor import ActorContext
 from noc.domain.admin.entities import ConfigProfile, ConfigProfileVersion
 
 router = APIRouter(prefix="/admin/profiles", tags=["admin-profiles"])
@@ -273,7 +274,9 @@ async def sync_preview(profile_id: int, body: SyncIn, request: Request) -> SyncP
 
 
 @router.post("/{profile_id}/sync", response_model=BatchOut, status_code=201)
-async def sync_profile(profile_id: int, body: SyncIn, request: Request) -> BatchOut:
+async def sync_profile(
+    profile_id: int, body: SyncIn, request: Request, current_user: RequireAuthDep
+) -> BatchOut:
     try:
         batch = await _service(request).sync(
             profile_id,
@@ -281,6 +284,7 @@ async def sync_profile(profile_id: int, body: SyncIn, request: Request) -> Batch
             version=body.version,
             include_unknown=body.include_unknown,
             name=body.name,
+            actor=ActorContext.for_user(current_user),
         )
     except ValueError as exc:
         status = 404 if "not found" in str(exc) else 422

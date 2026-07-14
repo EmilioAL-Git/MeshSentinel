@@ -14,6 +14,7 @@ import {
   type Severity,
 } from "../api/client";
 import { scopeAlertsToGroup, useGroupNodeIds } from "../context/GroupContext";
+import { relativeTime } from "../time";
 import { GroupScopeBanner } from "./shell/GroupScopeBanner";
 
 /**
@@ -28,14 +29,6 @@ const SEV_COLOR: Record<Severity, string> = {
   WARNING: "var(--warn)",
   CRITICAL: "var(--crit)",
 };
-
-function relativeTime(iso: string | null): string {
-  if (!iso) return "—";
-  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return `hace ${Math.round(seconds)}s`;
-  if (seconds < 3600) return `hace ${Math.round(seconds / 60)}m`;
-  return `hace ${Math.round(seconds / 3600)}h`;
-}
 
 function AlertRow({
   alert,

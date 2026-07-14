@@ -25,6 +25,7 @@ from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
 from noc.application.admin.gateway_routing import resolve_gateways_for_nodes
 from noc.application.admin.registry import OPERATIONS, validate_operation
+from noc.application.auth.actor import ActorContext
 from noc.application.dashboard import ensure_utc
 from noc.application.node_filters import NodeFilters, apply_filters
 from noc.config import Settings
@@ -98,7 +99,12 @@ class BatchService:
     # ── Simulación (sin efectos) ─────────────────────────────────────────────
 
     async def preview(
-        self, operation_type: str, params: dict[str, Any], scope: BatchScope
+        self,
+        operation_type: str,
+        params: dict[str, Any],
+        scope: BatchScope,
+        forced_gateway_id: str | None = None,
+        use_preference: bool = True,
     ) -> BatchPreview:
         spec = OPERATIONS.get(operation_type)
         if spec is None:
@@ -110,13 +116,25 @@ class BatchService:
         async with self._session_factory() as session:
             summaries = await SqlNodeRepository(session).list_summaries()
 
-        by_id = {s.node.node_id: s for s in summaries}
-        selected_ids: set[str] = set(scope.node_ids)
-        if scope.filters is not None:
-            filtered = apply_filters(
-                summaries, scope.filters, self._settings.node_offline_after_seconds
+            by_id = {s.node.node_id: s for s in summaries}
+            selected_ids: set[str] = set(scope.node_ids)
+            if scope.filters is not None:
+                filtered = apply_filters(
+                    summaries, scope.filters, self._settings.node_offline_after_seconds
+                )
+                selected_ids |= {s.node.node_id for s in filtered}
+
+            # Hardening: la enrutabilidad se decide con EXACTAMENTE el mismo
+            # resolver de 4 niveles que usará `create` — el dry-run nunca
+            # puede ser menos estricto que la ejecución (antes miraba solo la
+            # caché `nodes.gateway_id` y divergía del fallback endurecido).
+            resolved = await resolve_gateways_for_nodes(
+                session,
+                [nid for nid in selected_ids if nid in by_id],
+                self._settings,
+                forced_gateway_id=forced_gateway_id,
+                use_preference=use_preference,
             )
-            selected_ids |= {s.node.node_id for s in filtered}
 
         eligible: list[NodePreview] = []
         excluded: list[NodePreview] = []
@@ -131,8 +149,11 @@ class BatchService:
             node = summary.node
             name = node.long_name or node.short_name or node_id
             preview = NodePreview(node_id, name, True)
-            if not node.gateway_id:
-                preview.blockers.append("sin pasarela conocida (no enrutable)")
+            resolution = resolved.get(node_id)
+            if resolution is None or not resolution.gateway_id:
+                preview.blockers.append("sin pasarela operativa (no enrutable)")
+            elif resolution.note:
+                preview.warnings.append(resolution.note)
             if not node.is_online(threshold):
                 preview.warnings.append("sin conexión reciente: probable timeout")
             if node.is_ignored:
@@ -174,6 +195,7 @@ class BatchService:
         created_by: str = "admin",
         forced_gateway_id: str | None = None,
         use_preference: bool = True,
+        actor: ActorContext = ActorContext(),
     ) -> AdminBatch:
         spec = OPERATIONS.get(operation_type)
         if spec is None:
@@ -206,7 +228,7 @@ class BatchService:
                 )
 
         return await self.create_planned(
-            name, operation_type, normalized, planned, scope_description, created_by
+            name, operation_type, normalized, planned, scope_description, created_by, actor
         )
 
     async def create_planned(
@@ -217,6 +239,7 @@ class BatchService:
         planned: list[PlannedOperation],
         scope_description: dict[str, Any] | None,
         created_by: str = "admin",
+        actor: ActorContext = ActorContext(),
     ) -> AdminBatch:
         """Crea un lote a partir de operaciones ya resueltas y validadas.
 
@@ -238,6 +261,10 @@ class BatchService:
                     scope_description=scope_description,
                     status="running",
                     created_by=created_by,
+                    actor_type=actor.actor_type,
+                    actor_id=actor.actor_id,
+                    actor_username=actor.actor_username,
+                    actor_display_name=actor.actor_display_name,
                     created_at=now,
                     started_at=now,
                 )
@@ -254,6 +281,10 @@ class BatchService:
                         timeout_seconds=self._settings.admin_default_timeout_seconds,
                         max_attempts=self._settings.admin_max_attempts,
                         created_by=created_by,
+                        actor_type=actor.actor_type,
+                        actor_id=actor.actor_id,
+                        actor_username=actor.actor_username,
+                        actor_display_name=actor.actor_display_name,
                         gateway_note=op.gateway_note,
                     )
                 )

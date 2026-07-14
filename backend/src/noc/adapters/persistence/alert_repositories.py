@@ -1,10 +1,15 @@
 from dataclasses import fields
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from noc.adapters.persistence.models import AlertModel, AlertRuleModel, NotificationChannelModel
+from noc.adapters.persistence.models import (
+    AlertModel,
+    AlertRuleModel,
+    GroupMemberModel,
+    NotificationChannelModel,
+)
 from noc.domain.alerts.entities import (
     ACTIVE_STATUSES,
     Alert,
@@ -102,6 +107,38 @@ class SqlAlertRepository:
             select(AlertModel).where(AlertModel.status.in_(ACTIVE_STATUSES))
         )
         return [_alert_entity(r) for r in rows]
+
+    async def active_counts(self, group_id: int | None = None) -> dict[str, int]:
+        """Agregados de alertas activas para HUD/insignias (hardening): los
+        contadores "siempre visibles" nunca deben derivar de listas truncadas.
+
+        Con `group_id`, replica EXACTAMENTE la semántica del escopado de la
+        UI (`scopeAlertsToGroup`): alertas de sujeto no-nodo siempre dentro;
+        las CRITICAL de nodos fuera del grupo también cuentan (nunca se
+        ocultan, principio v0.7 §2.1)."""
+        stmt = (
+            select(AlertModel.status, AlertModel.severity, func.count())
+            .where(AlertModel.status.in_(ACTIVE_STATUSES))
+            .group_by(AlertModel.status, AlertModel.severity)
+        )
+        if group_id is not None:
+            members = select(GroupMemberModel.node_id).where(
+                GroupMemberModel.group_id == group_id
+            )
+            stmt = stmt.where(
+                or_(
+                    AlertModel.subject_type != "node",
+                    AlertModel.severity == "CRITICAL",
+                    AlertModel.subject_id.in_(members),
+                )
+            )
+        counts = {"active": 0, "firing": 0, "acknowledged": 0, "critical_active": 0}
+        for status, severity, n in (await self._session.execute(stmt)).all():
+            counts["active"] += n
+            counts[status] = counts.get(status, 0) + n
+            if severity == "CRITICAL":
+                counts["critical_active"] += n
+        return counts
 
     async def get(self, alert_id: int) -> Alert | None:
         m = await self._session.get(AlertModel, alert_id)

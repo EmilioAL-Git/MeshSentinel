@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from noc.adapters.persistence.repositories import (
     SqlGatewayRepository,
+    SqlNeighborRepository,
     SqlNodeGatewayLinkRepository,
     SqlNodeRepository,
     SqlPositionRepository,
@@ -22,7 +23,14 @@ from noc.application import activity_events
 from noc.application.activity import activity
 from noc.application.dashboard import is_stale
 from noc.application.gateway_link_selection import GatewayLinkCandidate, select_primary_link
-from noc.domain.nodes.entities import GatewayInfo, Node, NodeGatewayLink, Position, Telemetry
+from noc.domain.nodes.entities import (
+    GatewayInfo,
+    Node,
+    NodeGatewayLink,
+    NodeNeighbor,
+    Position,
+    Telemetry,
+)
 
 logger = logging.getLogger("noc.ingest")
 
@@ -281,16 +289,36 @@ class IngestService:
         # Registro por paquete: la entrada describe SOLO el paquete que llegó
         # (un kind = una entrada, nunca fusionada con otros kinds del nodo).
         # El reinicio es un hecho ADICIONAL, nunca sustituye a la entrada.
+        #
+        # Excepción (pedida por el usuario): la telemetría de dispositivo del
+        # NODO LOCAL del gateway que la reporta NO se narra — el nodo se
+        # auto-reporta por la API con mucha frecuencia (ni siquiera es
+        # tráfico LoRa) e inunda el diario. Se sigue persistiendo igual
+        # (histórico, dashboard, alertas); solo se calla la entrada. El
+        # reinicio del nodo local SÍ se narra (hecho relevante), y la
+        # telemetría de un nodo gateway oída por OTRA pasarela también
+        # (eso sí es tráfico de malla real).
         label = _node_label(await node_repo.get(p["node_id"]), p["node_id"])
-        packet_event = activity_events.render_telemetry_packet(
-            p["kind"], p["node_id"], label, p, gateway_id
+        is_own_gateway_node = (
+            p["kind"] == "device"
+            and gateway_id is not None
+            and await self._is_local_node_of(session, gateway_id, p["node_id"])
         )
-        if packet_event is not None:
-            await activity.emit_activity(packet_event)
+        if not is_own_gateway_node:
+            packet_event = activity_events.render_telemetry_packet(
+                p["kind"], p["node_id"], label, p, gateway_id
+            )
+            if packet_event is not None:
+                await activity.emit_activity(packet_event)
         if rebooted:
             await activity.emit_activity(
                 activity_events.render_reboot(p["node_id"], label, new_uptime, gateway_id)
             )
+
+    @staticmethod
+    async def _is_local_node_of(session: AsyncSession, gateway_id: str, node_id: str) -> bool:
+        info = await SqlGatewayRepository(session).get(gateway_id)
+        return info is not None and info.local_node_id == node_id
 
     async def _on_message(
         self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
@@ -308,17 +336,29 @@ class IngestService:
     async def _on_neighbors(
         self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
     ) -> None:
-        """NEIGHBORINFO_APP: solo narrativa puntual en esta fase — la
-        topología persistida (`node_neighbors`) sigue siendo el diseño
-        aparte de `motor-de-reglas-y-topologia.md` §2."""
+        """NEIGHBORINFO_APP: persiste cada vecino directo en `node_neighbors`
+        (topología real de malla, motor-de-reglas-y-topologia.md §2) además
+        de narrar el paquete, mismo orden que `_on_position` (persistir
+        primero, narrar después)."""
         node_repo = SqlNodeRepository(session)
+        neighbor_repo = SqlNeighborRepository(session)
         node_id = p["node_id"]
         await node_repo.touch_last_seen(node_id, gateway_id, ts)
+        neighbor_labels: list[tuple[str, float | None]] = []
+        for n in p.get("neighbors") or []:
+            await neighbor_repo.add(
+                NodeNeighbor(
+                    node_id=node_id,
+                    neighbor_id=n["neighbor_id"],
+                    snr=n.get("snr"),
+                    received_at=ts,
+                    gateway_id=gateway_id,
+                )
+            )
+            neighbor_labels.append(
+                (_node_label(await node_repo.get(n["neighbor_id"]), n["neighbor_id"]), n.get("snr"))
+            )
         label = _node_label(await node_repo.get(node_id), node_id)
-        neighbor_labels = [
-            (_node_label(await node_repo.get(n["neighbor_id"]), n["neighbor_id"]), n.get("snr"))
-            for n in p.get("neighbors") or []
-        ]
         await activity.emit_activity(
             activity_events.render_neighbor_info(node_id, label, neighbor_labels, gateway_id, p)
         )

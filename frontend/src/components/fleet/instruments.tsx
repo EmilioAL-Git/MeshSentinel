@@ -1,4 +1,5 @@
 import { activeGatewayCount, type NodeSummaryOut } from "../../api/client";
+import { relTime } from "../../time";
 
 /**
  * Instrumentos compartidos de una fila de Flota (v0.8, extraído en la fase
@@ -10,25 +11,23 @@ import { activeGatewayCount, type NodeSummaryOut } from "../../api/client";
 export const GRID =
   "20px 20px 14px minmax(140px,1.5fr) 92px minmax(80px,1fr) 120px 76px minmax(90px,120px) 70px 26px";
 
-/** Formatea segundos transcurridos como "12s" / "3m" / "2h" / "1d". */
-export function fmtElapsed(s: number): string {
-  if (s < 60) return `${Math.round(s)}s`;
-  if (s < 3600) return `${Math.round(s / 60)}m`;
-  if (s < 86400) return `${Math.round(s / 3600)}h`;
-  return `${Math.round(s / 86400)}d`;
-}
+// Tráfico "reciente" para el pulso de la columna de presencia (hardening):
+// la actividad es un indicador visual, nunca criterio de orden del roster.
+const RECENT_SEEN_MS = 120_000;
 
-export function relTime(iso: string | null): string {
-  if (!iso) return "—";
-  return fmtElapsed(Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000));
-}
-
-export function Battery({ level }: { level: number | null | undefined }) {
+export function Battery({
+  level,
+  lowThreshold = 20,
+}: {
+  level: number | null | undefined;
+  /** Umbral de batería baja (thresholds del backend, no hardcodeado). */
+  lowThreshold?: number;
+}) {
   if (level == null) return <span style={{ color: "var(--text-faint)" }}>—</span>;
   if (level > 100) {
     return <span className="meter" style={{ color: "var(--ok)" }}>⚡ ext</span>;
   }
-  const color = level <= 20 ? "var(--crit)" : level <= 50 ? "var(--warn)" : "var(--ok)";
+  const color = level < lowThreshold ? "var(--crit)" : level <= 50 ? "var(--warn)" : "var(--ok)";
   return (
     <span className="meter">
       <span className="track">
@@ -83,6 +82,7 @@ export function FleetRow({
   onToggleFavorite,
   onToggleIgnored,
   onToggleChecked,
+  lowBatteryThreshold = 20,
 }: {
   summary: NodeSummaryOut;
   selected: string | null;
@@ -92,9 +92,17 @@ export function FleetRow({
   onToggleFavorite: (id: string, value: boolean) => void;
   onToggleIgnored: (id: string, value: boolean) => void;
   onToggleChecked: (id: string) => void;
+  /** Umbral de batería baja (thresholds del backend, no hardcodeado). */
+  lowBatteryThreshold?: number;
 }) {
   const { node, last_device_telemetry, tags: nodeTags } = summary;
   const gwCount = activeGatewayCount(summary);
+  // Actividad como INDICADOR (hardening): el roster ya no se ordena por
+  // recencia — el tráfico reciente se señala con un pulso en la presencia.
+  const recent =
+    node.online &&
+    node.last_seen_at != null &&
+    Date.now() - new Date(node.last_seen_at).getTime() < RECENT_SEEN_MS;
   const cls = [
     "roster-row",
     focusId === node.node_id ? "focus" : selected === node.node_id ? "sel" : "",
@@ -122,7 +130,10 @@ export function FleetRow({
       >
         {node.is_favorite ? "★" : "☆"}
       </span>
-      <span className={`presence ${node.online ? "on" : "off"}`} title={node.online ? "En línea" : "Offline"}>
+      <span
+        className={`presence ${node.online ? "on" : "off"}${recent ? " noc-pulse" : ""}`}
+        title={recent ? "En línea · tráfico en los últimos 2 min" : node.online ? "En línea" : "Offline"}
+      >
         {node.online ? "●" : "○"}
       </span>
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -143,7 +154,7 @@ export function FleetRow({
         ))}
       </span>
       <span>
-        <Battery level={last_device_telemetry?.battery_level} />
+        <Battery level={last_device_telemetry?.battery_level} lowThreshold={lowBatteryThreshold} />
       </span>
       <span>
         <Signal snr={node.snr} />

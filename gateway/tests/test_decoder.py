@@ -227,9 +227,25 @@ def test_traceroute_with_resolved_route():
     assert payload["route"] == ["!a4e1f2b1", "!a4e1f2b2"]
 
 
-def test_traceroute_without_route_is_dropped():
-    """Una solicitud sin resolver (route vacío) no es un hecho narrable todavía."""
-    packet = {**BASE_PACKET, "decoded": {"portnum": "TRACEROUTE_APP", "traceroute": {"route": []}}}
+def test_traceroute_direct_with_empty_route_is_emitted():
+    """Regresión (visto en producción): un traceroute DIRECTO (emisor ->
+    destino en un salto) llega con route=[] y solo snr_towards — es el caso
+    más común en pruebas de cerca y antes se descartaba como "sin resolver",
+    dejando los traceroutes invisibles en el Registro."""
+    packet = {
+        **BASE_PACKET,
+        "decoded": {"portnum": "TRACEROUTE_APP", "traceroute": {"snrTowards": [54]}},
+    }
+    decoded = decode_packet(packet)
+    assert_valid(decoded)
+    event_type, payload = decoded
+    assert event_type == "traceroute.completed"
+    assert payload["route"] == []
+    assert payload["snr_towards"] == [54]
+
+
+def test_traceroute_without_payload_dict_is_dropped():
+    packet = {**BASE_PACKET, "decoded": {"portnum": "TRACEROUTE_APP"}}
     assert decode_packet(packet) is None
 
 
@@ -271,6 +287,43 @@ def test_waypoint_without_coordinates_is_dropped():
 )
 def test_unusable_packets_return_none(packet):
     assert decode_packet(packet) is None
+
+
+def test_packet_without_from_id_falls_back_to_from_num():
+    """Regresión (visto en producción vía TCP): la librería deja fromId=None
+    cuando el nodo emisor aún no está en su NodeDB en memoria — el paquete
+    es perfectamente válido y `from` (node_num) viene SIEMPRE. Antes se
+    descartaba en bloque y el Registro se quedaba mudo con tráfico real."""
+    packet = {
+        **BASE_PACKET,
+        "fromId": None,
+        "from": 0x524A3606,
+        "decoded": {
+            "portnum": "NODEINFO_APP",
+            "user": {"id": "!524a3606", "longName": "Torre", "shortName": "TRRE", "hwModel": "TBEAM"},
+        },
+    }
+    decoded = decode_packet(packet)
+    assert_valid(decoded)
+    event_type, payload = decoded
+    assert event_type == "node.seen"
+    assert payload["node_id"] == "!524a3606"
+    assert payload["node_num"] == 0x524A3606
+
+    telemetry = {
+        **BASE_PACKET,
+        "fromId": None,
+        "from": 0x524A3606,
+        "decoded": {
+            "portnum": "TELEMETRY_APP",
+            "telemetry": {"deviceMetrics": {"batteryLevel": 80, "voltage": 3.9}},
+        },
+    }
+    decoded = decode_packet(telemetry)
+    assert_valid(decoded)
+    event_type, payload = decoded
+    assert event_type == "telemetry.received"
+    assert payload["node_id"] == "!524a3606"
 
 
 def test_nodedb_entry():

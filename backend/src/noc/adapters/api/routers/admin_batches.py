@@ -15,7 +15,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.deps import RequireAuthDep, SessionDep
 from noc.adapters.api.routers.admin_operations import OperationOut
 from noc.adapters.api.schemas import GatewaySelectionIn
 from noc.adapters.persistence.admin_repositories import (
@@ -23,6 +23,7 @@ from noc.adapters.persistence.admin_repositories import (
     SqlAdminOperationRepository,
 )
 from noc.application.admin.batches import BatchScope
+from noc.application.auth.actor import ActorContext, actor_label_for
 from noc.application.node_filters import NodeFilters
 from noc.domain.admin.entities import AdminBatch
 
@@ -65,6 +66,10 @@ class PreviewIn(BaseModel):
     operation_type: str
     params: dict[str, Any] = Field(default_factory=dict)
     scope: ScopeIn
+    # Hardening: la simulación recibe la MISMA selección de gateway que la
+    # ejecución — antes el selector del wizard solo afectaba a `create` y el
+    # dry-run podía divergir de lo que de verdad se iba a ejecutar.
+    gateway_selection: GatewaySelectionIn = Field(default_factory=GatewaySelectionIn)
 
 
 class NodePreviewOut(BaseModel):
@@ -105,6 +110,7 @@ class BatchOut(BaseModel):
     node_count: int
     status: Literal["running", "paused", "cancelled", "completed", "completed_with_errors"]
     created_by: str
+    actor_label: str
     created_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
@@ -119,6 +125,7 @@ class BatchOut(BaseModel):
             node_count=len(b.node_ids),
             status=b.status,
             created_by=b.created_by,
+            actor_label=actor_label_for(b),
             created_at=b.created_at,
             started_at=b.started_at,
             finished_at=b.finished_at,
@@ -152,7 +159,15 @@ def _service(request: Request):
 @router.post("/preview", response_model=PreviewOut)
 async def preview_batch(body: PreviewIn, request: Request) -> PreviewOut:
     try:
-        preview = await _service(request).preview(body.operation_type, body.params, body.scope.to_scope())
+        preview = await _service(request).preview(
+            body.operation_type,
+            body.params,
+            body.scope.to_scope(),
+            forced_gateway_id=body.gateway_selection.gateway_id
+            if body.gateway_selection.mode == "forced"
+            else None,
+            use_preference=body.gateway_selection.mode != "auto",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return PreviewOut(
@@ -171,7 +186,7 @@ async def preview_batch(body: PreviewIn, request: Request) -> PreviewOut:
 
 
 @router.post("", response_model=BatchOut, status_code=201)
-async def create_batch(body: BatchCreateIn, request: Request) -> BatchOut:
+async def create_batch(body: BatchCreateIn, request: Request, current_user: RequireAuthDep) -> BatchOut:
     try:
         batch = await _service(request).create(
             name=body.name,
@@ -181,6 +196,7 @@ async def create_batch(body: BatchCreateIn, request: Request) -> BatchOut:
             scope_description=body.scope_description,
             forced_gateway_id=body.gateway_selection.gateway_id if body.gateway_selection.mode == "forced" else None,
             use_preference=body.gateway_selection.mode != "auto",
+            actor=ActorContext.for_user(current_user),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -240,7 +256,7 @@ async def batch_operations(
 
 
 @router.post("/{batch_id}/pause", response_model=BatchOut)
-async def pause_batch(batch_id: int, request: Request) -> BatchOut:
+async def pause_batch(batch_id: int, request: Request, _user: RequireAuthDep) -> BatchOut:
     batch = await _service(request).pause(batch_id)
     if batch is None:
         raise HTTPException(status_code=409, detail="Batch not found or not running")
@@ -248,7 +264,7 @@ async def pause_batch(batch_id: int, request: Request) -> BatchOut:
 
 
 @router.post("/{batch_id}/resume", response_model=BatchOut)
-async def resume_batch(batch_id: int, request: Request) -> BatchOut:
+async def resume_batch(batch_id: int, request: Request, _user: RequireAuthDep) -> BatchOut:
     batch = await _service(request).resume(batch_id)
     if batch is None:
         raise HTTPException(status_code=409, detail="Batch not found or not paused")
@@ -256,7 +272,7 @@ async def resume_batch(batch_id: int, request: Request) -> BatchOut:
 
 
 @router.post("/{batch_id}/cancel", response_model=BatchOut)
-async def cancel_batch(batch_id: int, request: Request) -> BatchOut:
+async def cancel_batch(batch_id: int, request: Request, _user: RequireAuthDep) -> BatchOut:
     batch = await _service(request).cancel(batch_id)
     if batch is None:
         raise HTTPException(status_code=409, detail="Batch not found or already terminal")

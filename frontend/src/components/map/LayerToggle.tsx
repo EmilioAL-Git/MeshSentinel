@@ -17,6 +17,14 @@ export interface MapLayerState {
   showFixed: boolean;
   showFavoritesOnly: boolean;
   showLinks: boolean;
+  /** Enlaces nodo↔nodo reales (NEIGHBORINFO_APP) — topología de malla. */
+  showNeighbors: boolean;
+  /** Historial GPS del nodo en Focus/seleccionado. */
+  showTraces: boolean;
+  /** Rutas de traceroute recientes (activity_log). */
+  showRoutes: boolean;
+  /** Área aproximada por pasarela derivada de sus enlaces activos. */
+  showCoverage: boolean;
   colorMode: MapColorMode;
 }
 
@@ -27,6 +35,10 @@ export const DEFAULT_MAP_LAYERS: MapLayerState = {
   showFixed: true,
   showFavoritesOnly: false,
   showLinks: false,
+  showNeighbors: false,
+  showTraces: false,
+  showRoutes: false,
+  showCoverage: false,
   colorMode: "status",
 };
 
@@ -74,6 +86,34 @@ export function LayerToggle({
         </button>
         <button style={chipBtn(layers.showLinks)} onClick={() => set("showLinks", !layers.showLinks)}>
           ╱ Enlaces
+        </button>
+        <button
+          style={chipBtn(layers.showNeighbors)}
+          onClick={() => set("showNeighbors", !layers.showNeighbors)}
+          title="Enlaces nodo↔nodo reales (NeighborInfo) — requiere firmware con el módulo activado"
+        >
+          ⌁ Malla real
+        </button>
+        <button
+          style={chipBtn(layers.showTraces)}
+          onClick={() => set("showTraces", !layers.showTraces)}
+          title="Historial GPS del nodo en Focus o del seleccionado"
+        >
+          〜 Traza
+        </button>
+        <button
+          style={chipBtn(layers.showRoutes)}
+          onClick={() => set("showRoutes", !layers.showRoutes)}
+          title="Rutas de traceroute recientes"
+        >
+          🧭 Rutas
+        </button>
+        <button
+          style={chipBtn(layers.showCoverage)}
+          onClick={() => set("showCoverage", !layers.showCoverage)}
+          title="Área aproximada de cobertura por pasarela (no es un modelo de propagación real)"
+        >
+          ◌ Cobertura
         </button>
       </div>
       <div style={{ display: "flex", gap: "0.3rem" }}>

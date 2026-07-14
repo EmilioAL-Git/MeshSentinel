@@ -391,7 +391,8 @@ def render_traceroute(
         internal_type="TRACEROUTE_APP",
         node_id=node_id,
         node_label=label,
-        description=" → ".join(route_labels),
+        # route = saltos INTERMEDIOS; vacío = enlace directo (un solo salto)
+        description=" → ".join(route_labels) if route_labels else "directo (sin saltos intermedios)",
         gateway_id=gateway_id,
         rssi=p.get("rssi"),
         snr=p.get("snr"),
@@ -456,6 +457,36 @@ def render_gateway_status(
         icon=icon,
         title=template.format(name=name or gateway_id),
         details=details,
+        gateway_id=gateway_id,
+    )
+
+
+# Gestión de pasarelas (autenticación, Tier B): la ACCIÓN pedida por un
+# operador, distinta de `render_gateway_status` (el estado real reportado
+# por el propio proceso gateway vía heartbeat) — no se duplican, narran
+# hechos distintos (intención vs. resultado).
+_GATEWAY_ACTION_NARRATIVE: dict[str, tuple[Priority, str, str]] = {
+    "connect": ("important", "🔌", "{actor} conectó la pasarela {name}"),
+    "disconnect": ("warning", "🔌", "{actor} desconectó la pasarela {name}"),
+    "configure": ("important", "🛠", "{actor} configuró la pasarela {name}"),
+    "update": ("important", "🛠", "{actor} editó la configuración de la pasarela {name}"),
+    "delete": ("warning", "🗑", "{actor} eliminó la pasarela {name}"),
+    "import": ("info", "📥", "{actor} adoptó la pasarela {name} para gestión"),
+}
+
+
+def render_gateway_action(
+    action: str, gateway_id: str, name: str | None, actor_label: str
+) -> ActivityEvent | None:
+    narrative = _GATEWAY_ACTION_NARRATIVE.get(action)
+    if narrative is None:
+        return None
+    severity, icon, template = narrative
+    return ActivityEvent(
+        source="gateway",
+        severity=severity,
+        icon=icon,
+        title=template.format(actor=actor_label, name=name or gateway_id),
         gateway_id=gateway_id,
     )
 
@@ -600,10 +631,13 @@ def render_operation(
     error: str | None = None,
     attempts: int | None = None,
     max_attempts: int | None = None,
+    actor_label: str | None = None,
 ) -> ActivityEvent | None:
     """Narrativa del pipeline admin. dispatched/running no se narran (ruido
     interno); CRÍTICO solo cuando la operación ya fracasó definitivamente —
-    un reintento programado es WARNING (situación recuperable)."""
+    un reintento programado es WARNING (situación recuperable). `actor_label`
+    (autenticación): quién la inició — solo se interpola en "created", que es
+    literalmente el acto de iniciar la operación."""
     doing, success, failure = (p.format(node=label) for p in _phrases(operation_type))
     common: dict[str, Any] = {
         "source": "admin",
@@ -614,9 +648,8 @@ def render_operation(
     }
 
     if state == "created":
-        return ActivityEvent(
-            severity="important", icon="▶", title=f"Iniciando {doing}", **common
-        )
+        title = f"{actor_label} inició {doing}" if actor_label else f"Iniciando {doing}"
+        return ActivityEvent(severity="important", icon="▶", title=title, **common)
     if state == "retry_scheduled":
         attempt = f" (intento {attempts} de {max_attempts})" if attempts and max_attempts else ""
         return ActivityEvent(
@@ -665,7 +698,7 @@ def render_operation(
 
 
 _BATCH_NARRATIVE: dict[str, tuple[Priority, str, str]] = {
-    "created": ("important", "▶", "Lanzado el lote «{name}» sobre {count} nodos"),
+    "created": ("important", "▶", "{actor} lanzó el lote «{name}» sobre {count} nodos"),
     "paused": ("warning", "⏸", "Lote «{name}» pausado"),
     "resumed": ("info", "▶", "Lote «{name}» reanudado"),
     "cancelled": ("warning", "✕", "Lote «{name}» cancelado"),
@@ -675,16 +708,21 @@ _BATCH_NARRATIVE: dict[str, tuple[Priority, str, str]] = {
 
 
 def render_batch(
-    batch_id: int | None, name: str, state: str, node_count: int
+    batch_id: int | None, name: str, state: str, node_count: int, actor_label: str | None = None
 ) -> ActivityEvent | None:
     narrative = _BATCH_NARRATIVE.get(state)
     if narrative is None:
         return None
     severity, icon, template = narrative
+    title = (
+        template.format(name=name, count=node_count, actor=actor_label or "Sistema")
+        if state == "created"
+        else template.format(name=name, count=node_count)
+    )
     return ActivityEvent(
         source="admin",
         severity=severity,
         icon=icon,
-        title=template.format(name=name, count=node_count),
+        title=title,
         batch_id=batch_id,
     )

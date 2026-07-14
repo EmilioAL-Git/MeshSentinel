@@ -21,6 +21,7 @@ export function FleetBlocks({
   onToggleFavorite,
   onToggleIgnored,
   onCheckedChange,
+  lowBatteryThreshold,
 }: {
   summaries: NodeSummaryOut[];
   gatewayNodeIds: Set<string>;
@@ -31,6 +32,8 @@ export function FleetBlocks({
   onToggleFavorite: (id: string, value: boolean) => void;
   onToggleIgnored: (id: string, value: boolean) => void;
   onCheckedChange: (ids: Set<string>) => void;
+  /** Umbral de batería baja (thresholds del backend, no hardcodeado). */
+  lowBatteryThreshold?: number;
 }) {
   const byCategory = useMemo(() => groupByCategory(summaries, gatewayNodeIds), [summaries, gatewayNodeIds]);
 
@@ -88,6 +91,7 @@ export function FleetBlocks({
                 onToggleFavorite={onToggleFavorite}
                 onToggleIgnored={onToggleIgnored}
                 onToggleChecked={toggleChecked}
+                lowBatteryThreshold={lowBatteryThreshold}
               />
             ))}
           </BlockAccordion>

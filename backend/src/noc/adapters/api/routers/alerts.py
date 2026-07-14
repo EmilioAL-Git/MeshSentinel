@@ -97,6 +97,22 @@ class ChannelOut(ChannelIn):
 # ── Alertas ──────────────────────────────────────────────────────────────────
 
 
+class AlertCountsOut(BaseModel):
+    """Agregados reales de alertas activas (hardening): la fuente de los
+    contadores del HUD/StatusBar/insignias — nunca una lista truncada."""
+
+    active: int
+    firing: int
+    acknowledged: int
+    critical_active: int
+
+
+@router.get("/alerts/counts", response_model=AlertCountsOut)
+async def alert_counts(session: SessionDep, group_id: int | None = None) -> AlertCountsOut:
+    counts = await SqlAlertRepository(session).active_counts(group_id)
+    return AlertCountsOut(**{f: counts.get(f, 0) for f in AlertCountsOut.model_fields})
+
+
 @router.get("/alerts", response_model=list[AlertOut])
 async def list_alerts(
     session: SessionDep,

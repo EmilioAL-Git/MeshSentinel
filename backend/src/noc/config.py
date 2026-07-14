@@ -63,6 +63,28 @@ class Settings(BaseSettings):
     admin_max_attempts: int = 3
     admin_scheduler_interval_seconds: float = 2.0
 
+    # ── Registro persistente (hardening) ─────────────────────────────
+    # Tope de filas de activity_log: el escritor poda las más antiguas al
+    # superarlo (diario operativo con memoria, no histórico ilimitado).
+    activity_log_max_rows: int = 20_000
+
+    # ── Autenticación ──────────────────────────────────────────────────
+    # Modo abierto mientras no exista ningún auth_users con is_admin+enabled
+    # (sin flag de entorno: ver AuthService.is_protected_mode). Sesión
+    # deslizante: se renueva en cada request autenticada válida hasta un tope
+    # absoluto — evita tanto sesiones eternas como cerrar sesión a media
+    # jornada de un operador de guardia.
+    session_cookie_name: str = "ms_session"
+    session_idle_hours: int = 12
+    session_max_days: int = 7
+    # Desactivable para despliegues sin TLS todavía (docker-compose.yml no
+    # monta HTTPS por defecto); con TLS delante SIEMPRE debe ir a true.
+    cookie_secure: bool = True
+    password_min_length: int = 10
+    login_rate_limit_window_seconds: int = 900
+    login_rate_limit_per_username: int = 5
+    login_rate_limit_per_ip: int = 20
+
     api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = []
 

@@ -7,6 +7,7 @@ import {
   createGroup,
   createOperation,
   createTag,
+  fetchDashboardSummary,
   fetchGateways,
   fetchGroups,
   fetchNode,
@@ -27,7 +28,6 @@ import {
   type NodeSummaryOut,
   type OperationOut,
 } from "../../api/client";
-import type { ActivityEntry } from "../../activity";
 import { relativeTime } from "../../time";
 import { alertSeverityColor, chipStyle, t } from "../../tokens";
 import { trackOperations } from "../../opTracker";
@@ -42,6 +42,7 @@ import { FloatingWindow } from "../shell/FloatingWindow";
 import { PreferredGatewaySelect } from "../shell/GatewaySelect";
 import { toast } from "../shell/Toast";
 import { HistoryChart, type HistoryPoint } from "./HistoryChart";
+import { NodeLog } from "./NodeLog";
 import { RemoteFlags } from "./RemoteFlags";
 
 /**
@@ -149,7 +150,6 @@ export function Inspector({
   summaries,
   operations,
   alerts,
-  activity,
   onClose,
   onCenter,
   onGoTo,
@@ -162,8 +162,6 @@ export function Inspector({
   operations: OperationOut[];
   /** Alertas ya cargadas por App (pestaña Alertas) — filtradas aquí, sin fetch nuevo. */
   alerts: AlertOut[];
-  /** Feed de actividad ya cargado por App/OpsCenter (pestaña Log) — filtrado aquí. */
-  activity: ActivityEntry[];
   onClose: () => void;
   onCenter: ((lat: number, lng: number) => void) | null;
   onGoTo: (view: string) => void;
@@ -222,6 +220,10 @@ export function Inspector({
   const allGroups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
   // Mismo queryKey que App.tsx: caché compartida, sin fetch nuevo.
   const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
+  // Umbrales de la red (hardening): el color de batería usa
+  // thresholds.low_battery_percent, nunca un valor hardcodeado. Mismo
+  // queryKey que App.tsx — caché compartida.
+  const dashboard = useQuery({ queryKey: ["dashboard"], queryFn: fetchDashboardSummary });
   // Pestaña Configuración: resumen ligero, reutiliza el mismo fetch que M1.4/M3
   // — sin reimplementar FieldControl/coerceValue del editor completo aquí.
   const configState = useQuery({
@@ -311,7 +313,6 @@ export function Inspector({
   const nodeOps = operations.filter((o) => o.target_node_id === nodeId).slice(0, 5);
   const nodeAlerts = alerts.filter((a) => a.subject_type === "node" && a.subject_id === nodeId);
   const nodeActiveAlerts = nodeAlerts.filter((a) => a.status !== "resolved");
-  const nodeLog = activity.filter((e) => e.nodeId === nodeId).slice(0, 60);
   const nodeTagIds = new Set((summary?.tags ?? []).map((x) => x.id));
   const nodeGroupIds = new Set(summary?.group_ids ?? []);
   const subjectOptions = summaries.filter((s) => s.node.node_id !== nodeId);
@@ -339,7 +340,9 @@ export function Inspector({
   const battery = lastTel?.battery_level;
   const batteryText =
     battery == null ? "—" : battery > 100 ? "⚡ ext." : `${battery} %`;
-  const batteryColor = battery != null && battery <= 100 && battery < 25 ? t.crit : undefined;
+  const lowBatteryThreshold = dashboard.data?.thresholds.low_battery_percent ?? 20;
+  const batteryColor =
+    battery != null && battery <= 100 && battery < lowBatteryThreshold ? t.crit : undefined;
 
   const badge = (n: number, color: string = t.accent) =>
     n > 0 ? (
@@ -690,11 +693,18 @@ export function Inspector({
           <>
             {nodeOps.length === 0 && <div style={{ color: t.textFaint, fontSize: 12 }}>Sin operaciones recientes.</div>}
             {nodeOps.map((op) => (
-              <div key={op.id} style={{ display: "flex", alignItems: "baseline", gap: "0.45rem", padding: "0.16rem 0", fontSize: 12 }}>
+              <div
+                key={op.id}
+                title={`por ${op.actor_label}`}
+                style={{ display: "flex", alignItems: "baseline", gap: "0.45rem", padding: "0.16rem 0", fontSize: 12 }}
+              >
                 <span style={{ color: t.textFaint, fontFamily: t.fontMono, fontSize: 11 }}>#{op.id}</span>
                 <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {op.operation_type}
                   {typeof op.params.section === "string" ? `:${op.params.section}` : ""}
+                </span>
+                <span style={{ color: t.textFaint, fontSize: 10.5, maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  por {op.actor_label}
                 </span>
                 <span
                   style={{ ...chipStyle(OP_STATUS_COLOR[op.status] ?? t.textDim), fontSize: 10.5 }}
@@ -773,17 +783,7 @@ export function Inspector({
           </>
         )}
 
-        {tab === "log" && (
-          <>
-            {nodeLog.length === 0 && <div style={{ color: t.textFaint, fontSize: 12 }}>Sin eventos registrados para este nodo.</div>}
-            {nodeLog.map((e) => (
-              <div key={e.id} style={{ fontSize: 11.5, fontFamily: t.fontMono, padding: "0.18rem 0", borderBottom: `1px solid ${t.borderSubtle}` }}>
-                <span style={{ color: t.textFaint }}>{relativeTime(e.time)}</span>{" "}
-                <span style={{ color: t.text, fontFamily: t.fontUi }}>{e.text}</span>
-              </div>
-            ))}
-          </>
-        )}
+        {tab === "log" && <NodeLog nodeId={nodeId} />}
       </div>
     </FloatingWindow>
   );

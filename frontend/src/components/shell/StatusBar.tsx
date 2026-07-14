@@ -1,12 +1,13 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import type {
-  AlertOut,
+  AlertCountsOut,
   BatchDetailOut,
   DashboardSummaryOut,
   EventsSocketStatus,
   GatewayOut,
-  OperationOut,
+  OperationCountsOut,
 } from "../../api/client";
+import { useAuth } from "../../context/AuthContext";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { t } from "../../tokens";
 
@@ -76,8 +77,8 @@ export function StatusBar({
   backendOk,
   summary,
   gateways,
-  alerts,
-  operations,
+  alertCounts,
+  operationCounts,
   runningBatch,
   onGoTo,
 }: {
@@ -85,8 +86,9 @@ export function StatusBar({
   backendOk: boolean;
   summary: DashboardSummaryOut | undefined;
   gateways: GatewayOut[];
-  alerts: AlertOut[];
-  operations: OperationOut[];
+  /** Agregados reales del backend (hardening) — nunca listas truncadas. */
+  alertCounts: AlertCountsOut | undefined;
+  operationCounts: OperationCountsOut | undefined;
   runningBatch: BatchDetailOut | undefined;
   onGoTo: (view: "nodes" | "gateways" | "alerts" | "jobs") => void;
 }) {
@@ -101,12 +103,12 @@ export function StatusBar({
   const connected = enabled.filter((g) => g.status === "connected").length;
   const gwProblem = connected < enabled.length;
 
-  const active = alerts.filter((a) => a.status !== "resolved");
-  const hasCrit = active.some((a) => a.severity === "CRITICAL");
-  const alertColor = active.length === 0 ? t.textDim : hasCrit ? t.crit : t.warn;
+  const activeAlerts = alertCounts?.active ?? 0;
+  const hasCrit = (alertCounts?.critical_active ?? 0) > 0;
+  const alertColor = activeAlerts === 0 ? t.textDim : hasCrit ? t.crit : t.warn;
 
-  const queuedCount = operations.filter((o) => o.status === "pending" || o.status === "queued").length;
-  const runningCount = operations.filter((o) => o.status === "running").length;
+  const queuedCount = (operationCounts?.pending ?? 0) + (operationCounts?.queued ?? 0);
+  const runningCount = operationCounts?.running ?? 0;
 
   // Conexión: el backend caído manda sobre el estado del WS
   const conn = !backendOk
@@ -141,7 +143,7 @@ export function StatusBar({
         </span>
       </Segment>
       <Segment title="Alertas activas" onClick={() => onGoTo("alerts")}>
-        <span style={{ color: alertColor }}>⚠ {active.length}</span>
+        <span style={{ color: alertColor }}>⚠ {activeAlerts}</span>
       </Segment>
       <Segment title="Operaciones en cola (pendientes + encoladas)" onClick={() => onGoTo("jobs")}>
         ⧗ {queuedCount}
@@ -161,9 +163,31 @@ export function StatusBar({
         {summary ? `${summary.nodes_online}/${summary.nodes_total} ⬆` : "…"}
       </Segment>
       <span style={{ marginLeft: "auto" }} />
+      <SessionSegment />
       <Segment title="Cambiar entre hora UTC y local" onClick={() => setUtc(!utc)}>
         {clock}
       </Segment>
     </footer>
+  );
+}
+
+/** Sesión (autenticación): "Iniciar sesión" abre el modal; autenticado
+ * muestra el nombre y cierra sesión al click — sin submenú, coherente con
+ * el resto de segmentos (una acción por click). En modo abierto (sin
+ * ningún admin todavía) sigue mostrando "Iniciar sesión" por si alguien
+ * quiere crear el primer usuario. */
+function SessionSegment() {
+  const { isAuthenticated, me, openLoginModal, doLogout } = useAuth();
+  if (isAuthenticated && me?.user) {
+    return (
+      <Segment title="Cerrar sesión" onClick={() => void doLogout()}>
+        👤 {me.user.display_name}
+      </Segment>
+    );
+  }
+  return (
+    <Segment title="Iniciar sesión" onClick={openLoginModal}>
+      Iniciar sesión
+    </Segment>
   );
 }

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meshtastic-noc/shared/events/v1/traceroute_completed.schema.json",
   "title": "TracerouteCompletedPayload",
-  "description": "Payload de 'traceroute.completed': TRACEROUTE_APP con la ruta ya resuelta (route no vacío).",
+  "description": "Payload de 'traceroute.completed': TRACEROUTE_APP decodificado. `route` lista los saltos INTERMEDIOS: vacío = traceroute directo (un solo salto), el caso más común en mallas densas.",
   "type": "object",
   "required": ["node_id", "route"],
   "properties": {

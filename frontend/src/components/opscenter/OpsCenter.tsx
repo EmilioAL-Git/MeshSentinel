@@ -1,4 +1,5 @@
 import type L from "leaflet";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityEntry } from "../../activity";
 import type {
@@ -10,6 +11,7 @@ import type {
   NodeSummaryOut,
   OperationOut,
 } from "../../api/client";
+import { fetchTopology } from "../../api/client";
 import { useGroupNodeIds } from "../../context/GroupContext";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { t } from "../../tokens";
@@ -89,6 +91,41 @@ export function OpsCenter({
     }
     return map;
   }, [summaries]);
+
+  // Flujo de tráfico entre nodos (§8): reutiliza la topología real
+  // (node_neighbors, motor-de-reglas-y-topologia.md §2) para que un evento
+  // de un nodo con vecinos conocidos pulse también sobre el punto medio de
+  // cada enlace, dando sensación de flujo en vez de un punto aislado.
+  const { data: topologyLinks } = useQuery({
+    queryKey: ["topology"],
+    queryFn: () => fetchTopology(),
+    refetchInterval: 20_000,
+  });
+  const neighborMidpointsOf = useMemo(() => {
+    const map = new Map<string, [number, number][]>();
+    for (const link of topologyLinks ?? []) {
+      if (!link.active) continue;
+      const a = positionOf.get(link.node_id);
+      const b = positionOf.get(link.neighbor_id);
+      if (!a || !b) continue;
+      const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const list = map.get(link.node_id) ?? [];
+      list.push(mid);
+      map.set(link.node_id, list);
+    }
+    return map;
+  }, [topologyLinks, positionOf]);
+
+  // Nombre COMPLETO por nodo para las tarjetas de actividad (la entrada del
+  // backend solo trae el nombre corto).
+  const nodeNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of summaries) {
+      const name = s.node.long_name ?? s.node.short_name;
+      if (name) map.set(s.node.node_id, name);
+    }
+    return map;
+  }, [summaries]);
   const [pulses, setPulses] = useState<MapPulse[]>([]);
   const seenEntries = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -97,6 +134,9 @@ export function OpsCenter({
       if (seenEntries.current.has(e.id)) continue;
       seenEntries.current.add(e.id);
       if (!e.nodeId) continue;
+      // Registro persistente (hardening): las entradas sembradas del
+      // histórico no son tráfico de ahora — sin pulso para lo antiguo.
+      if (Date.now() - e.receivedAtMs > 120_000) continue;
       const pos = positionOf.get(e.nodeId);
       if (!pos) continue;
       const color =
@@ -108,6 +148,12 @@ export function OpsCenter({
               ? t.warn
               : t.accent;
       fresh.push({ key: e.id, lat: pos[0], lng: pos[1], color });
+      // Punto medio de cada enlace real conocido de este nodo (tope 2 por
+      // evento, el límite general de lote de abajo sigue aplicando).
+      const midpoints = neighborMidpointsOf.get(e.nodeId) ?? [];
+      for (const [i, mid] of midpoints.slice(0, 2).entries()) {
+        fresh.push({ key: `${e.id}-edge-${i}`, lat: mid[0], lng: mid[1], color });
+      }
     }
     if (seenEntries.current.size > 2000) seenEntries.current.clear();
     if (fresh.length === 0) return;
@@ -117,7 +163,7 @@ export function OpsCenter({
       setPulses((prev) => prev.filter((p) => !batch.some((b) => b.key === p.key)));
     }, 1_500);
     return () => window.clearTimeout(timer);
-  }, [activity, positionOf]);
+  }, [activity, positionOf, neighborMidpointsOf]);
 
   // Grupo activo: nodos fuera de él se atenúan en el mapa, nunca se ocultan.
   const groupNodeIds = useGroupNodeIds(summaries);
@@ -136,7 +182,6 @@ export function OpsCenter({
   const activeOps = operations.filter(
     (o) => o.status === "pending" || o.status === "queued" || o.status === "running",
   ).length;
-  const activeAlerts = alerts.filter((a) => a.status !== "resolved");
 
   return (
     <div style={{ display: "flex", height: "100%", minHeight: 0, position: "relative" }}>
@@ -155,7 +200,6 @@ export function OpsCenter({
         {leftOpen && (
           <StatusPanel
             summaries={summaries}
-            gatewayNodeIds={gatewayNodeIds}
             summary={summary}
             alerts={alerts}
             gateways={gateways}
@@ -211,6 +255,7 @@ export function OpsCenter({
                 }
                 selectedId={selected}
                 onOpenNode={setSelected}
+                nodeNames={nodeNames}
               />
             ),
           },
@@ -229,46 +274,9 @@ export function OpsCenter({
               />
             ),
           },
-          {
-            id: "alerts",
-            icon: "⚠",
-            title: "Alertas activas",
-            badge: activeAlerts.length,
-            badgeColor: activeAlerts.some((a) => a.severity === "CRITICAL") ? t.crit : t.warn,
-            content: (
-              <div style={{ padding: "0.5rem 0.75rem", overflowY: "auto", height: "100%" }}>
-                <span style={{ color: t.textDim, fontSize: 11, letterSpacing: "0.08em", fontWeight: 600 }}>
-                  ALERTAS
-                </span>
-                {activeAlerts.length === 0 && (
-                  <p style={{ color: t.textFaint, fontSize: 12 }}>Sin alertas activas.</p>
-                )}
-                {activeAlerts.map((a) => (
-                  <div key={a.id} style={{ fontSize: 12, padding: "0.25rem 0", borderBottom: `1px solid ${t.borderSubtle}` }}>
-                    <span style={{ color: a.severity === "CRITICAL" ? t.crit : a.severity === "WARNING" ? t.warn : t.textDim }}>
-                      ● {a.severity}
-                    </span>{" "}
-                    <span style={{ color: t.text }}>{a.message}</span>
-                    {a.subject_type === "node" && (
-                      <button
-                        onClick={() => setSelected(a.subject_id)}
-                        style={{
-                          background: "none",
-                          border: "none",
-                          color: t.accent,
-                          cursor: "pointer",
-                          fontSize: 12,
-                          padding: "0 0.3rem",
-                        }}
-                      >
-                        →
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ),
-          },
+          // El panel "Alertas" del riel se eliminó (consolidación del
+          // Centro): una ÚNICA lista de alertas por pantalla — vive en la
+          // cola de ATENCIÓN del StatusPanel, con ACK inline.
         ]}
       />
     </div>

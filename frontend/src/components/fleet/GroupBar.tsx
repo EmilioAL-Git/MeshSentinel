@@ -1,6 +1,6 @@
 import type { GroupOut, MultiGatewayStatsOut } from "../../api/client";
+import { fmtElapsed } from "../../time";
 import { t } from "../../tokens";
-import { fmtElapsed } from "./instruments";
 import type { FleetGroupMetrics } from "./groupStats";
 
 /**
@@ -22,10 +22,13 @@ export function GroupBar({
   group,
   metrics,
   gatewayStats,
+  lowBatteryThreshold = 20,
 }: {
   group: GroupOut;
   metrics: FleetGroupMetrics;
   gatewayStats: MultiGatewayStatsOut | undefined;
+  /** Umbral de batería baja (thresholds del backend, no hardcodeado). */
+  lowBatteryThreshold?: number;
 }) {
   const gatewaysVisible = gatewayStats?.gateways.filter((g) => g.nodes_visible > 0).length ?? null;
 
@@ -63,7 +66,7 @@ export function GroupBar({
           <Stat label="🔋 media" value={`${metrics.batteryAvg.toFixed(0)}%`} />
         )}
         {metrics.batteryMin != null && (
-          <Stat label="mín" value={`${metrics.batteryMin.toFixed(0)}%`} color={metrics.batteryMin <= 20 ? t.crit : undefined} />
+          <Stat label="mín" value={`${metrics.batteryMin.toFixed(0)}%`} color={metrics.batteryMin < lowBatteryThreshold ? t.crit : undefined} />
         )}
         {metrics.snrAvg != null && <Stat label="📶 SNR" value={`${metrics.snrAvg.toFixed(1)} dB`} />}
         {gatewayStats != null && gatewayStats.nodes_observed > 0 && (

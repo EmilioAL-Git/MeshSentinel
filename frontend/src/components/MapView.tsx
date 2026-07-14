@@ -8,6 +8,10 @@ import { classifyNode } from "./fleet/classify";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { LayerToggle, DEFAULT_MAP_LAYERS, type MapColorMode, type MapLayerState } from "./map/LayerToggle";
 import { LinksLayer } from "./map/LinksLayer";
+import { NeighborsLayer } from "./map/NeighborsLayer";
+import { TraceLayer } from "./map/TraceLayer";
+import { RouteLayer } from "./map/RouteLayer";
+import { CoverageLayer } from "./map/CoverageLayer";
 import { styles } from "../styles";
 
 interface Props {
@@ -328,6 +332,10 @@ export function MapView({
           gateways={gateways.map((g) => ({ gateway_id: g.gateway_id, local_node_id: g.local_node_id }))}
         />
       )}
+      {layers.showNeighbors && <NeighborsLayer summaries={visibleByLayer} />}
+      {layers.showRoutes && <RouteLayer summaries={visibleByLayer} gateways={gateways} />}
+      {layers.showCoverage && <CoverageLayer summaries={visibleByLayer} gateways={gateways} />}
+      {layers.showTraces && <TraceLayer nodeId={focusId ?? selectedId} />}
       <MarkerClusterGroup chunkedLoading maxClusterRadius={50}>
         {visibleByLayer.map((s) => {
           const id = s.node.node_id;

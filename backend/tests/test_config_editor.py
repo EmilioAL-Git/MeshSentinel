@@ -145,7 +145,7 @@ async def test_refresh_creates_get_operations(session_factory):
     await seed_node(session_factory)
     async with session_factory() as session:
         out = await refresh_node_config(
-            NODE, RefreshIn(sections=["lora", "telemetry", "owner"]), session,
+            NODE, RefreshIn(sections=["lora", "telemetry", "owner"]), session, None,
         )
     assert len(out.operation_ids) == 3
 
@@ -163,7 +163,7 @@ async def test_refresh_creates_get_operations(session_factory):
 async def test_refresh_all_sections_when_body_empty(session_factory):
     await seed_node(session_factory)
     async with session_factory() as session:
-        out = await refresh_node_config(NODE, RefreshIn(), session)
+        out = await refresh_node_config(NODE, RefreshIn(), session, None)
     assert len(out.operation_ids) == len(ALL_SECTIONS)
 
 
@@ -173,7 +173,7 @@ async def test_refresh_rejects_unknown_section(session_factory):
 
     with pytest.raises(HTTPException) as exc:
         async with session_factory() as session:
-            await refresh_node_config(NODE, RefreshIn(sections=["nope"]), session)
+            await refresh_node_config(NODE, RefreshIn(sections=["nope"]), session, None)
     assert exc.value.status_code == 422
 
 
@@ -192,7 +192,7 @@ async def test_apply_creates_typed_operations_in_order(session_factory):
         }
     )
     async with session_factory() as session:
-        out = await apply_node_config(NODE, body, session)
+        out = await apply_node_config(NODE, body, session, None)
     assert len(out.operation_ids) == 4
 
     async with session_factory() as session:
@@ -220,7 +220,7 @@ async def test_apply_rejects_invalid_value(session_factory):
     body = ApplyIn(sections={"lora": {"region": "MARTE"}})
     with pytest.raises(HTTPException) as exc:
         async with session_factory() as session:
-            await apply_node_config(NODE, body, session)
+            await apply_node_config(NODE, body, session, None)
     assert exc.value.status_code == 422
     assert "lora" in exc.value.detail
     # Nada se encoló
@@ -235,12 +235,12 @@ async def test_apply_rejects_no_changes(session_factory):
 
     with pytest.raises(HTTPException) as exc:
         async with session_factory() as session:
-            await apply_node_config(NODE, ApplyIn(sections={}), session)
+            await apply_node_config(NODE, ApplyIn(sections={}), session, None)
     assert exc.value.status_code == 422
     # Y también si los valores están vacíos por sección
     with pytest.raises(HTTPException) as exc:
         async with session_factory() as session:
-            await apply_node_config(NODE, ApplyIn(sections={"lora": {}}), session)
+            await apply_node_config(NODE, ApplyIn(sections={"lora": {}}), session, None)
     assert exc.value.status_code == 422
 
 

@@ -273,7 +273,7 @@ async def test_create_operation_endpoint_after_implicit_transaction(session_fact
     )
     async with session_factory() as session:
         out = await create_operation(
-            OperationIn(node_id=NODE, operation_type="nodeinfo.get"), session
+            OperationIn(node_id=NODE, operation_type="nodeinfo.get"), session, None
         )
     assert out.status == "pending"
     assert out.gateway_id == "gw-test"

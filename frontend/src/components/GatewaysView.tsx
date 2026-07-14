@@ -17,6 +17,7 @@ import {
   type GatewayStatus,
   type TestConnectionResultOut,
 } from "../api/client";
+import { relativeTime } from "../time";
 
 /**
  * Enlaces (identidad v0.8): las pasarelas dejan de ser tarjetas apiladas y
@@ -53,15 +54,6 @@ function StatusLight({ status }: { status: GatewayStatus | string }) {
       <span style={{ fontSize: 12 }}>{STATUS_LABEL[status] ?? status}</span>
     </span>
   );
-}
-
-function relativeTime(iso: string | null): string {
-  if (!iso) return "—";
-  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return `hace ${Math.round(seconds)}s`;
-  if (seconds < 3600) return `hace ${Math.round(seconds / 60)}m`;
-  if (seconds < 86400) return `hace ${Math.round(seconds / 3600)}h`;
-  return `hace ${Math.round(seconds / 86400)}d`;
 }
 
 const TRANSPORT_LABEL: Record<string, string> = {

@@ -9,13 +9,14 @@ from dataclasses import fields
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from noc.adapters.persistence.models import (
     GatewayModel,
     GroupMemberModel,
+    NeighborModel,
     NodeGatewayLinkModel,
     NodeModel,
     NodeTagModel,
@@ -27,6 +28,7 @@ from noc.domain.nodes.entities import (
     GatewayInfo,
     Node,
     NodeGatewayLink,
+    NodeNeighbor,
     NodeSummary,
     Position,
     Tag,
@@ -161,6 +163,18 @@ class SqlNodeRepository:
         await self._session.flush()
         return _node_entity(model)
 
+    async def set_node_type_override_bulk(self, node_ids: list[str], node_type: str | None) -> int:
+        """Igual que set_node_type_override pero para selección múltiple (Flota)."""
+        if not node_ids:
+            return 0
+        result = await self._session.execute(
+            update(NodeModel)
+            .where(NodeModel.id.in_(node_ids))
+            .values(node_type_override=node_type)
+        )
+        await self._session.flush()
+        return result.rowcount or 0
+
     async def list_summaries(self) -> list[NodeSummary]:
         nodes = (
             await self._session.scalars(
@@ -267,6 +281,62 @@ class SqlTelemetryRepository:
             select(func.count()).select_from(TelemetryModel).where(TelemetryModel.received_at >= since)
         )
         return int(result or 0)
+
+
+class SqlNeighborRepository:
+    """Enlaces nodo<->nodo reales (NEIGHBORINFO_APP), append-only.
+
+    Paralelo exacto a `SqlPositionRepository`: "lo último" por par
+    (node_id, neighbor_id) se resuelve con row_number(), nunca se pisa.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, neighbor: NodeNeighbor) -> None:
+        self._session.add(
+            NeighborModel(**{f.name: getattr(neighbor, f.name) for f in fields(NodeNeighbor)})
+        )
+        await self._session.flush()
+
+    async def list_for_node(self, node_id: str, limit: int) -> list[NodeNeighbor]:
+        rows = await self._session.scalars(
+            select(NeighborModel)
+            .where(NeighborModel.node_id == node_id)
+            .order_by(NeighborModel.received_at.desc())
+            .limit(limit)
+        )
+        return [_to_entity(r, NodeNeighbor) for r in rows]
+
+    async def list_latest_for_node(self, node_id: str) -> list[NodeNeighbor]:
+        """Último enlace conocido por cada vecino de UN nodo (diseño §2:
+        estado actual de su vecindario, nunca el histórico con duplicados)."""
+        return await self._latest_per_pair(NeighborModel.node_id == node_id)
+
+    async def list_latest_network(self, since: datetime | None = None) -> list[NodeNeighbor]:
+        """Último enlace conocido por cada par (node_id, neighbor_id), red
+        completa — para pintar la capa de topología del mapa sin N peticiones.
+        `since` acota a pares oídos desde esa fecha: sin él, un par visto una
+        sola vez se devolvería para siempre."""
+        criteria: list[Any] = []
+        if since is not None:
+            criteria.append(NeighborModel.received_at >= since)
+        return await self._latest_per_pair(*criteria)
+
+    async def _latest_per_pair(self, *criteria: Any) -> list[NodeNeighbor]:
+        rn = (
+            func.row_number()
+            .over(
+                partition_by=(NeighborModel.node_id, NeighborModel.neighbor_id),
+                order_by=(NeighborModel.received_at.desc(), NeighborModel.id.desc()),
+            )
+            .label("rn")
+        )
+        subq = select(NeighborModel, rn).where(*criteria).subquery()
+        latest = select(subq).where(subq.c.rn == 1).subquery()
+        alias = aliased(NeighborModel, latest)
+        rows = (await self._session.scalars(select(alias))).all()
+        return [_to_entity(r, NodeNeighbor) for r in rows]
 
 
 class SqlNodeGatewayLinkRepository:

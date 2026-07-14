@@ -107,7 +107,13 @@ def _radio_metadata(packet: dict[str, Any]) -> dict[str, Any]:
 def decode_packet(packet: dict[str, Any]) -> DecodedEvent | None:
     """Paquete recibido (topic meshtastic.receive) -> evento v1, o None si no aplica."""
     decoded = packet.get("decoded")
-    node_id = _node_id(packet.get("fromId"))
+    # `fromId` lo resuelve la librería contra su NodeDB en memoria y llega
+    # None con frecuencia en mallas reales (nodo aún no cacheado, carrera
+    # tras reconectar) — visto en producción vía TCP: paquetes válidos
+    # descartados en bloque. `from` (node_num) viene SIEMPRE en el
+    # MeshPacket, así que es la fuente canónica; fromId queda solo como
+    # atajo si ya viene resuelto.
+    node_id = _node_id(packet.get("fromId")) or _node_id_from_num(packet.get("from"))
     if not isinstance(decoded, dict) or node_id is None:
         return None
 
@@ -189,9 +195,12 @@ def decode_packet(packet: dict[str, Any]) -> DecodedEvent | None:
         trace = decoded.get("traceroute")
         if not isinstance(trace, dict):
             return None
+        # `route` lista SOLO los saltos intermedios: un traceroute directo
+        # (emisor -> destino en un salto, el caso más común en pruebas de
+        # cerca) llega con route vacío y snr_towards con una entrada —
+        # verificado en producción. Antes se descartaba como "sin resolver"
+        # y los traceroutes directos eran invisibles en el Registro.
         route_nums = trace.get("route") or []
-        if not route_nums:
-            return None  # solicitud sin resolver todavía: nada que narrar
         route = [_node_id_from_num(n) for n in route_nums]
         if any(r is None for r in route):
             return None

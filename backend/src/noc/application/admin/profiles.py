@@ -33,6 +33,7 @@ from noc.application.admin.config_schema import (
 )
 from noc.application.admin.config_state import SectionState, load_section_states
 from noc.application.admin.gateway_routing import resolve_gateways_for_nodes
+from noc.application.auth.actor import ActorContext
 from noc.config import Settings
 from noc.domain.admin.entities import ConfigProfile, ConfigProfileVersion
 
@@ -323,6 +324,7 @@ class ProfileService:
         include_unknown: bool = False,
         name: str | None = None,
         created_by: str = "admin",
+        actor: ActorContext = ActorContext(),
     ) -> Any:
         """Crea el lote de sincronización. El plan se recalcula en el servidor
         (no se confía en el preview del cliente) y solo viajan diferencias."""
@@ -370,6 +372,7 @@ class ProfileService:
                 "explicit_node_ids": len(preview.eligible),
             },
             created_by=created_by,
+            actor=actor,
         )
         logger.info(
             "profile.sync profile=%s v=%d batch=%s ops=%d",

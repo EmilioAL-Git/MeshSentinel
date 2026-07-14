@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from noc.adapters.persistence.repositories import (
     SqlGatewayRepository,
+    SqlNeighborRepository,
     SqlNodeRepository,
     SqlPositionRepository,
     SqlTelemetryRepository,
@@ -66,6 +67,48 @@ async def test_position_and_telemetry_are_appended_and_touch_last_seen(session_f
     assert positions[0].latitude == 41.0  # orden descendente por received_at
     assert telemetry[0].battery_level == 77
     assert node.is_online(threshold_seconds=900)
+
+
+async def test_neighbors_seen_persists_append_only_links(session_factory):
+    ingest = IngestService(session_factory)
+    t0 = datetime.now(timezone.utc) - timedelta(minutes=5)
+    t1 = datetime.now(timezone.utc)
+
+    await ingest.handle_event(
+        make_event(
+            "neighbors.seen",
+            {"node_id": NODE_A, "neighbors": [{"neighbor_id": NODE_B, "snr": 4.5}]},
+            t0,
+        )
+    )
+    await ingest.handle_event(
+        make_event(
+            "neighbors.seen",
+            {"node_id": NODE_A, "neighbors": [{"neighbor_id": NODE_B, "snr": 6.0}]},
+            t1,
+        )
+    )
+
+    async with session_factory() as session:
+        node = await SqlNodeRepository(session).get(NODE_A)
+        links = await SqlNeighborRepository(session).list_for_node(NODE_A, limit=10)
+        latest_for_node = await SqlNeighborRepository(session).list_latest_for_node(NODE_A)
+        latest_network = await SqlNeighborRepository(session).list_latest_network()
+        windowed = await SqlNeighborRepository(session).list_latest_network(
+            since=datetime.now(timezone.utc) - timedelta(minutes=1)
+        )
+
+    assert node is not None  # touch_last_seen auto-crea el nodo, como position/telemetry
+    assert len(links) == 2  # append-only: nunca se sobreescribe
+    assert links[0].snr == 6.0  # orden descendente por received_at
+    # Vecindario actual: un solo enlace por vecino, el más reciente (API /neighbors)
+    assert len(latest_for_node) == 1
+    assert latest_for_node[0].snr == 6.0
+    assert len(latest_network) == 1  # un solo par (node_id, neighbor_id): solo el más reciente
+    assert latest_network[0].snr == 6.0
+    # Ventana temporal (/topology?since_hours): el par de t0 (5 min atrás)
+    # solo sobrevive porque su ÚLTIMO enlace (t1) cae dentro de la ventana
+    assert len(windowed) == 1
 
 
 async def test_list_summaries_returns_latest_values(session_factory):

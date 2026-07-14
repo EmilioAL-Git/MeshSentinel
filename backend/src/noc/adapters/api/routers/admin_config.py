@@ -17,7 +17,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.deps import RequireAuthDep, SessionDep
 from noc.adapters.api.schemas import GatewaySelectionIn
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
@@ -35,6 +35,7 @@ from noc.application.admin.config_schema import (
 from noc.application.admin.config_state import load_section_states
 from noc.application.admin.gateway_routing import resolve_gateway
 from noc.application.admin.registry import validate_operation
+from noc.application.auth.actor import ActorContext
 from noc.config import get_settings
 from noc.domain.admin.entities import AdminOperation
 
@@ -125,7 +126,13 @@ async def _emit_created(ops: list[AdminOperation]) -> None:
 
 
 async def _create_operation(
-    session, node, gateway_id: str, op_type: str, params: dict[str, Any], gateway_note: str | None = None
+    session,
+    node,
+    gateway_id: str,
+    op_type: str,
+    params: dict[str, Any],
+    gateway_note: str | None = None,
+    actor: ActorContext = ActorContext(),
 ) -> AdminOperation:
     """Auxiliar compartido: crea una AdminOperation validada y persistida."""
     settings = get_settings()
@@ -138,7 +145,10 @@ async def _create_operation(
             params=normalized,
             timeout_seconds=settings.admin_default_timeout_seconds,
             max_attempts=settings.admin_max_attempts,
-            created_by="admin",
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            actor_username=actor.actor_username,
+            actor_display_name=actor.actor_display_name,
             gateway_note=gateway_note,
         )
     )
@@ -147,8 +157,9 @@ async def _create_operation(
 
 @router.post("/nodes/{node_id}/config/refresh", response_model=ApplyOut)
 async def refresh_node_config(
-    node_id: str, body: RefreshIn, session: SessionDep
+    node_id: str, body: RefreshIn, session: SessionDep, current_user: RequireAuthDep
 ) -> ApplyOut:
+    actor = ActorContext.for_user(current_user)
     node = await SqlNodeRepository(session).get(node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
@@ -174,7 +185,11 @@ async def refresh_node_config(
             op_type, params = "config.get", {"section": name}
         else:
             op_type, params = "module_config.get", {"section": name}
-        ops.append(await _create_operation(session, node, resolution.gateway_id, op_type, params, resolution.note))
+        ops.append(
+            await _create_operation(
+                session, node, resolution.gateway_id, op_type, params, resolution.note, actor
+            )
+        )
     await session.commit()
     await _emit_created(ops)
     return ApplyOut(
@@ -193,8 +208,9 @@ def _sorted_apply_sections(sections: dict[str, Any]) -> list[str]:
 
 @router.post("/nodes/{node_id}/config/apply", response_model=ApplyOut, status_code=201)
 async def apply_node_config(
-    node_id: str, body: ApplyIn, session: SessionDep
+    node_id: str, body: ApplyIn, session: SessionDep, current_user: RequireAuthDep
 ) -> ApplyOut:
+    actor = ActorContext.for_user(current_user)
     node = await SqlNodeRepository(session).get(node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
@@ -245,7 +261,11 @@ async def apply_node_config(
 
     ops = []
     for _name, op_type, params in resolved:
-        ops.append(await _create_operation(session, node, resolution.gateway_id, op_type, params, resolution.note))
+        ops.append(
+            await _create_operation(
+                session, node, resolution.gateway_id, op_type, params, resolution.note, actor
+            )
+        )
     await session.commit()
     await _emit_created(ops)
     return ApplyOut(

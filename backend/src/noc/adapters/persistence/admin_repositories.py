@@ -4,7 +4,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from noc.adapters.persistence.models import AdminBatchModel, AdminOperationModel
+from noc.adapters.persistence.models import (
+    AdminBatchModel,
+    AdminOperationModel,
+    GroupMemberModel,
+)
 from noc.domain.admin.entities import (
     IN_FLIGHT_STATUSES,
     TERMINAL_STATUSES,
@@ -35,6 +39,10 @@ class SqlAdminOperationRepository:
             timeout_seconds=op.timeout_seconds,
             next_attempt_at=op.next_attempt_at,
             created_by=op.created_by,
+            actor_type=op.actor_type,
+            actor_id=op.actor_id,
+            actor_username=op.actor_username,
+            actor_display_name=op.actor_display_name,
             created_at=op.created_at or datetime.now(timezone.utc),
             gateway_note=op.gateway_note,
         )
@@ -115,6 +123,27 @@ class SqlAdminOperationRepository:
         m = await self._session.scalar(stmt)
         return _entity(m) if m else None
 
+    async def active_counts(self, group_id: int | None = None) -> dict[str, int]:
+        """Agregados de operaciones no terminales para HUD/insignias
+        (hardening): pending/queued/running por conteo real en BD, nunca
+        derivados de una lista con `limit`. Con `group_id`, mismo criterio
+        que `scopeOperationsToGroup` de la UI (target dentro del grupo)."""
+        stmt = (
+            select(AdminOperationModel.status, func.count())
+            .where(AdminOperationModel.status.in_(("pending", "queued", "running")))
+            .group_by(AdminOperationModel.status)
+        )
+        if group_id is not None:
+            members = select(GroupMemberModel.node_id).where(
+                GroupMemberModel.group_id == group_id
+            )
+            stmt = stmt.where(AdminOperationModel.target_node_id.in_(members))
+        counts = {"pending": 0, "queued": 0, "running": 0}
+        for status, n in (await self._session.execute(stmt)).all():
+            counts[status] = n
+        counts["active"] = counts["pending"] + counts["queued"] + counts["running"]
+        return counts
+
     async def count_dispatched_since(self, since: datetime) -> int:
         result = await self._session.scalar(
             select(func.count())
@@ -156,6 +185,10 @@ class SqlAdminBatchRepository:
             scope_description=batch.scope_description,
             status=batch.status,
             created_by=batch.created_by,
+            actor_type=batch.actor_type,
+            actor_id=batch.actor_id,
+            actor_username=batch.actor_username,
+            actor_display_name=batch.actor_display_name,
             created_at=batch.created_at or datetime.now(timezone.utc),
             started_at=batch.started_at,
         )

@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
 import {
+  fetchActivityLog,
+  fetchAlertCounts,
   fetchAlerts,
   fetchBatch,
   fetchBatches,
@@ -11,6 +13,7 @@ import {
   fetchGroups,
   fetchHealth,
   fetchNodes,
+  fetchOperationCounts,
   fetchOperations,
   fetchProfiles,
   fetchTags,
@@ -30,15 +33,19 @@ import { Inspector } from "./components/inspector/Inspector";
 import { BatchWizard } from "./components/jobs/BatchWizard";
 import { JobsView } from "./components/jobs/JobsView";
 import { OpsCenter } from "./components/opscenter/OpsCenter";
+import { LoginLogView } from "./components/LoginLogView";
 import { ProfilesView } from "./components/ProfilesView";
+import { UsersView } from "./components/UsersView";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { FocusChip, type FocusState } from "./components/shell/FocusChip";
 import { GroupSelector } from "./components/shell/GroupSelector";
 import { Hud } from "./components/shell/Hud";
+import { LoginModal } from "./components/shell/LoginModal";
 import { NavRail } from "./components/shell/NavRail";
 import { StatusBar } from "./components/shell/StatusBar";
 import { toast, ToastHost } from "./components/shell/Toast";
-import { scopeAlertsToGroup, scopeOperationsToGroup, useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
+import { useAuth } from "./context/AuthContext";
+import { useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
 import { computeFleetGroupMetrics, computeGroupAttention, computeGroupStatus, scopeGatewaysToGroup } from "./components/fleet/groupStats";
 import { consumeFinished } from "./opTracker";
 import { t } from "./tokens";
@@ -66,7 +73,9 @@ type View =
   | "config"
   | "profiles"
   | "activity"
-  | "gateways";
+  | "gateways"
+  | "users"
+  | "login-log";
 
 /**
  * Workspaces (identidad v0.8): no hay "páginas" — el riel de navegación
@@ -83,6 +92,11 @@ const VIEWS: { id: View; label: string; icon: string }[] = [
   { id: "config", label: "Config", icon: "⚙" },
   { id: "activity", label: "Registro", icon: "▤" },
   { id: "gateways", label: "Enlaces", icon: "⛭" },
+  // Autenticación: "Usuarios" solo visible si eres admin O si el sistema aún
+  // está en modo abierto (así siempre hay una forma de crear el primer
+  // usuario); "Accesos" solo tiene sentido estando autenticado.
+  { id: "users", label: "Usuarios", icon: "👤" },
+  { id: "login-log", label: "Accesos", icon: "🔑" },
 ];
 
 /** Ids históricos (componentes/documentos antiguos): siguen navegando bien. */
@@ -94,6 +108,7 @@ function resolveView(v: string): View {
 
 export default function App() {
   const queryClient = useQueryClient();
+  const authState = useAuth();
   const { activeGroupId, activeGroup } = useActiveGroup();
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, refetchInterval: 15_000 });
   // Query base (sin ignorados): la usan Mapa, Centro y el feed — nunca escopada
@@ -129,11 +144,24 @@ export default function App() {
     queryFn: () => fetchAlerts(undefined, 100),
     refetchInterval: 30_000,
   });
-  // Soporte del shell (HUD + barra inferior + insignias del riel)
+  // Soporte del shell (HUD + barra inferior + insignias del riel).
+  // Hardening: los CONTADORES del shell salen de agregados reales del
+  // backend (con el mismo escopado de grupo); las listas siguen existiendo
+  // solo para detalle (Centro, Inspector, Trabajos), nunca para contar.
   const operations = useQuery({
     queryKey: ["operations", "shell"],
     queryFn: () => fetchOperations(undefined, 200),
     refetchInterval: 30_000,
+  });
+  const alertCounts = useQuery({
+    queryKey: ["alert-counts", activeGroupId],
+    queryFn: () => fetchAlertCounts(activeGroupId),
+    refetchInterval: 15_000,
+  });
+  const operationCounts = useQuery({
+    queryKey: ["operation-counts", activeGroupId],
+    queryFn: () => fetchOperationCounts(activeGroupId),
+    refetchInterval: 15_000,
   });
   const runningBatches = useQuery({
     queryKey: ["batches", "running"],
@@ -209,6 +237,8 @@ export default function App() {
           queryClient.invalidateQueries({ queryKey: ["batches"] });
           queryClient.invalidateQueries({ queryKey: ["batch"] });
           queryClient.invalidateQueries({ queryKey: ["batch-ops"] });
+          queryClient.invalidateQueries({ queryKey: ["alert-counts"] });
+          queryClient.invalidateQueries({ queryKey: ["operation-counts"] });
         }, 2000);
       }
     }, setWsStatus);
@@ -224,6 +254,33 @@ export default function App() {
       if (invalidateTimer.current != null) window.clearTimeout(invalidateTimer.current);
     };
   }, [queryClient]);
+
+  // Registro persistente (hardening): al arrancar se siembra el buffer con el
+  // histórico del backend — el diario ya no se pierde al recargar la página.
+  // Merge con dedupe por event_id: lo que llegó por WS antes de resolver la
+  // siembra nunca se duplica ni se pierde.
+  useEffect(() => {
+    let cancelled = false;
+    fetchActivityLog(ACTIVITY_LIMIT)
+      .then((items) => {
+        if (cancelled) return;
+        const seeded = items
+          .map((it) => toEntry(it))
+          .filter((e): e is ActivityEntry => e != null);
+        setActivity((prev) => {
+          const known = new Set(prev.map((e) => e.id));
+          const merged = [...prev, ...seeded.filter((e) => !known.has(e.id))];
+          merged.sort((a, b) => b.receivedAtMs - a.receivedAtMs);
+          return merged.slice(0, ACTIVITY_LIMIT);
+        });
+      })
+      .catch(() => {
+        // Sin histórico disponible el feed en vivo sigue funcionando igual
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Al recuperar el WS tras una caída, todo puede estar obsoleto: refresco único
   const prevWsState = useRef(wsStatus.state);
@@ -264,14 +321,9 @@ export default function App() {
     () => (groupNodeIds == null ? [] : summaries.filter((s) => groupNodeIds.has(s.node.node_id))),
     [summaries, groupNodeIds],
   );
-  const shellAlerts = useMemo(
-    () => scopeAlertsToGroup(alerts.data ?? [], groupNodeIds).inScope,
-    [alerts.data, groupNodeIds],
-  );
-  const shellOperations = useMemo(
-    () => scopeOperationsToGroup(operations.data ?? [], groupNodeIds),
-    [operations.data, groupNodeIds],
-  );
+  // (Hardening: los recuentos de alertas/operaciones del shell ya no se
+  // derivan aquí de listas truncadas — los sirven /alerts/counts y
+  // /admin/operations/counts con el mismo escopado de grupo.)
   const shellGateways = useMemo(
     () => scopeGatewaysToGroup(gateways.data ?? [], groupNodeIds, groupGatewayStats.data),
     [gateways.data, groupNodeIds, groupGatewayStats.data],
@@ -380,13 +432,17 @@ export default function App() {
     filteredSummaries.find((s) => s.node.node_id === selected) ??
     summaries.find((s) => s.node.node_id === selected);
 
-  // Insignias vivas del riel — mismo alcance que HUD/StatusBar (grupo activo)
-  const activeAlertCount = shellAlerts.filter((a) => a.status !== "resolved").length;
-  const hasCritAlert = shellAlerts.some((a) => a.status !== "resolved" && a.severity === "CRITICAL");
-  const activeOpsCount = shellOperations.filter(
-    (o) => o.status === "pending" || o.status === "queued" || o.status === "running",
-  ).length;
-  const railItems = VIEWS.map((v) => ({
+  // Insignias vivas del riel — mismo alcance que HUD/StatusBar (grupo activo).
+  // Hardening: recuentos de agregados reales del backend, nunca de las
+  // listas con limit (que se congelaban en 100/200 justo bajo carga).
+  const activeAlertCount = alertCounts.data?.active ?? 0;
+  const hasCritAlert = (alertCounts.data?.critical_active ?? 0) > 0;
+  const activeOpsCount = operationCounts.data?.active ?? 0;
+  const railItems = VIEWS.filter((v) => {
+    if (v.id === "users") return !authState.protectedMode || authState.isAdmin;
+    if (v.id === "login-log") return authState.isAuthenticated;
+    return true;
+  }).map((v) => ({
     ...v,
     badge: v.id === "alerts" ? activeAlertCount : v.id === "jobs" ? activeOpsCount : undefined,
     badgeCrit: v.id === "alerts" && hasCritAlert,
@@ -467,8 +523,8 @@ export default function App() {
         <Hud
           summary={shellSummary}
           gateways={shellGateways}
-          alerts={shellAlerts}
-          operations={shellOperations}
+          alertCounts={alertCounts.data}
+          operationCounts={operationCounts.data}
           onGoTo={(v) => setView(resolveView(v))}
         />
       </header>
@@ -559,6 +615,7 @@ export default function App() {
               checkedIds={checkedIds}
               onCheckedChange={setCheckedIds}
               onCreateBatch={() => setWizardOpen(true)}
+              lowBatteryThreshold={dashboard.data?.thresholds.low_battery_percent ?? 20}
             />
           )}
 
@@ -567,7 +624,6 @@ export default function App() {
               entries={activity}
               summaries={summaries}
               gateways={gateways.data ?? []}
-              onClear={() => setActivity([])}
             />
           )}
 
@@ -607,6 +663,22 @@ export default function App() {
                     setView("jobs");
                   }}
                 />
+              </div>
+            </div>
+          )}
+
+          {view === "users" && (
+            <div className="ws">
+              <div className="ws-scroll">
+                <UsersView />
+              </div>
+            </div>
+          )}
+
+          {view === "login-log" && (
+            <div className="ws">
+              <div className="ws-scroll">
+                <LoginLogView />
               </div>
             </div>
           )}
@@ -660,7 +732,6 @@ export default function App() {
           summaries={summaries}
           operations={operations.data ?? []}
           alerts={alerts.data ?? []}
-          activity={activity}
           onClose={() => setSelected(null)}
           onCenter={centerOnMap}
           onGoTo={(v) => setView(resolveView(v))}
@@ -669,14 +740,15 @@ export default function App() {
         />
       )}
       <ToastHost />
+      <LoginModal />
 
       <StatusBar
         wsStatus={wsStatus}
         backendOk={!health.isError && health.data?.status === "ok"}
         summary={shellSummary}
         gateways={shellGateways}
-        alerts={shellAlerts}
-        operations={shellOperations}
+        alertCounts={alertCounts.data}
+        operationCounts={operationCounts.data}
         runningBatch={runningBatch.data}
         onGoTo={(v) => setView(resolveView(v))}
       />

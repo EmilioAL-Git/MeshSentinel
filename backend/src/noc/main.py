@@ -5,18 +5,21 @@ from typing import Any, AsyncIterator
 from fastapi import FastAPI
 
 from noc.adapters.api.routers import (
+    activity as activity_router,
     admin_batches,
     admin_config,
     admin_operations,
     admin_profiles,
     admin_remote_flags,
     alerts,
+    auth as auth_router,
     dashboard,
     gateways,
     health,
     nodes,
     organization,
     system,
+    topology,
 )
 from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.command_queue import RedisCommandQueue
@@ -25,12 +28,14 @@ from noc.adapters.persistence.database import Database
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.activity import activity
 from noc.application.activity_events import render_alert_transition
+from noc.application.activity_log import ActivityLogWriter
 from noc.application.admin.batches import BatchService
 from noc.application.admin.profiles import ProfileService
 from noc.application.admin.service import AdminOperationService
 from noc.application.alerting.engine import AlertEngine, AlertEngineLoop, AlertTransition
 from noc.application.alerting.notifier import AlertNotifier
 from noc.application.alerting.seed import seed_default_rules
+from noc.application.auth.service import AuthService
 from noc.application.dashboard import DashboardService
 from noc.application.envelopes import make_event_envelope
 from noc.application.gateways.service import GatewayService
@@ -48,6 +53,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db = Database(settings.database_url)
     app.state.dashboard = DashboardService(app.state.db.session_factory, settings)
     app.state.event_bus = RedisEventBus(settings.redis_url, settings.events_channel)
+    # Autenticación: cookie de sesión opaca + rate limit de login sobre Redis
+    # (misma infraestructura que el resto del backend, sin dependencia nueva).
+    app.state.auth = AuthService(app.state.db.session_factory, settings.redis_url, settings)
 
     command_queue = RedisCommandQueue(settings.redis_url, settings.commands_stream_prefix)
     # Gestión de gateways (M5, ADR 0021): CRUD + comandos command.gateway_*,
@@ -70,6 +78,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # el nombre del nodo con una lectura puntual (fuera de la transacción del
     # llamante — sesión propia, solo lectura)
     activity.attach_labeler(_make_node_labeler(app.state.db.session_factory))
+    # Registro persistente (hardening): el MISMO envelope del WS se encola
+    # hacia un escritor en background (cola acotada, poda por tamaño) — nunca
+    # una sesión propia inline, que en SQLite chocaría con la transacción de
+    # la ingesta que está narrando.
+    activity_log_writer = ActivityLogWriter(
+        app.state.db.session_factory, settings.activity_log_max_rows
+    )
+    activity.attach_store(activity_log_writer.enqueue)
+    activity_log_writer.start()
 
     # Pipeline de administración remota (M1.1, ADR 0013)
     admin_service = AdminOperationService(app.state.db.session_factory, command_queue, settings)
@@ -100,7 +117,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await admin_service.stop()
         await alert_loop.stop()
         await app.state.event_bus.stop()
+        activity.attach_store(None)
+        await activity_log_writer.stop()
         await command_queue.close()
+        await app.state.auth.close()
         await app.state.db.dispose()
         logger.info("Backend stopped")
 
@@ -164,6 +184,7 @@ def create_app() -> FastAPI:
         openapi_url=f"{settings.api_v1_prefix}/openapi.json",
     )
     app.include_router(health.router, prefix=settings.api_v1_prefix)
+    app.include_router(auth_router.router, prefix=settings.api_v1_prefix)
     app.include_router(nodes.router, prefix=settings.api_v1_prefix)
     app.include_router(gateways.router, prefix=settings.api_v1_prefix)
     app.include_router(system.router, prefix=settings.api_v1_prefix)
@@ -175,6 +196,8 @@ def create_app() -> FastAPI:
     app.include_router(admin_batches.router, prefix=settings.api_v1_prefix)
     app.include_router(admin_profiles.router, prefix=settings.api_v1_prefix)
     app.include_router(organization.router, prefix=settings.api_v1_prefix)
+    app.include_router(activity_router.router, prefix=settings.api_v1_prefix)
+    app.include_router(topology.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app
 

@@ -3,9 +3,11 @@ from pydantic import BaseModel
 
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.api.schemas import (
+    NeighborOut,
     NodeGatewayLinkOut,
     NodeOut,
     NodeSummaryOut,
+    NodeTypeBulkIn,
     NodeTypeIn,
     PositionOut,
     PreferredGatewayIn,
@@ -13,6 +15,7 @@ from noc.adapters.api.schemas import (
 )
 from noc.adapters.persistence.organization_repositories import SqlTagRepository
 from noc.adapters.persistence.repositories import (
+    SqlNeighborRepository,
     SqlNodeGatewayLinkRepository,
     SqlNodeRepository,
     SqlPositionRepository,
@@ -116,6 +119,20 @@ async def set_node_type(node_id: str, body: NodeTypeIn, session: SessionDep) -> 
     return NodeOut.from_entity(node, get_settings().node_offline_after_seconds)
 
 
+class NodeTypeBulkOut(BaseModel):
+    updated: int
+
+
+@router.put("/node-type/bulk", response_model=NodeTypeBulkOut)
+async def set_node_type_bulk(body: NodeTypeBulkIn, session: SessionDep) -> NodeTypeBulkOut:
+    """Igual que set_node_type pero para la barra de selección de Flota."""
+    updated = await SqlNodeRepository(session).set_node_type_override_bulk(
+        body.node_ids, body.node_type
+    )
+    await session.commit()
+    return NodeTypeBulkOut(updated=updated)
+
+
 @router.put("/{node_id}/tags", status_code=204)
 async def set_node_tags(node_id: str, body: NodeTagsIn, session: SessionDep) -> None:
     if await SqlNodeRepository(session).get(node_id) is None:
@@ -156,6 +173,21 @@ async def node_gateways(node_id: str, session: SessionDep) -> list[NodeGatewayLi
     links = await SqlNodeGatewayLinkRepository(session).list_for_node(node_id)
     threshold = get_settings().node_offline_after_seconds
     return [NodeGatewayLinkOut.from_entity(link, threshold, node.gateway_id) for link in links]
+
+
+@router.get("/{node_id}/neighbors", response_model=list[NeighborOut])
+async def node_neighbors(node_id: str, session: SessionDep) -> list[NeighborOut]:
+    """Vecindario actual real del nodo (NEIGHBORINFO_APP, motor-de-reglas-y-
+    topologia.md §2): el ÚLTIMO enlace conocido por cada vecino, nunca el
+    histórico con duplicados (la tabla es append-only; el histórico completo
+    no tiene consumidor de UI hoy). Requiere que el firmware tenga el módulo
+    activado; si no, queda vacío.
+    """
+    if await SqlNodeRepository(session).get(node_id) is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    neighbors = await SqlNeighborRepository(session).list_latest_for_node(node_id)
+    threshold = get_settings().node_offline_after_seconds
+    return [NeighborOut.from_entity(n, threshold) for n in neighbors]
 
 
 @router.get("/{node_id}/telemetry", response_model=list[TelemetryOut])

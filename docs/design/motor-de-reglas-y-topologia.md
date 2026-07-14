@@ -6,6 +6,15 @@
 > del mapa) y porque el segundo es precondición de datos para completar el
 > primero con una regla de "enlace nodo↔nodo perdido".
 >
+> **Nota (actualizada 2)**: §2 completo **implementado** ("Mapa como centro
+> operativo", ver CLAUDE.md): tabla `node_neighbors` (migración 0013),
+> `SqlNeighborRepository`, persistencia en `IngestService._on_neighbors`,
+> `GET /nodes/{id}/neighbors` y `GET /topology`, capa "Malla real" en el
+> mapa. La regla `neighbor_link_lost` y el resto de §1 (motor de reglas
+> generalizado, `AlertRule.group_id`) siguen sin implementar — quedan como
+> siguiente paso natural ahora que hay datos reales de topología con los
+> que calibrar `duration_seconds`, tal como sugería el orden del §3.
+>
 > **Nota (actualizada)**: parte del trabajo de decodificación que este
 > documento pide en §2.2 (`decode_neighborinfo`, evento `neighbors.seen`)
 > **ya aterrizó**, pero con un alcance menor al que describe este
