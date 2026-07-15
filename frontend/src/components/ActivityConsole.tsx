@@ -374,7 +374,16 @@ export function ActivityConsole({
           className={`btn ghost${groupBursts ? " on" : ""}`}
           style={groupBursts ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined}
           onClick={() => setGroupBursts(!groupBursts)}
-          title="Plegar ráfagas repetitivas (mismo nodo y tipo, ≥3 seguidas) en una sola línea expandible"
+          title={
+            "Agrupar ráfagas repetitivas.\n\n" +
+            "Activado: 3 o más paquetes SEGUIDOS del mismo nodo y del mismo tipo " +
+            "(p. ej. 12 telemetrías una tras otra) se pliegan en una sola línea " +
+            "«×12 Telemetría · nodo» — clic en ella para ver las entradas una a una.\n\n" +
+            "Es solo presentación: cada paquete sigue siendo su propia entrada en el " +
+            "histórico, no se fusiona ni se pierde nada. Si entre medias llega un " +
+            "paquete de otro nodo u otro tipo, la ráfaga se corta.\n\n" +
+            "Desactivado: todo plano, una línea por paquete."
+          }
         >
           {groupBursts ? "◉" : "○"} ráfagas
         </button>
