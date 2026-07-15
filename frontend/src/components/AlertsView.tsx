@@ -28,6 +28,7 @@ import {
 } from "../api/client";
 import { scopeAlertsToGroup, useGroupNodeIds } from "../context/GroupContext";
 import { relativeTime } from "../time";
+import { useUrlString } from "../hooks/useUrlState";
 import { GroupScopeBanner } from "./shell/GroupScopeBanner";
 import { Modal } from "./shell/Modal";
 
@@ -749,8 +750,25 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   });
   const newRule = useMutation({ mutationFn: createAlertRule, onSettled: invalidate });
   const removeRule = useMutation({ mutationFn: deleteAlertRule, onSettled: invalidate });
-  const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
-  const [creatingRule, setCreatingRule] = useState(false);
+  // Editor abierto ↔ URL (`alerts.edit`, ADR 0026 / docs/design/urls-compartibles.md
+  // §3.6): un único parámetro (`rule:{id}` | `provider:{id}` | `channel:{id}` |
+  // `new-rule` | `new-provider` | `new-channel`) — como mucho un editor
+  // abierto a la vez, igual que hoy. Los campos del formulario en curso NO
+  // viajan en la URL (ver ADR): abrir el enlace reabre con los valores
+  // actuales de esa regla/proveedor/canal, no con un borrador ajeno.
+  const [alertsEdit, setAlertsEdit] = useUrlString("alerts.edit", null, { replace: true });
+  const creatingRule = alertsEdit === "new-rule";
+  const editingRuleId = alertsEdit?.startsWith("rule:") ? Number(alertsEdit.slice(5)) : null;
+  const creatingProvider = alertsEdit === "new-provider";
+  const editingProviderId = alertsEdit?.startsWith("provider:") ? Number(alertsEdit.slice(9)) : null;
+  const creatingChannel = alertsEdit === "new-channel";
+  const editingChannelId = alertsEdit?.startsWith("channel:") ? Number(alertsEdit.slice(8)) : null;
+  const setCreatingRule = (v: boolean) => setAlertsEdit(v ? "new-rule" : null);
+  const setEditingRuleId = (id: number | null) => setAlertsEdit(id != null ? `rule:${id}` : null);
+  const setCreatingProvider = (v: boolean) => setAlertsEdit(v ? "new-provider" : null);
+  const setEditingProviderId = (id: number | null) => setAlertsEdit(id != null ? `provider:${id}` : null);
+  const setCreatingChannel = (v: boolean) => setAlertsEdit(v ? "new-channel" : null);
+  const setEditingChannelId = (id: number | null) => setAlertsEdit(id != null ? `channel:${id}` : null);
 
   const addProvider = useMutation({ mutationFn: createProvider, onSettled: invalidate });
   const editProvider = useMutation({
@@ -765,8 +783,6 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   const removeProvider = useMutation({ mutationFn: deleteProvider, onSettled: invalidate });
   const dupProvider = useMutation({ mutationFn: duplicateProvider, onSettled: invalidate });
   const testProviderMut = useMutation({ mutationFn: testProvider });
-  const [editingProviderId, setEditingProviderId] = useState<number | null>(null);
-  const [creatingProvider, setCreatingProvider] = useState(false);
 
   const addChannelGroup = useMutation({ mutationFn: createChannel, onSettled: invalidate });
   const editChannelGroup = useMutation({
@@ -775,8 +791,6 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
     onSettled: invalidate,
   });
   const removeChannelGroup = useMutation({ mutationFn: deleteChannel, onSettled: invalidate });
-  const [editingChannelId, setEditingChannelId] = useState<number | null>(null);
-  const [creatingChannel, setCreatingChannel] = useState(false);
 
   const all = alerts.data ?? [];
   const allActive = all.filter((a) => a.status !== "resolved");

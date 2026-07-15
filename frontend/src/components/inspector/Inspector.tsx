@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { usePersistedState } from "../../hooks/usePersistedState";
+import { useUrlString } from "../../hooks/useUrlState";
 import {
   ackAlert,
   addGroupMember,
@@ -243,10 +244,22 @@ export function Inspector({
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
 
-  // Pestaña activa persistida (misma ventana para cualquier nodo abierto):
-  // reabrir el Inspector vuelve a la última pestaña usada, no siempre a
-  // "Actividad" — coherente con recordar posición/tamaño de la ventana.
-  const [tab, setTab] = usePersistedState<TabId>("window.inspector.tab", "log");
+  // Pestaña activa: preferencia persistida (misma ventana para cualquier
+  // nodo abierto — reabrir el Inspector vuelve a la última pestaña usada)
+  // por defecto, pero URLs compartibles (ADR 0026) dejan que un enlace con
+  // `tab=` la sobrescriba — "cómo tengo montado el puesto" (localStorage)
+  // cede ante "qué le estoy enseñando a alguien" (URL) cuando esta última
+  // está presente.
+  const [storedTab, setStoredTab] = usePersistedState<TabId>("window.inspector.tab", "log");
+  const [urlTab, setUrlTab] = useUrlString("tab", null, { replace: true });
+  const tab: TabId = urlTab != null && (TABS as readonly string[]).includes(urlTab) ? (urlTab as TabId) : storedTab;
+  const setTab = useCallback(
+    (next: TabId) => {
+      setStoredTab(next);
+      setUrlTab(next);
+    },
+    [setStoredTab, setUrlTab],
+  );
 
   const node = useQuery({ queryKey: ["node", nodeId], queryFn: () => fetchNode(nodeId), refetchInterval: 10_000 });
   const telemetry = useQuery({

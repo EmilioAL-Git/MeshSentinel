@@ -1,11 +1,11 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { memo, useEffect, useMemo, useRef } from "react";
-import { MapContainer, Marker, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { MapContainer, Marker, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
 import { activeGatewayCount, type GatewayOut, type NodeSummaryOut } from "../api/client";
 import { classifyNode } from "./fleet/classify";
-import { usePersistedState } from "../hooks/usePersistedState";
+import { useUrlList, useUrlNumber, useUrlParam } from "../hooks/useUrlState";
 import { LayerToggle, DEFAULT_MAP_LAYERS, type MapColorMode, type MapLayerState } from "./map/LayerToggle";
 import { LinksLayer } from "./map/LinksLayer";
 import { NeighborsLayer } from "./map/NeighborsLayer";
@@ -255,6 +255,47 @@ function FitOnFirstData({ summaries }: { summaries: NodeSummaryOut[] }) {
   return null;
 }
 
+/**
+ * Capas ↔ URL (`map.layers`, ADR 0026 / docs/design/urls-compartibles.md
+ * §3.2): códigos cortos y legibles en vez de los nombres `showX` internos.
+ * `useUrlList` compara por igualdad de conjunto contra el default, así que
+ * apagar una capa que viene activada por defecto (p.ej. "Infraestructura")
+ * también queda representado — no hace falta codificar altas y bajas por
+ * separado.
+ */
+const LAYER_CODES: { code: string; key: keyof Omit<MapLayerState, "colorMode"> }[] = [
+  { code: "infra", key: "showInfra" },
+  { code: "gateways", key: "showGateways" },
+  { code: "users", key: "showUsers" },
+  { code: "fixed", key: "showFixed" },
+  { code: "favorites", key: "showFavoritesOnly" },
+  { code: "links", key: "showLinks" },
+  { code: "neighbors", key: "showNeighbors" },
+  { code: "traces", key: "showTraces" },
+  { code: "routes", key: "showRoutes" },
+  { code: "coverage", key: "showCoverage" },
+];
+const DEFAULT_ON_CODES = LAYER_CODES.filter((c) => DEFAULT_MAP_LAYERS[c.key]).map((c) => c.code);
+
+const DEFAULT_CENTER: [number, number] = [40.4168, -3.7038];
+const DEFAULT_ZOOM = 12;
+
+/** Reporta el viewport (centro+zoom) tras cada gesto — `moveend`/`zoomend`
+ * ya son eventos "de fin de gesto", sin necesidad de debounce propio. */
+function ViewportSync({ onChange }: { onChange: (lat: number, lng: number, zoom: number) => void }) {
+  const map = useMapEvents({
+    moveend: () => {
+      const c = map.getCenter();
+      onChange(c.lat, c.lng, map.getZoom());
+    },
+    zoomend: () => {
+      const c = map.getCenter();
+      onChange(c.lat, c.lng, map.getZoom());
+    },
+  });
+  return null;
+}
+
 /** Pulsos de una sola vez (mapa vivo): marcadores no interactivos con
  * animación CSS one-shot; el ciclo de vida lo gestiona el llamante. */
 function PulseLayer({ pulses }: { pulses: MapPulse[] }) {
@@ -293,7 +334,48 @@ export function MapView({
   const withPosition = useMemo(() => summaries.filter((s) => s.last_position), [summaries]);
   const withoutPosition = summaries.length - withPosition.length;
 
-  const [layers, setLayers] = usePersistedState<MapLayerState>("noc.map.layers", DEFAULT_MAP_LAYERS);
+  // Capas y modo de color ↔ URL (`map.layers`, `map.color` — ADR 0026):
+  // sustituye el `usePersistedState("noc.map.layers", …)` anterior, que
+  // además tenía un bug de doble prefijo (`noc.noc.map.layers`, documentado
+  // en el ADR) al pasar una clave que ya incluía "noc.".
+  const [onCodes, setOnCodes] = useUrlList("map.layers", DEFAULT_ON_CODES, { replace: true });
+  const [colorMode, setColorMode] = useUrlParam<MapColorMode>("map.color", "status", {
+    replace: true,
+    parse: (raw) => (raw === "quality" || raw === "redundancy" ? raw : "status"),
+    serialize: (v) => v,
+  });
+  const layers: MapLayerState = useMemo(() => {
+    const obj = {} as MapLayerState;
+    for (const c of LAYER_CODES) obj[c.key] = onCodes.includes(c.code);
+    obj.colorMode = colorMode;
+    return obj;
+  }, [onCodes, colorMode]);
+  const setLayers = useCallback(
+    (next: MapLayerState) => {
+      setOnCodes(LAYER_CODES.filter((c) => next[c.key]).map((c) => c.code));
+      setColorMode(next.colorMode);
+    },
+    [setOnCodes, setColorMode],
+  );
+
+  // Viewport (`map.lat`/`map.lng`/`map.z` — ADR 0026): centro/zoom vividos
+  // solo se aplican al MONTAR (props no controladas de Leaflet, como ya
+  // hacía `center`/`zoom` antes); tras el primer render el mapa manda y
+  // `ViewportSync` escribe cada gesto de vuelta a la URL.
+  const [urlLat, setUrlLat] = useUrlNumber("map.lat", null, { replace: true });
+  const [urlLng, setUrlLng] = useUrlNumber("map.lng", null, { replace: true });
+  const [urlZoom, setUrlZoom] = useUrlNumber("map.z", null, { replace: true });
+  const hasUrlViewport = urlLat != null && urlLng != null;
+  const initialCenterRef = useRef<[number, number]>(hasUrlViewport ? [urlLat!, urlLng!] : DEFAULT_CENTER);
+  const initialZoomRef = useRef<number>(urlZoom ?? DEFAULT_ZOOM);
+  const onViewportChange = useCallback(
+    (lat: number, lng: number, zoom: number) => {
+      setUrlLat(Number(lat.toFixed(5)));
+      setUrlLng(Number(lng.toFixed(5)));
+      setUrlZoom(Math.round(zoom));
+    },
+    [setUrlLat, setUrlLng, setUrlZoom],
+  );
 
   // Capas de categoría (Fase B.1): filtran qué marcadores se dibujan,
   // reutilizando `classifyNode` (mismo criterio que Flota). "Favoritos" es
@@ -313,8 +395,8 @@ export function MapView({
 
   const map = (
     <MapContainer
-      center={[40.4168, -3.7038]}
-      zoom={12}
+      center={initialCenterRef.current}
+      zoom={initialZoomRef.current}
       preferCanvas
       zoomControl={!fill}
       style={fill ? { height: "100%", width: "100%", background: "var(--bg)" } : { height: "70vh", borderRadius: 6 }}
@@ -325,7 +407,9 @@ export function MapView({
       />
       <ExposeMap onMapReady={onMapReady} />
       <AutoResize />
-      <FitOnFirstData summaries={withPosition} />
+      <ViewportSync onChange={onViewportChange} />
+      {/* Con viewport ya en la URL, el encuadre automático no debe pelear con el enlace compartido */}
+      {!hasUrlViewport && <FitOnFirstData summaries={withPosition} />}
       {layers.showLinks && (
         <LinksLayer
           summaries={visibleByLayer}

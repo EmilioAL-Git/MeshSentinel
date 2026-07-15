@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, type ReactNode } from 
 import { useQuery } from "@tanstack/react-query";
 import { fetchGroups, type AlertOut, type GroupOut, type NodeSummaryOut, type OperationOut } from "../api/client";
 import { usePersistedState } from "../hooks/usePersistedState";
+import { useUrlNumber } from "../hooks/useUrlState";
 
 /**
  * Grupo de trabajo activo: contexto global de MeshSentinel (fase de
@@ -26,7 +27,12 @@ const GroupContext = createContext<GroupContextValue | null>(null);
 export function GroupProvider({ children }: { children: ReactNode }) {
   // Mismo queryKey que App.tsx: TanStack Query comparte la caché, sin fetch duplicado.
   const groups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
-  const [activeGroupId, setActiveGroupId] = usePersistedState<number | null>("activeGroupId", null);
+  // URLs compartibles (ADR 0026): la URL manda sobre la preferencia de sesión
+  // cuando el parámetro `group` está presente; si no, cae a `localStorage`
+  // (puesto de trabajo del operador entre sesiones sin enlace explícito).
+  const [storedGroupId, setStoredGroupId] = usePersistedState<number | null>("activeGroupId", null);
+  const [urlGroupId, setUrlGroupId] = useUrlNumber("group", null);
+  const activeGroupId = urlGroupId ?? storedGroupId;
 
   const list = groups.data ?? [];
   const activeGroup = useMemo(
@@ -35,10 +41,13 @@ export function GroupProvider({ children }: { children: ReactNode }) {
   );
 
   const setActiveGroup = useCallback(
-    (groupId: number | null) => setActiveGroupId(groupId),
-    [setActiveGroupId],
+    (groupId: number | null) => {
+      setStoredGroupId(groupId);
+      setUrlGroupId(groupId);
+    },
+    [setStoredGroupId, setUrlGroupId],
   );
-  const clearActiveGroup = useCallback(() => setActiveGroupId(null), [setActiveGroupId]);
+  const clearActiveGroup = useCallback(() => setActiveGroup(null), [setActiveGroup]);
 
   const value = useMemo<GroupContextValue>(
     () => ({ activeGroupId, activeGroup, groups: list, setActiveGroup, clearActiveGroup }),

@@ -14,6 +14,7 @@ import {
 import { fetchActivityLog, type GatewayOut, type NodeSummaryOut } from "../api/client";
 import { useActiveGroup, useGroupNodeIds } from "../context/GroupContext";
 import { usePersistedState } from "../hooks/usePersistedState";
+import { useUrlList, useUrlString } from "../hooks/useUrlState";
 import { NodeSelect } from "./NodeSelect";
 
 /**
@@ -77,21 +78,39 @@ export function ActivityConsole({
   const { activeGroup, activeGroupId } = useActiveGroup();
   const groupNodeIds = useGroupNodeIds(summaries);
 
-  // ── Filtros ────────────────────────────────────────────────────────────────
+  // ── Filtros ↔ URL (`activity.*`, ADR 0026 / docs/design/urls-compartibles.md
+  // §3.5) ──────────────────────────────────────────────────────────────────
   // Servidor (recortan TODO el histórico): nodo, pasarela, grupo, búsqueda.
   // Cliente (visuales, sobre lo cargado): categorías, tipo de paquete, lote.
-  const [nodeFilter, setNodeFilter] = useState("");
-  const [gatewayFilter, setGatewayFilter] = useState("");
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [batchFilter, setBatchFilter] = useState("");
-  const [categories, setCategories] = useState<Set<ActivityCategory>>(new Set(ALL_CATEGORIES));
-  const [packetFilter, setPacketFilter] = useState("");
+  // `groupBursts` es presentación, no filtro — se queda en localStorage.
+  const [nodeFilterRaw, setNodeFilter] = useUrlString("activity.node", "", { replace: true });
+  const [gatewayFilterRaw, setGatewayFilter] = useUrlString("activity.gw", "", { replace: true });
+  const [urlQ, setUrlQ] = useUrlString("activity.q", "", { replace: true });
+  const [batchFilterRaw, setBatchFilter] = useUrlString("activity.batch", "", { replace: true });
+  const [categoriesList, setCategoriesList] = useUrlList("activity.cat", ALL_CATEGORIES, { replace: true });
+  const [packetFilterRaw, setPacketFilter] = useUrlString("activity.packet", "", { replace: true });
   const [groupBursts, setGroupBursts] = usePersistedState<boolean>("activity.groupBursts", true);
+  const nodeFilter = nodeFilterRaw ?? "";
+  const gatewayFilter = gatewayFilterRaw ?? "";
+  const batchFilter = batchFilterRaw ?? "";
+  const packetFilter = packetFilterRaw ?? "";
+  const categories = useMemo(() => new Set(categoriesList) as Set<ActivityCategory>, [categoriesList]);
+
+  // El campo de texto sigue siendo estado local (tecleo sin debounce); solo
+  // el valor YA pedido al servidor (`debouncedSearch`) se refleja en la URL
+  // — así un enlace compartido reproduce lo que de verdad se buscó, no un
+  // carácter a medio escribir. El valor inicial sí puede venir de la URL.
+  const [search, setSearch] = useState(urlQ ?? "");
+  const [debouncedSearch, setDebouncedSearch] = useState(urlQ ?? "");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    const timer = window.setTimeout(() => {
+      const trimmed = search.trim();
+      setDebouncedSearch(trimmed);
+      setUrlQ(trimmed);
+    }, 350);
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
   const serverFilters = useMemo(
@@ -302,7 +321,7 @@ export function ActivityConsole({
     const next = new Set(categories);
     if (next.has(c)) next.delete(c);
     else next.add(c);
-    setCategories(next);
+    setCategoriesList([...next]);
   };
 
   return (

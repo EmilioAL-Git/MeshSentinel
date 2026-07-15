@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type CSSProperties } from "react";
+import { useUrlNumber } from "../hooks/useUrlState";
 import {
   compareProfile,
   createProfile,
@@ -703,7 +704,10 @@ export function ProfilesView({
   const queryClient = useQueryClient();
   const schema = useQuery({ queryKey: ["config-schema"], queryFn: fetchConfigSchema, staleTime: 3_600_000 });
   const profiles = useQuery({ queryKey: ["profiles"], queryFn: fetchProfiles });
-  const [openId, setOpenId] = useState<number | null>(null);
+  // Perfil abierto ↔ URL (`profiles.open`, ADR 0026 §3.7 — auditoría rápida:
+  // el editor create/version se queda fuera, mismo criterio que el editor
+  // de reglas de Alertas — es un borrador en curso, no "un lugar").
+  const [openId, setOpenId] = useUrlNumber("profiles.open", null, { replace: true });
   const [editor, setEditor] = useState<EditorMode>(null);
   const [deleteArmed, setDeleteArmed] = useState<number | null>(null);
 

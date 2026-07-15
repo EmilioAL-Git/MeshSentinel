@@ -17,6 +17,7 @@ import {
 import { relativeTime } from "../../time";
 import { chipStyle, t } from "../../tokens";
 import { scopeOperationsToGroup, useGroupNodeIds } from "../../context/GroupContext";
+import { useUrlString } from "../../hooks/useUrlState";
 import { NodeSelect } from "../NodeSelect";
 import { GroupScopeBanner } from "../shell/GroupScopeBanner";
 import { toast } from "../shell/Toast";
@@ -415,13 +416,20 @@ export function JobsView({
   summaries,
   focusId,
   openBatchId,
+  onOpenBatchIdChange,
   onOpenNode,
   onLocate,
 }: {
   summaries: NodeSummaryOut[];
   focusId: string | null;
-  /** Lote a expandir al entrar (llegando desde Perfiles o el wizard). */
+  /**
+   * Lote expandido — URLs compartibles (ADR 0026, `jobs.batch`): controlado
+   * desde App.tsx, sustituye el `useState` interno anterior. Llega tanto de
+   * "abrir desde Perfiles/el wizard" como del clic del operador en cualquier
+   * tarjeta de lote — un único parámetro, una única fuente de verdad.
+   */
   openBatchId: number | null;
+  onOpenBatchIdChange: (batchId: number | null) => void;
   onOpenNode: (nodeId: string) => void;
   onLocate: (nodeId: string) => void;
 }) {
@@ -448,15 +456,20 @@ export function JobsView({
     onSettled: invalidate,
   });
 
-  // Filtros: nodo / tipo / pasarela — se aplican a cola, intervención e historial
-  const [nodeFilter, setNodeFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
-  const [gwFilter, setGwFilter] = useState("");
+  // Filtros ↔ URL (`jobs.*`, ADR 0026 / docs/design/urls-compartibles.md
+  // §3.4) — se aplican a cola, intervención e historial. `?? ""` porque el
+  // resto del componente asume string (nunca hay `null`: el default ya es
+  // "" y nada aquí escribe `null` explícitamente).
+  const [nodeFilterRaw, setNodeFilter] = useUrlString("jobs.node", "", { replace: true });
+  const [typeFilterRaw, setTypeFilter] = useUrlString("jobs.type", "", { replace: true });
+  const [gwFilterRaw, setGwFilter] = useUrlString("jobs.gw", "", { replace: true });
+  const nodeFilter = nodeFilterRaw ?? "";
+  const typeFilter = typeFilterRaw ?? "";
+  const gwFilter = gwFilterRaw ?? "";
   const [showForm, setShowForm] = useState(false);
-  const [expandedBatch, setExpandedBatch] = useState<number | null>(openBatchId);
-  useEffect(() => {
-    if (openBatchId != null) setExpandedBatch(openBatchId);
-  }, [openBatchId]);
+  // Lote expandido: prop controlada (jobs.batch en App.tsx), sin estado propio.
+  const expandedBatch = openBatchId;
+  const setExpandedBatch = onOpenBatchIdChange;
 
   const rawOps = useMemo(() => operations.data ?? [], [operations.data]);
   const rawBatches = useMemo(() => batches.data ?? [], [batches.data]);

@@ -49,6 +49,8 @@ import { toast, ToastHost } from "./components/shell/Toast";
 import { useAuth } from "./context/AuthContext";
 import { useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
 import { usePersistedState } from "./hooks/usePersistedState";
+import { useUrlFlag, useUrlNumber, useUrlParam, useUrlString, useUrlView } from "./hooks/useUrlState";
+import { resolveView, VIEWS, type View } from "./view";
 import { computeFleetGroupMetrics, computeGroupAttention, computeGroupStatus, scopeGatewaysToGroup } from "./components/fleet/groupStats";
 import { consumeFinished } from "./opTracker";
 import { t } from "./tokens";
@@ -68,51 +70,6 @@ const DATA_EVENTS = new Set([
   "activity.event",
 ]);
 
-type View =
-  | "ops"
-  | "nodes"
-  | "jobs"
-  | "alerts"
-  | "config"
-  | "profiles"
-  | "activity"
-  | "gateways"
-  | "users"
-  | "login-log"
-  | "settings";
-
-/**
- * Workspaces (identidad v0.8): no hay "páginas" — el riel de navegación
- * cambia de instrumento sin abandonar el chasis (cabecera + barra de
- * estado siempre presentes). El Dashboard clásico y la vista Mapa suelta
- * han muerto: el Centro de Operaciones ES el mapa y ES el dashboard.
- */
-const VIEWS: { id: View; label: string; icon: string }[] = [
-  { id: "ops", label: "Centro", icon: "◉" },
-  { id: "nodes", label: "Flota", icon: "⬡" },
-  { id: "jobs", label: "Trabajos", icon: "▶" },
-  { id: "alerts", label: "Alertas", icon: "⚠" },
-  { id: "profiles", label: "Perfiles", icon: "⧉" },
-  { id: "config", label: "Config", icon: "⚙" },
-  { id: "activity", label: "Registro", icon: "▤" },
-  { id: "gateways", label: "Enlaces", icon: "⛭" },
-  // Autenticación: "Usuarios" solo visible si eres admin O si el sistema aún
-  // está en modo abierto (así siempre hay una forma de crear el primer
-  // usuario); "Accesos" solo tiene sentido estando autenticado.
-  { id: "users", label: "Usuarios", icon: "👤" },
-  { id: "login-log", label: "Accesos", icon: "🔑" },
-  // Panel "Ajustes": umbrales operacionales editables sin redeploy — mismo
-  // criterio de visibilidad que Usuarios (RequireAdminDep en el backend).
-  { id: "settings", label: "Ajustes", icon: "🎚" },
-];
-
-/** Ids históricos (componentes/documentos antiguos): siguen navegando bien. */
-function resolveView(v: string): View {
-  if (v === "operations" || v === "batches") return "jobs";
-  if (v === "dashboard" || v === "map") return "ops";
-  return v as View;
-}
-
 export default function App() {
   const queryClient = useQueryClient();
   const authState = useAuth();
@@ -121,7 +78,73 @@ export default function App() {
   // Query base (sin ignorados): la usan Mapa, Centro y el feed — nunca escopada
   // al grupo activo (necesitan ver toda la red para el contexto espacial/global)
   const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes(), refetchInterval: 30_000 });
-  const [filters, setFilters] = useState<NodeFilterParams>({});
+  // Filtros de Flota ↔ URL (`nodes.*`, ADR 0026 / docs/design/urls-compartibles.md
+  // §3.3). Prefijo `nodes.` a propósito: `nodes.group` es el filtro puntual
+  // de tabla (M1.2), distinto del grupo ACTIVO global (`group`, GroupContext)
+  // — ya eran conceptos independientes antes de esta fase, el prefijo solo
+  // evita que compartan nombre de parámetro.
+  const [filtersQ, setFiltersQ] = useUrlString("nodes.q", null, { replace: true });
+  const [filtersOnline, setFiltersOnline] = useUrlParam<boolean | undefined>("nodes.online", undefined, {
+    replace: true,
+    parse: (raw) => raw === "1",
+    serialize: (v) => (v ? "1" : "0"),
+    isDefault: (v) => v === undefined,
+  });
+  const [filtersFavorite, setFiltersFavorite] = useUrlFlag("nodes.favorite", { replace: true });
+  const [filtersHwModel, setFiltersHwModel] = useUrlString("nodes.hw", null, { replace: true });
+  const [filtersTag, setFiltersTag] = useUrlString("nodes.tag", null, { replace: true });
+  const [filtersGroupId, setFiltersGroupId] = useUrlNumber("nodes.group", null, { replace: true });
+  const [filtersGatewayId, setFiltersGatewayId] = useUrlString("nodes.gw", null, { replace: true });
+  const [filtersBatteryBelow, setFiltersBatteryBelow] = useUrlNumber("nodes.batlt", null, { replace: true });
+  const [filtersIgnored, setFiltersIgnored] = useUrlFlag("nodes.ignored", { replace: true });
+  const filters: NodeFilterParams = useMemo(
+    () => ({
+      q: filtersQ ?? undefined,
+      online: filtersOnline,
+      favorite: filtersFavorite || undefined,
+      hw_model: filtersHwModel ?? undefined,
+      tag: filtersTag ?? undefined,
+      group_id: filtersGroupId ?? undefined,
+      gateway_id: filtersGatewayId ?? undefined,
+      battery_below: filtersBatteryBelow ?? undefined,
+      include_ignored: filtersIgnored || undefined,
+    }),
+    [
+      filtersQ,
+      filtersOnline,
+      filtersFavorite,
+      filtersHwModel,
+      filtersTag,
+      filtersGroupId,
+      filtersGatewayId,
+      filtersBatteryBelow,
+      filtersIgnored,
+    ],
+  );
+  const setFilters = useCallback(
+    (next: NodeFilterParams) => {
+      setFiltersQ(next.q ?? null);
+      setFiltersOnline(next.online);
+      setFiltersFavorite(next.favorite ?? false);
+      setFiltersHwModel(next.hw_model ?? null);
+      setFiltersTag(next.tag ?? null);
+      setFiltersGroupId(next.group_id ?? null);
+      setFiltersGatewayId(next.gateway_id ?? null);
+      setFiltersBatteryBelow(next.battery_below ?? null);
+      setFiltersIgnored(next.include_ignored ?? false);
+    },
+    [
+      setFiltersQ,
+      setFiltersOnline,
+      setFiltersFavorite,
+      setFiltersHwModel,
+      setFiltersTag,
+      setFiltersGroupId,
+      setFiltersGatewayId,
+      setFiltersBatteryBelow,
+      setFiltersIgnored,
+    ],
+  );
   // Query filtrada para la Flota (búsqueda avanzada M1.2 + grupo activo,
   // "Flota orientada a grupos": filtrado server-side, group_id ya existente
   // en apply_filters, M1.2 — el grupo activo manda sobre el filtro manual)
@@ -182,7 +205,9 @@ export default function App() {
     enabled: runningBatchId != null,
     refetchInterval: 10_000,
   });
-  const [view, setView] = useState<View>("ops");
+  // URLs compartibles (ADR 0026): la vista vive en el path, no en memoria.
+  // `resolveView` ya traduce alias históricos (`/dashboard`, `/operations`…).
+  const [view, setView] = useUrlView<View>(resolveView, "ops");
   const gatewayStats = useQuery({
     queryKey: ["gateway-stats"],
     queryFn: () => fetchGatewayStats(),
@@ -193,14 +218,28 @@ export default function App() {
     disconnectedAt: null,
   });
   const [paletteOpen, setPaletteOpen] = useState(false);
-  // Focus (v0.7 §7): contexto operativo deliberado — distinto de la selección
-  const [focus, setFocus] = useState<FocusState | null>(null);
-  const toggleFocus = useCallback((nodeId: string) => {
-    setFocus((f) => (f?.id === nodeId ? null : { id: nodeId, since: Date.now() }));
-  }, []);
+  // Focus (v0.7 §7): contexto operativo deliberado — distinto de la selección.
+  // URLs compartibles (ADR 0026): solo el id vive en la URL (`focus=!...`,
+  // replaceState); `since` es efímero, se recalcula a Date.now() cada vez
+  // que el foco pasa de "sin foco" a un id (recarga con `focus` en la URL
+  // incluida — igual que hoy al hacer clic en ◎).
+  const [focusId, setFocusId] = useUrlString("focus", null, { replace: true });
+  const focusSinceRef = useRef<{ id: string; since: number } | null>(null);
+  if (!focusId) {
+    focusSinceRef.current = null;
+  } else if (focusSinceRef.current?.id !== focusId) {
+    focusSinceRef.current = { id: focusId, since: Date.now() };
+  }
+  const focus: FocusState | null = focusId ? { id: focusId, since: focusSinceRef.current!.since } : null;
+  const toggleFocus = useCallback(
+    (nodeId: string) => setFocusId(focusId === nodeId ? null : nodeId),
+    [focusId, setFocusId],
+  );
   // Perfiles: solo se cargan cuando la paleta los necesita
   const profiles = useQuery({ queryKey: ["profiles"], queryFn: fetchProfiles, enabled: paletteOpen });
-  const [selected, setSelected] = useState<string | null>(null);
+  // Inspector abierto: URLs compartibles (ADR 0026) — `node=!...` en la URL,
+  // pushState (abrir/cerrar el Inspector es una navegación deliberada).
+  const [selected, setSelected] = useUrlString("node", null, { replace: false });
   // Selección múltiple para batches (M2)
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   // Cambiar de grupo activo limpia la selección: nodos armados en un grupo
@@ -211,7 +250,8 @@ export default function App() {
     setCheckedIds(new Set());
   }, [activeGroupId]);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [openBatchId, setOpenBatchId] = useState<number | null>(null);
+  // Lote abierto en Trabajos ↔ URL (`jobs.batch`, ADR 0026).
+  const [openBatchId, setOpenBatchId] = useUrlNumber("jobs.batch", null, { replace: true });
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [registerTab, setRegisterTab] = usePersistedState<"activity" | "chat">("registro.tab", "activity");
   const invalidateTimer = useRef<number | null>(null);
@@ -420,16 +460,17 @@ export default function App() {
       pendingCenter.current = null;
     }
   }, []);
-  const centerOnMap = useCallback((lat: number, lng: number) => {
-    setView((v) => {
-      if (v === "ops" && mapRef.current) {
+  const centerOnMap = useCallback(
+    (lat: number, lng: number) => {
+      if (view === "ops" && mapRef.current) {
         mapRef.current.flyTo([lat, lng], Math.max(mapRef.current.getZoom(), 13));
-        return v;
+        return;
       }
       pendingCenter.current = [lat, lng];
-      return "ops";
-    });
-  }, []);
+      setView("ops");
+    },
+    [view, setView],
+  );
   // "Localizar en el mapa" desde cualquier lista (Trabajos, etc.)
   const locateNode = useCallback(
     (nodeId: string) => {
@@ -529,7 +570,7 @@ export default function App() {
               summaries.find((s) => s.node.node_id === focus.id)?.node.short_name ?? focus.id
             }
             onOpen={() => setSelected(focus.id)}
-            onExit={() => setFocus(null)}
+            onExit={() => setFocusId(null)}
           />
         )}
         <Hud
@@ -672,6 +713,7 @@ export default function App() {
                   summaries={summaries}
                   focusId={focus?.id ?? null}
                   openBatchId={openBatchId}
+                  onOpenBatchIdChange={setOpenBatchId}
                   onOpenNode={setSelected}
                   onLocate={locateNode}
                 />
