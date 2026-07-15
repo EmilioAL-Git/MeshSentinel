@@ -81,9 +81,6 @@ export function ColumnPicker({
               gap: 2,
             }}
           >
-            <div className="microlabel" style={{ marginBottom: 2 }}>
-              Columnas del roster
-            </div>
             {FLEET_COLUMNS.map((c) => (
               <label
                 key={c.id}
