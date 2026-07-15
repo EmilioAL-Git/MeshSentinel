@@ -1,54 +1,96 @@
 from dataclasses import fields
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from noc.adapters.persistence.models import (
     AlertModel,
+    AlertRuleChannelModel,
     AlertRuleModel,
     GroupMemberModel,
     NotificationChannelModel,
+    NotificationChannelProviderModel,
+    NotificationProviderModel,
 )
 from noc.domain.alerts.entities import (
     ACTIVE_STATUSES,
     Alert,
     AlertRule,
-    NotificationChannelConfig,
+    NotificationChannel,
+    NotificationProviderConfig,
 )
 
 
 def _rule_entity(m: AlertRuleModel) -> AlertRule:
-    return AlertRule(**{f.name: getattr(m, f.name) for f in fields(AlertRule)})
+    data = {f.name: getattr(m, f.name) for f in fields(AlertRule) if f.name != "channel_ids"}
+    return AlertRule(**data)
 
 
 def _alert_entity(m: AlertModel) -> Alert:
     return Alert(**{f.name: getattr(m, f.name) for f in fields(Alert)})
 
 
-def _channel_entity(m: NotificationChannelModel) -> NotificationChannelConfig:
-    return NotificationChannelConfig(
-        **{f.name: getattr(m, f.name) for f in fields(NotificationChannelConfig)}
+def _provider_entity(m: NotificationProviderModel) -> NotificationProviderConfig:
+    return NotificationProviderConfig(
+        **{f.name: getattr(m, f.name) for f in fields(NotificationProviderConfig)}
     )
+
+
+def _channel_entity(m: NotificationChannelModel) -> NotificationChannel:
+    data = {f.name: getattr(m, f.name) for f in fields(NotificationChannel) if f.name != "provider_ids"}
+    return NotificationChannel(**data)
 
 
 class SqlAlertRuleRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def _attach_channel_ids(self, rules: list[AlertRule]) -> list[AlertRule]:
+        if not rules:
+            return rules
+        ids = [r.id for r in rules if r.id is not None]
+        rows = await self._session.execute(
+            select(AlertRuleChannelModel.rule_id, AlertRuleChannelModel.channel_id).where(
+                AlertRuleChannelModel.rule_id.in_(ids)
+            )
+        )
+        by_rule: dict[int, list[int]] = {}
+        for rule_id, channel_id in rows.all():
+            by_rule.setdefault(rule_id, []).append(channel_id)
+        for rule in rules:
+            rule.channel_ids = by_rule.get(rule.id, [])
+        return rules
+
     async def list_all(self) -> list[AlertRule]:
         rows = await self._session.scalars(select(AlertRuleModel).order_by(AlertRuleModel.id))
-        return [_rule_entity(r) for r in rows]
+        return await self._attach_channel_ids([_rule_entity(r) for r in rows])
 
     async def list_enabled(self) -> list[AlertRule]:
         rows = await self._session.scalars(
             select(AlertRuleModel).where(AlertRuleModel.enabled.is_(True)).order_by(AlertRuleModel.id)
         )
-        return [_rule_entity(r) for r in rows]
+        return await self._attach_channel_ids([_rule_entity(r) for r in rows])
 
     async def get(self, rule_id: int) -> AlertRule | None:
         m = await self._session.get(AlertRuleModel, rule_id)
-        return _rule_entity(m) if m else None
+        if m is None:
+            return None
+        rule = _rule_entity(m)
+        await self._attach_channel_ids([rule])
+        return rule
+
+    async def list_channel_ids(self, rule_id: int) -> list[int]:
+        rows = await self._session.scalars(
+            select(AlertRuleChannelModel.channel_id).where(AlertRuleChannelModel.rule_id == rule_id)
+        )
+        return list(rows)
+
+    async def set_channels(self, rule_id: int, channel_ids: list[int]) -> None:
+        await self._session.execute(delete(AlertRuleChannelModel).where(AlertRuleChannelModel.rule_id == rule_id))
+        for channel_id in dict.fromkeys(channel_ids):  # dedupe conservando orden
+            self._session.add(AlertRuleChannelModel(rule_id=rule_id, channel_id=channel_id))
+        await self._session.flush()
 
     async def count(self) -> int:
         rows = await self._session.scalars(select(AlertRuleModel.id))
@@ -65,27 +107,34 @@ class SqlAlertRuleRepository:
             duration_seconds=rule.duration_seconds,
             cooldown_seconds=rule.cooldown_seconds,
             params=rule.params,
+            group_id=rule.group_id,
             created_at=now,
             updated_at=now,
         )
         self._session.add(m)
         await self._session.flush()
-        return _rule_entity(m)
+        if rule.channel_ids:
+            await self.set_channels(m.id, rule.channel_ids)
+        return await self.get(m.id)
 
     async def update(self, rule_id: int, changes: dict) -> AlertRule | None:
         m = await self._session.get(AlertRuleModel, rule_id)
         if m is None:
             return None
+        channel_ids = changes.pop("channel_ids", None)
         for key, value in changes.items():
             setattr(m, key, value)
         m.updated_at = datetime.now(timezone.utc)
         await self._session.flush()
-        return _rule_entity(m)
+        if channel_ids is not None:
+            await self.set_channels(rule_id, channel_ids)
+        return await self.get(rule_id)
 
     async def delete(self, rule_id: int) -> bool:
         m = await self._session.get(AlertRuleModel, rule_id)
         if m is None:
             return False
+        await self._session.execute(delete(AlertRuleChannelModel).where(AlertRuleChannelModel.rule_id == rule_id))
         await self._session.delete(m)
         await self._session.flush()
         return True
@@ -188,48 +237,173 @@ class SqlAlertRepository:
             await self._session.flush()
 
 
-class SqlChannelRepository:
+class SqlNotificationProviderRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def list_all(self) -> list[NotificationChannelConfig]:
-        rows = await self._session.scalars(select(NotificationChannelModel).order_by(NotificationChannelModel.id))
-        return [_channel_entity(r) for r in rows]
+    async def list_all(self) -> list[NotificationProviderConfig]:
+        rows = await self._session.scalars(select(NotificationProviderModel).order_by(NotificationProviderModel.id))
+        return [_provider_entity(r) for r in rows]
 
-    async def list_enabled(self) -> list[NotificationChannelConfig]:
+    async def list_enabled(self) -> list[NotificationProviderConfig]:
         rows = await self._session.scalars(
-            select(NotificationChannelModel).where(NotificationChannelModel.enabled.is_(True))
+            select(NotificationProviderModel).where(NotificationProviderModel.enabled.is_(True))
         )
-        return [_channel_entity(r) for r in rows]
+        return [_provider_entity(r) for r in rows]
 
-    async def get(self, channel_id: int) -> NotificationChannelConfig | None:
-        m = await self._session.get(NotificationChannelModel, channel_id)
-        return _channel_entity(m) if m else None
+    async def list_by_ids(self, provider_ids: list[int]) -> list[NotificationProviderConfig]:
+        if not provider_ids:
+            return []
+        rows = await self._session.scalars(
+            select(NotificationProviderModel).where(NotificationProviderModel.id.in_(provider_ids))
+        )
+        return [_provider_entity(r) for r in rows]
 
-    async def create(self, channel: NotificationChannelConfig) -> NotificationChannelConfig:
-        m = NotificationChannelModel(
-            name=channel.name,
-            channel_type=channel.channel_type,
-            config=channel.config,
-            enabled=channel.enabled,
+    async def get(self, provider_id: int) -> NotificationProviderConfig | None:
+        m = await self._session.get(NotificationProviderModel, provider_id)
+        return _provider_entity(m) if m else None
+
+    async def create(self, provider: NotificationProviderConfig) -> NotificationProviderConfig:
+        now = datetime.now(timezone.utc)
+        m = NotificationProviderModel(
+            name=provider.name,
+            provider=provider.provider,
+            configuration=provider.configuration,
+            enabled=provider.enabled,
+            created_at=now,
+            updated_at=now,
         )
         self._session.add(m)
         await self._session.flush()
-        return _channel_entity(m)
+        return _provider_entity(m)
 
-    async def update(self, channel_id: int, changes: dict) -> NotificationChannelConfig | None:
-        m = await self._session.get(NotificationChannelModel, channel_id)
+    async def update(self, provider_id: int, changes: dict) -> NotificationProviderConfig | None:
+        m = await self._session.get(NotificationProviderModel, provider_id)
         if m is None:
             return None
         for key, value in changes.items():
             setattr(m, key, value)
+        m.updated_at = datetime.now(timezone.utc)
         await self._session.flush()
-        return _channel_entity(m)
+        return _provider_entity(m)
+
+    async def delete(self, provider_id: int) -> bool:
+        m = await self._session.get(NotificationProviderModel, provider_id)
+        if m is None:
+            return False
+        await self._session.execute(
+            delete(NotificationChannelProviderModel).where(NotificationChannelProviderModel.provider_id == provider_id)
+        )
+        await self._session.delete(m)
+        await self._session.flush()
+        return True
+
+
+class SqlNotificationChannelRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def _attach_provider_ids(self, channels: list[NotificationChannel]) -> list[NotificationChannel]:
+        if not channels:
+            return channels
+        ids = [c.id for c in channels if c.id is not None]
+        rows = await self._session.execute(
+            select(NotificationChannelProviderModel.channel_id, NotificationChannelProviderModel.provider_id).where(
+                NotificationChannelProviderModel.channel_id.in_(ids)
+            )
+        )
+        by_channel: dict[int, list[int]] = {}
+        for channel_id, provider_id in rows.all():
+            by_channel.setdefault(channel_id, []).append(provider_id)
+        for channel in channels:
+            channel.provider_ids = by_channel.get(channel.id, [])
+        return channels
+
+    async def list_all(self) -> list[NotificationChannel]:
+        rows = await self._session.scalars(select(NotificationChannelModel).order_by(NotificationChannelModel.id))
+        return await self._attach_provider_ids([_channel_entity(r) for r in rows])
+
+    async def get(self, channel_id: int) -> NotificationChannel | None:
+        m = await self._session.get(NotificationChannelModel, channel_id)
+        if m is None:
+            return None
+        channel = _channel_entity(m)
+        await self._attach_provider_ids([channel])
+        return channel
+
+    async def list_provider_ids(self, channel_id: int) -> list[int]:
+        rows = await self._session.scalars(
+            select(NotificationChannelProviderModel.provider_id).where(
+                NotificationChannelProviderModel.channel_id == channel_id
+            )
+        )
+        return list(rows)
+
+    async def set_providers(self, channel_id: int, provider_ids: list[int]) -> None:
+        await self._session.execute(
+            delete(NotificationChannelProviderModel).where(NotificationChannelProviderModel.channel_id == channel_id)
+        )
+        for provider_id in dict.fromkeys(provider_ids):
+            self._session.add(NotificationChannelProviderModel(channel_id=channel_id, provider_id=provider_id))
+        await self._session.flush()
+
+    async def list_providers_for_channels(self, channel_ids: list[int]) -> list[NotificationProviderConfig]:
+        """Unión deduplicada de proveedores (por id) de los canales dados —
+        para no enviar dos veces si un proveedor está en 2 canales de la
+        misma regla."""
+        if not channel_ids:
+            return []
+        provider_id_rows = await self._session.scalars(
+            select(NotificationChannelProviderModel.provider_id)
+            .where(NotificationChannelProviderModel.channel_id.in_(channel_ids))
+            .distinct()
+        )
+        provider_ids = list(provider_id_rows)
+        if not provider_ids:
+            return []
+        rows = await self._session.scalars(
+            select(NotificationProviderModel).where(
+                NotificationProviderModel.id.in_(provider_ids),
+                NotificationProviderModel.enabled.is_(True),
+            )
+        )
+        return [_provider_entity(r) for r in rows]
+
+    async def create(self, channel: NotificationChannel) -> NotificationChannel:
+        now = datetime.now(timezone.utc)
+        m = NotificationChannelModel(
+            name=channel.name,
+            description=channel.description,
+            created_at=now,
+            updated_at=now,
+        )
+        self._session.add(m)
+        await self._session.flush()
+        if channel.provider_ids:
+            await self.set_providers(m.id, channel.provider_ids)
+        return await self.get(m.id)
+
+    async def update(self, channel_id: int, changes: dict) -> NotificationChannel | None:
+        m = await self._session.get(NotificationChannelModel, channel_id)
+        if m is None:
+            return None
+        provider_ids = changes.pop("provider_ids", None)
+        for key, value in changes.items():
+            setattr(m, key, value)
+        m.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+        if provider_ids is not None:
+            await self.set_providers(channel_id, provider_ids)
+        return await self.get(channel_id)
 
     async def delete(self, channel_id: int) -> bool:
         m = await self._session.get(NotificationChannelModel, channel_id)
         if m is None:
             return False
+        await self._session.execute(
+            delete(NotificationChannelProviderModel).where(NotificationChannelProviderModel.channel_id == channel_id)
+        )
+        await self._session.execute(delete(AlertRuleChannelModel).where(AlertRuleChannelModel.channel_id == channel_id))
         await self._session.delete(m)
         await self._session.flush()
         return True

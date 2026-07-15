@@ -4,18 +4,25 @@ import {
   ackAlert,
   createAlertRule,
   createChannel,
+  createProvider,
   deleteAlertRule,
   deleteChannel,
+  deleteProvider,
+  duplicateProvider,
   fetchAlertRules,
   fetchAlerts,
   fetchChannels,
+  fetchGroups,
   fetchNodes,
+  fetchProviders,
   patchAlertRule,
   patchChannel,
-  testChannel,
+  patchProvider,
+  testProvider,
   type AlertOut,
   type AlertRuleOut,
   type ChannelOut,
+  type ProviderOut,
   type Severity,
 } from "../api/client";
 import { scopeAlertsToGroup, useGroupNodeIds } from "../context/GroupContext";
@@ -26,7 +33,15 @@ import { GroupScopeBanner } from "./shell/GroupScopeBanner";
  * Alertas (identidad v0.8): un puesto de triaje, no una página de tablas.
  * Columna principal = bandeja activa con gutter de severidad y ACK a un
  * clic (endpoint de 3C); debajo, historial compacto. Columna derecha =
- * reglas y canales como paneles de configuración del motor.
+ * reglas, integraciones y canales como paneles de configuración del motor.
+ *
+ * Vocabulario (backend ⇄ UI, notificaciones multi-proveedor): una
+ * "Integración" es la instancia de proveedor configurada (un webhook
+ * concreto, un bot de Telegram concreto — backend: notification_providers).
+ * Un "Canal" es la agrupación lógica a la que apuntan las reglas
+ * (p.ej. "Operadores", "Guardia" — backend: notification_channels), y
+ * agrupa 1+ integraciones. Una regla sin canales asignados difunde a todas
+ * las integraciones activas (comportamiento por defecto, sin cambios).
  */
 
 const SEV_COLOR: Record<Severity, string> = {
@@ -55,14 +70,113 @@ const RULE_FIELD_META: Record<
     label: "Pasarela desconectada",
     duration: { label: "Segundos sin heartbeat", toUi: (s) => s, fromUi: (s) => s, default: 120 },
   },
+  gateway_no_traffic: {
+    label: "Pasarela sin tráfico",
+    duration: { label: "Minutos sin oír a la malla", toUi: (s) => Math.round(s / 60), fromUi: (m) => m * 60, default: 30 },
+  },
+  low_redundancy: { label: "Redundancia baja", threshold: { label: "% mínimo con 2+ pasarelas", default: 50 } },
+  temperature_high: { label: "Temperatura alta", threshold: { label: "°C máximos", step: 0.5, default: 45 } },
+  channel_utilization_high: { label: "Canal saturado", threshold: { label: "% utilización máx.", default: 25 } },
+  position_lost: {
+    label: "Posición perdida",
+    duration: { label: "Minutos sin posición (nodo activo)", toUi: (s) => Math.round(s / 60), fromUi: (m) => m * 60, default: 120 },
+  },
+  neighbor_link_lost: {
+    label: "Enlace de vecinos perdido",
+    duration: { label: "Minutos sin reoír el enlace", toUi: (s) => Math.round(s / 60), fromUi: (m) => m * 60, default: 120 },
+  },
 };
 
-function RuleEditor({ rule, onSave, onCancel }: { rule: AlertRuleOut; onSave: (changes: Partial<AlertRuleOut>) => void; onCancel: () => void }) {
+// Tipos cuyo sujeto son pasarelas: sin escopado por grupo (la API lo rechaza)
+const GROUP_UNSUPPORTED = new Set(["gateway_disconnected", "gateway_no_traffic"]);
+
+// Metadatos por tipo de proveedor: qué campos pide su `configuration`, sin
+// lógica if/else dispersa por el resto del componente (mismo patrón que
+// RULE_FIELD_META). Añadir un proveedor nuevo aquí = ya aparece en el
+// formulario de "+ Nueva integración".
+const PROVIDER_FIELD_META: Record<
+  string,
+  {
+    label: string;
+    fields: { key: string; label: string; type?: "text" | "password"; placeholder?: string; optional?: boolean }[];
+  }
+> = {
+  webhook: {
+    label: "Webhook",
+    fields: [{ key: "url", label: "URL", placeholder: "https://ejemplo.com/hook" }],
+  },
+  ntfy: {
+    label: "ntfy",
+    fields: [
+      { key: "topic", label: "Topic", placeholder: "meshtastic-noc" },
+      { key: "url", label: "Servidor", placeholder: "https://ntfy.sh (opcional)", optional: true },
+      { key: "token", label: "Token", type: "password", optional: true },
+    ],
+  },
+  telegram: {
+    label: "Telegram",
+    fields: [
+      { key: "bot_token", label: "Bot Token", type: "password" },
+      { key: "chat_id", label: "Chat ID" },
+    ],
+  },
+};
+
+function ChannelPicker({
+  channels,
+  selected,
+  onChange,
+}: {
+  channels: ChannelOut[];
+  selected: number[];
+  onChange: (ids: number[]) => void;
+}) {
+  const toggle = (id: number) =>
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+      <span className="microlabel">Canales</span>
+      {channels.length === 0 && (
+        <span style={{ color: "var(--text-faint)", fontSize: 11 }}>
+          Sin canales creados — todas las integraciones activas (por defecto).
+        </span>
+      )}
+      {channels.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          {channels.map((c) => (
+            <label key={c.id} style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: 11.5 }}>
+              <input type="checkbox" checked={selected.includes(c.id)} onChange={() => toggle(c.id)} />
+              {c.name}
+            </label>
+          ))}
+        </div>
+      )}
+      {selected.length === 0 && channels.length > 0 && (
+        <span style={{ color: "var(--text-faint)", fontSize: 11 }}>
+          Ninguno seleccionado = todas las integraciones activas (por defecto).
+        </span>
+      )}
+    </div>
+  );
+}
+
+function RuleEditor({
+  rule,
+  channels,
+  onSave,
+  onCancel,
+}: {
+  rule: AlertRuleOut;
+  channels: ChannelOut[];
+  onSave: (changes: Partial<AlertRuleOut>) => void;
+  onCancel: () => void;
+}) {
   const meta = RULE_FIELD_META[rule.rule_type];
   const [severity, setSeverity] = useState<Severity>(rule.severity);
   const [threshold, setThreshold] = useState(rule.threshold ?? 0);
   const [durationUi, setDurationUi] = useState(meta?.duration ? meta.duration.toUi(rule.duration_seconds ?? 0) : 0);
   const [cooldown, setCooldown] = useState(rule.cooldown_seconds);
+  const [channelIds, setChannelIds] = useState<number[]>(rule.channel_ids ?? []);
 
   return (
     <div
@@ -106,6 +220,7 @@ function RuleEditor({ rule, onSave, onCancel }: { rule: AlertRuleOut; onSave: (c
         <span className="microlabel" style={{ minWidth: 70 }}>Enfriamiento (s)</span>
         <input className="input" type="number" min={0} value={cooldown} onChange={(e) => setCooldown(Number(e.target.value))} />
       </div>
+      <ChannelPicker channels={channels} selected={channelIds} onChange={setChannelIds} />
       <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
         <button
           className="btn"
@@ -116,6 +231,7 @@ function RuleEditor({ rule, onSave, onCancel }: { rule: AlertRuleOut; onSave: (c
               threshold: meta?.threshold ? threshold : rule.threshold,
               duration_seconds: meta?.duration ? meta.duration.fromUi(durationUi) : rule.duration_seconds,
               cooldown_seconds: cooldown,
+              channel_ids: channelIds,
             })
           }
         >
@@ -129,7 +245,15 @@ function RuleEditor({ rule, onSave, onCancel }: { rule: AlertRuleOut; onSave: (c
   );
 }
 
-function NewRuleForm({ onSave, onCancel }: { onSave: (rule: Omit<AlertRuleOut, "id">) => void; onCancel: () => void }) {
+function NewRuleForm({
+  channels,
+  onSave,
+  onCancel,
+}: {
+  channels: ChannelOut[];
+  onSave: (rule: Omit<AlertRuleOut, "id">) => void;
+  onCancel: () => void;
+}) {
   const [ruleType, setRuleType] = useState<keyof typeof RULE_FIELD_META>("low_battery");
   const [name, setName] = useState(RULE_FIELD_META.low_battery.label);
   const [severity, setSeverity] = useState<Severity>("WARNING");
@@ -137,12 +261,32 @@ function NewRuleForm({ onSave, onCancel }: { onSave: (rule: Omit<AlertRuleOut, "
   const [threshold, setThreshold] = useState(meta.threshold?.default ?? 0);
   const [durationUi, setDurationUi] = useState(meta.duration?.default ?? 0);
   const [cooldown, setCooldown] = useState(0);
+  const [channelIds, setChannelIds] = useState<number[]>([]);
+  // Reglas por grupo (§1.3): null = toda la red. El nombre por defecto
+  // incorpora el grupo — `name` es UNIQUE en BD y la variante por grupo
+  // colisionaría con la regla global sembrada del mismo tipo.
+  const [groupId, setGroupId] = useState<number | null>(null);
+  const groups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
+
+  const defaultName = (t: keyof typeof RULE_FIELD_META, gid: number | null) => {
+    const base = RULE_FIELD_META[t].label;
+    const group = (groups.data ?? []).find((g) => g.id === gid);
+    return group ? `${base} · ${group.name}` : base;
+  };
 
   const changeType = (t: keyof typeof RULE_FIELD_META) => {
     setRuleType(t);
-    setName(RULE_FIELD_META[t].label);
+    const gid = GROUP_UNSUPPORTED.has(t) ? null : groupId;
+    if (GROUP_UNSUPPORTED.has(t)) setGroupId(null);
+    setName(defaultName(t, gid));
     setThreshold(RULE_FIELD_META[t].threshold?.default ?? 0);
     setDurationUi(RULE_FIELD_META[t].duration?.default ?? 0);
+  };
+
+  const changeGroup = (gid: number | null) => {
+    // Si el nombre sigue siendo el autogenerado, se regenera con el grupo
+    if (name === defaultName(ruleType, groupId)) setName(defaultName(ruleType, gid));
+    setGroupId(gid);
   };
 
   return (
@@ -165,6 +309,21 @@ function NewRuleForm({ onSave, onCancel }: { onSave: (rule: Omit<AlertRuleOut, "
           ))}
         </select>
       </div>
+      {!GROUP_UNSUPPORTED.has(ruleType) && (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span className="microlabel" style={{ minWidth: 70 }}>Ámbito</span>
+          <select
+            className="input"
+            value={groupId ?? ""}
+            onChange={(e) => changeGroup(e.target.value === "" ? null : Number(e.target.value))}
+          >
+            <option value="">Toda la red</option>
+            {(groups.data ?? []).map((g) => (
+              <option key={g.id} value={g.id}>Grupo: {g.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
         <span className="microlabel" style={{ minWidth: 70 }}>Nombre</span>
         <input className="input" style={{ flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
@@ -199,6 +358,7 @@ function NewRuleForm({ onSave, onCancel }: { onSave: (rule: Omit<AlertRuleOut, "
         <span className="microlabel" style={{ minWidth: 70 }}>Enfriamiento (s)</span>
         <input className="input" type="number" min={0} value={cooldown} onChange={(e) => setCooldown(Number(e.target.value))} />
       </div>
+      <ChannelPicker channels={channels} selected={channelIds} onChange={setChannelIds} />
       <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
         <button
           className="btn"
@@ -214,6 +374,8 @@ function NewRuleForm({ onSave, onCancel }: { onSave: (rule: Omit<AlertRuleOut, "
               duration_seconds: meta.duration ? meta.duration.fromUi(durationUi) : null,
               cooldown_seconds: cooldown,
               params: {},
+              group_id: groupId,
+              channel_ids: channelIds,
             })
           }
         >
@@ -227,14 +389,49 @@ function NewRuleForm({ onSave, onCancel }: { onSave: (rule: Omit<AlertRuleOut, "
   );
 }
 
-// ntfy guarda el destino en config.topic, webhook en config.url.
-function channelTarget(c: ChannelOut): string {
-  return c.channel_type === "ntfy" ? String(c.config.topic ?? "") : String(c.config.url ?? "");
+function ProviderFieldsEditor({
+  providerType,
+  configuration,
+  onChange,
+}: {
+  providerType: string;
+  configuration: Record<string, unknown>;
+  onChange: (config: Record<string, unknown>) => void;
+}) {
+  const meta = PROVIDER_FIELD_META[providerType];
+  if (!meta) return null;
+  return (
+    <>
+      {meta.fields.map((f) => (
+        <div key={f.key} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span className="microlabel" style={{ minWidth: 70 }}>{f.label}</span>
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            type={f.type === "password" ? "password" : "text"}
+            placeholder={f.placeholder}
+            value={String(configuration[f.key] ?? "")}
+            onChange={(e) => onChange({ ...configuration, [f.key]: e.target.value })}
+          />
+        </div>
+      ))}
+    </>
+  );
 }
 
-function ChannelEditor({ channel, onSave, onCancel }: { channel: ChannelOut; onSave: (changes: Partial<ChannelOut>) => void; onCancel: () => void }) {
-  const [name, setName] = useState(channel.name);
-  const [target, setTarget] = useState(channelTarget(channel));
+function ProviderEditor({
+  provider,
+  onSave,
+  onCancel,
+}: {
+  provider: ProviderOut;
+  onSave: (changes: { name: string; configuration: Record<string, unknown> }) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(provider.name);
+  const [configuration, setConfiguration] = useState<Record<string, unknown>>(provider.configuration);
+  const meta = PROVIDER_FIELD_META[provider.provider];
+  const requiredOk = (meta?.fields ?? []).every((f) => f.optional || String(configuration[f.key] ?? "").trim());
 
   return (
     <div
@@ -252,21 +449,144 @@ function ChannelEditor({ channel, onSave, onCancel }: { channel: ChannelOut; onS
         <span className="microlabel" style={{ minWidth: 70 }}>Nombre</span>
         <input className="input" style={{ flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} />
       </div>
+      <ProviderFieldsEditor providerType={provider.provider} configuration={configuration} onChange={setConfiguration} />
+      <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
+        <button
+          className="btn"
+          disabled={!name.trim() || !requiredOk}
+          style={{ fontSize: 11 }}
+          onClick={() => onSave({ name: name.trim(), configuration })}
+        >
+          Guardar
+        </button>
+        <button className="btn ghost" style={{ fontSize: 11 }} onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NewProviderForm({
+  onSave,
+  onCancel,
+}: {
+  onSave: (provider: { name: string; provider: string; configuration: Record<string, unknown>; enabled: boolean }) => void;
+  onCancel: () => void;
+}) {
+  const [providerType, setProviderType] = useState<keyof typeof PROVIDER_FIELD_META>("ntfy");
+  const [name, setName] = useState("");
+  const [configuration, setConfiguration] = useState<Record<string, unknown>>({});
+  const meta = PROVIDER_FIELD_META[providerType];
+  const requiredOk = meta.fields.every((f) => f.optional || String(configuration[f.key] ?? "").trim());
+
+  const changeType = (t: keyof typeof PROVIDER_FIELD_META) => {
+    setProviderType(t);
+    setConfiguration({});
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.4rem",
+        padding: "0.5rem 0.75rem 0.7rem",
+        borderBottom: "1px solid var(--border-subtle)",
+        background: "var(--surface-2, rgba(255,255,255,0.03))",
+        fontSize: 12,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-        <span className="microlabel" style={{ minWidth: 70 }}>{channel.channel_type === "ntfy" ? "Topic" : "URL"}</span>
-        <input className="input" style={{ flex: 1 }} value={target} onChange={(e) => setTarget(e.target.value)} />
+        <span className="microlabel" style={{ minWidth: 70 }}>Proveedor</span>
+        <select className="input" value={providerType} onChange={(e) => changeType(e.target.value as keyof typeof PROVIDER_FIELD_META)}>
+          {Object.entries(PROVIDER_FIELD_META).map(([type, m]) => (
+            <option key={type} value={type}>{m.label}</option>
+          ))}
+        </select>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Nombre</span>
+        <input className="input" style={{ flex: 1 }} placeholder="p. ej. Bot de guardia" value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <ProviderFieldsEditor providerType={providerType} configuration={configuration} onChange={setConfiguration} />
+      <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
+        <button
+          className="btn"
+          disabled={!name.trim() || !requiredOk}
+          style={{ fontSize: 11 }}
+          onClick={() => {
+            onSave({ name: name.trim(), provider: providerType, configuration, enabled: true });
+          }}
+        >
+          Crear integración
+        </button>
+        <button className="btn ghost" style={{ fontSize: 11 }} onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ChannelForm({
+  channel,
+  providers,
+  onSave,
+  onCancel,
+}: {
+  channel?: ChannelOut;
+  providers: ProviderOut[];
+  onSave: (changes: { name: string; description: string | null; provider_ids: number[] }) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(channel?.name ?? "");
+  const [description, setDescription] = useState(channel?.description ?? "");
+  const [providerIds, setProviderIds] = useState<number[]>(channel?.provider_ids ?? []);
+
+  const toggle = (id: number) =>
+    setProviderIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.4rem",
+        padding: "0.5rem 0.75rem 0.7rem",
+        borderBottom: "1px solid var(--border-subtle)",
+        background: "var(--surface-2, rgba(255,255,255,0.03))",
+        fontSize: 12,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Nombre</span>
+        <input className="input" style={{ flex: 1 }} placeholder="p. ej. Operadores" value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="microlabel" style={{ minWidth: 70 }}>Descripción</span>
+        <input className="input" style={{ flex: 1 }} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+        <span className="microlabel">Integraciones</span>
+        {providers.length === 0 && (
+          <span style={{ color: "var(--text-faint)", fontSize: 11 }}>Sin integraciones creadas todavía.</span>
+        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          {providers.map((p) => (
+            <label key={p.id} style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: 11.5 }}>
+              <input type="checkbox" checked={providerIds.includes(p.id)} onChange={() => toggle(p.id)} />
+              {p.name} <span className="chip">{p.provider}</span>
+            </label>
+          ))}
+        </div>
       </div>
       <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
         <button
           className="btn"
-          disabled={!name.trim() || !target.trim()}
+          disabled={!name.trim()}
           style={{ fontSize: 11 }}
-          onClick={() =>
-            onSave({
-              name: name.trim(),
-              config: channel.channel_type === "ntfy" ? { topic: target.trim() } : { url: target.trim() },
-            })
-          }
+          onClick={() => onSave({ name: name.trim(), description: description.trim() || null, provider_ids: providerIds })}
         >
           Guardar
         </button>
@@ -350,12 +670,19 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["alerts"] });
     queryClient.invalidateQueries({ queryKey: ["alert-rules"] });
+    queryClient.invalidateQueries({ queryKey: ["providers"] });
     queryClient.invalidateQueries({ queryKey: ["channels"] });
   };
 
   const alerts = useQuery({ queryKey: ["alerts"], queryFn: () => fetchAlerts(undefined, 100), refetchInterval: 30_000 });
   const rules = useQuery({ queryKey: ["alert-rules"], queryFn: fetchAlertRules });
+  // Nombre del grupo para el chip de ámbito de las reglas por grupo (§1.3)
+  const groups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
+  const groupName = (id: number | null) =>
+    id == null ? null : ((groups.data ?? []).find((g) => g.id === id)?.name ?? `#${id}`);
+  const providers = useQuery({ queryKey: ["providers"], queryFn: fetchProviders });
   const channels = useQuery({ queryKey: ["channels"], queryFn: fetchChannels });
+  const channelName = (id: number) => (channels.data ?? []).find((c) => c.id === id)?.name ?? `#${id}`;
   // Mismo queryKey que App.tsx/GroupContext: caché compartida, sin fetch nuevo.
   const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes() });
   const groupNodeIds = useGroupNodeIds(nodes.data ?? []);
@@ -373,18 +700,32 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   const removeRule = useMutation({ mutationFn: deleteAlertRule, onSettled: invalidate });
   const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
   const [creatingRule, setCreatingRule] = useState(false);
-  const addChannel = useMutation({ mutationFn: createChannel, onSettled: invalidate });
-  const editChannel = useMutation({
-    mutationFn: ({ id, changes }: { id: number; changes: Partial<ChannelOut> }) => patchChannel(id, changes),
+
+  const addProvider = useMutation({ mutationFn: createProvider, onSettled: invalidate });
+  const editProvider = useMutation({
+    mutationFn: ({ id, changes }: { id: number; changes: { name: string; configuration: Record<string, unknown> } }) =>
+      patchProvider(id, changes),
     onSettled: invalidate,
   });
-  const removeChannel = useMutation({ mutationFn: deleteChannel, onSettled: invalidate });
-  const test = useMutation({ mutationFn: testChannel });
-  const [editingChannelId, setEditingChannelId] = useState<number | null>(null);
+  const toggleProvider = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => patchProvider(id, { enabled }),
+    onSettled: invalidate,
+  });
+  const removeProvider = useMutation({ mutationFn: deleteProvider, onSettled: invalidate });
+  const dupProvider = useMutation({ mutationFn: duplicateProvider, onSettled: invalidate });
+  const testProviderMut = useMutation({ mutationFn: testProvider });
+  const [editingProviderId, setEditingProviderId] = useState<number | null>(null);
+  const [creatingProvider, setCreatingProvider] = useState(false);
 
-  const [chName, setChName] = useState("");
-  const [chType, setChType] = useState<"webhook" | "ntfy">("ntfy");
-  const [chTarget, setChTarget] = useState("");
+  const addChannelGroup = useMutation({ mutationFn: createChannel, onSettled: invalidate });
+  const editChannelGroup = useMutation({
+    mutationFn: ({ id, changes }: { id: number; changes: { name: string; description: string | null; provider_ids: number[] } }) =>
+      patchChannel(id, changes),
+    onSettled: invalidate,
+  });
+  const removeChannelGroup = useMutation({ mutationFn: deleteChannel, onSettled: invalidate });
+  const [editingChannelId, setEditingChannelId] = useState<number | null>(null);
+  const [creatingChannel, setCreatingChannel] = useState(false);
 
   const all = alerts.data ?? [];
   const allActive = all.filter((a) => a.status !== "resolved");
@@ -424,8 +765,8 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
           <div className="k">Reglas activas</div>
         </div>
         <div className="kpi">
-          <div className="v" style={{ color: "var(--text-dim)" }}>{(channels.data ?? []).length}</div>
-          <div className="k">Canales</div>
+          <div className="v" style={{ color: "var(--text-dim)" }}>{(providers.data ?? []).length}</div>
+          <div className="k">Integraciones</div>
         </div>
       </div>
 
@@ -487,6 +828,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
             <div className="panel-body flush">
               {creatingRule && (
                 <NewRuleForm
+                  channels={channels.data ?? []}
                   onCancel={() => setCreatingRule(false)}
                   onSave={(rule) => {
                     newRule.mutate(rule);
@@ -515,7 +857,19 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                     <span className="mono" style={{ color: SEV_COLOR[r.severity], fontSize: 10, minWidth: 60 }}>
                       {r.severity}
                     </span>
-                    <span style={{ color: r.enabled ? "var(--text)" : "var(--text-faint)", flex: 1 }}>{r.name}</span>
+                    <span style={{ color: r.enabled ? "var(--text)" : "var(--text-faint)", flex: 1 }}>
+                      {r.name}
+                      {r.group_id != null && (
+                        <span className="chip" style={{ marginLeft: 6 }} title="Regla escopada a un grupo">
+                          ◉ {groupName(r.group_id)}
+                        </span>
+                      )}
+                      {r.channel_ids.length > 0 && (
+                        <span className="chip" style={{ marginLeft: 6 }} title={r.channel_ids.map(channelName).join(", ")}>
+                          ✉ {r.channel_ids.length}
+                        </span>
+                      )}
+                    </span>
                     <button
                       className="btn ghost"
                       style={{ padding: "0.1rem 0.5rem", fontSize: 11 }}
@@ -542,6 +896,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                   {editingRuleId === r.id && (
                     <RuleEditor
                       rule={r}
+                      channels={channels.data ?? []}
                       onCancel={() => setEditingRuleId(null)}
                       onSave={(changes) => {
                         editRule.mutate({ id: r.id, changes });
@@ -556,28 +911,121 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
 
           <div className="panel" style={{ flex: 1 }}>
             <div className="panel-head">
-              <span className="panel-title">Canales de notificación</span>
-              <span className="panel-count">{(channels.data ?? []).length}</span>
+              <span className="panel-title">Integraciones</span>
+              <span className="panel-count">{(providers.data ?? []).length}</span>
+              <button
+                className="btn ghost"
+                style={{ marginLeft: "auto", padding: "0.1rem 0.5rem", fontSize: 11 }}
+                onClick={() => {
+                  setCreatingProvider((v) => !v);
+                  setEditingProviderId(null);
+                }}
+              >
+                {creatingProvider ? "▲" : "+ Nueva"}
+              </button>
             </div>
             <div className="panel-body">
-              {(channels.data ?? []).length === 0 && (
+              {creatingProvider && (
+                <NewProviderForm
+                  onCancel={() => setCreatingProvider(false)}
+                  onSave={(provider) => {
+                    addProvider.mutate(provider);
+                    setCreatingProvider(false);
+                  }}
+                />
+              )}
+              {(providers.data ?? []).length === 0 && !creatingProvider && (
                 <p style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 0 }}>
-                  Sin canales. Las alertas solo se verán en el NOC.
+                  Sin integraciones. Las alertas solo se verán en el NOC.
+                </p>
+              )}
+              {(providers.data ?? []).map((p) => (
+                <div key={p.id} style={{ marginBottom: "0.4rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 12, padding: "0.2rem 0.75rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={p.enabled}
+                      title={p.enabled ? "Integración activa" : "Integración desactivada"}
+                      onChange={(e) => toggleProvider.mutate({ id: p.id, enabled: e.target.checked })}
+                    />
+                    <span className="mono" style={{ color: p.enabled ? "var(--text)" : "var(--text-faint)" }}>{p.name}</span>
+                    <span className="chip">{PROVIDER_FIELD_META[p.provider]?.label ?? p.provider}</span>
+                    <span style={{ marginLeft: "auto", display: "flex", gap: "0.3rem" }}>
+                      <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => testProviderMut.mutate(p.id)}>Probar</button>
+                      <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => dupProvider.mutate(p.id)}>Duplicar</button>
+                      <button
+                        className="btn ghost"
+                        style={{ fontSize: 11 }}
+                        onClick={() => setEditingProviderId(editingProviderId === p.id ? null : p.id)}
+                      >
+                        {editingProviderId === p.id ? "▲" : "Editar"}
+                      </button>
+                      <button
+                        className="btn ghost"
+                        style={{ fontSize: 11 }}
+                        onClick={() => {
+                          if (window.confirm(`¿Borrar la integración «${p.name}»?`)) removeProvider.mutate(p.id);
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  </div>
+                  {editingProviderId === p.id && (
+                    <ProviderEditor
+                      provider={p}
+                      onCancel={() => setEditingProviderId(null)}
+                      onSave={(changes) => {
+                        editProvider.mutate({ id: p.id, changes });
+                        setEditingProviderId(null);
+                      }}
+                    />
+                  )}
+                </div>
+              ))}
+              {testProviderMut.isSuccess && <p style={{ color: "var(--ok)", fontSize: 12 }}>Mensaje de prueba enviado.</p>}
+              {testProviderMut.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(testProviderMut.error)}</p>}
+              {addProvider.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(addProvider.error)}</p>}
+            </div>
+          </div>
+
+          <div className="panel" style={{ flex: 1 }}>
+            <div className="panel-head">
+              <span className="panel-title">Canales</span>
+              <span className="panel-count">{(channels.data ?? []).length}</span>
+              <button
+                className="btn ghost"
+                style={{ marginLeft: "auto", padding: "0.1rem 0.5rem", fontSize: 11 }}
+                onClick={() => {
+                  setCreatingChannel((v) => !v);
+                  setEditingChannelId(null);
+                }}
+              >
+                {creatingChannel ? "▲" : "+ Nuevo"}
+              </button>
+            </div>
+            <div className="panel-body">
+              {creatingChannel && (
+                <ChannelForm
+                  providers={providers.data ?? []}
+                  onCancel={() => setCreatingChannel(false)}
+                  onSave={(channel) => {
+                    addChannelGroup.mutate(channel);
+                    setCreatingChannel(false);
+                  }}
+                />
+              )}
+              {(channels.data ?? []).length === 0 && !creatingChannel && (
+                <p style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 0 }}>
+                  Sin canales — las reglas sin canal asignado difunden a todas las integraciones activas.
                 </p>
               )}
               {(channels.data ?? []).map((c) => (
                 <div key={c.id} style={{ marginBottom: "0.4rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 12 }}>
-                    <input
-                      type="checkbox"
-                      checked={c.enabled}
-                      title={c.enabled ? "Canal activo" : "Canal desactivado"}
-                      onChange={(e) => editChannel.mutate({ id: c.id, changes: { enabled: e.target.checked } })}
-                    />
-                    <span className="mono" style={{ color: c.enabled ? "var(--text)" : "var(--text-faint)" }}>{c.name}</span>
-                    <span className="chip">{c.channel_type}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 12, padding: "0.2rem 0.75rem" }}>
+                    <span className="mono" style={{ color: "var(--text)" }}>{c.name}</span>
+                    <span className="chip">{c.provider_ids.length} integr.</span>
                     <span style={{ marginLeft: "auto", display: "flex", gap: "0.3rem" }}>
-                      <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => test.mutate(c.id)}>Probar</button>
                       <button
                         className="btn ghost"
                         style={{ fontSize: 11 }}
@@ -589,7 +1037,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                         className="btn ghost"
                         style={{ fontSize: 11 }}
                         onClick={() => {
-                          if (window.confirm(`¿Borrar el canal «${c.name}»?`)) removeChannel.mutate(c.id);
+                          if (window.confirm(`¿Borrar el canal «${c.name}»?`)) removeChannelGroup.mutate(c.id);
                         }}
                       >
                         ✕
@@ -597,52 +1045,19 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                     </span>
                   </div>
                   {editingChannelId === c.id && (
-                    <ChannelEditor
+                    <ChannelForm
                       channel={c}
+                      providers={providers.data ?? []}
                       onCancel={() => setEditingChannelId(null)}
                       onSave={(changes) => {
-                        editChannel.mutate({ id: c.id, changes });
+                        editChannelGroup.mutate({ id: c.id, changes });
                         setEditingChannelId(null);
                       }}
                     />
                   )}
                 </div>
               ))}
-              {test.isSuccess && <p style={{ color: "var(--ok)", fontSize: 12 }}>Mensaje de prueba enviado.</p>}
-              {test.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(test.error)}</p>}
-
-              <div className="microlabel" style={{ margin: "0.8rem 0 0.4rem" }}>Añadir canal</div>
-              <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                <input className="input" style={{ width: 110 }} placeholder="Nombre" value={chName} onChange={(e) => setChName(e.target.value)} />
-                <select className="input" value={chType} onChange={(e) => setChType(e.target.value as "webhook" | "ntfy")}>
-                  <option value="ntfy">ntfy</option>
-                  <option value="webhook">webhook</option>
-                </select>
-                <input
-                  className="input"
-                  style={{ flex: 1, minWidth: 160 }}
-                  placeholder={chType === "ntfy" ? "topic (p. ej. meshtastic-noc)" : "URL del webhook"}
-                  value={chTarget}
-                  onChange={(e) => setChTarget(e.target.value)}
-                />
-                <button
-                  className="btn"
-                  disabled={!chName || !chTarget}
-                  onClick={() => {
-                    addChannel.mutate({
-                      name: chName,
-                      channel_type: chType,
-                      enabled: true,
-                      config: chType === "ntfy" ? { topic: chTarget } : { url: chTarget },
-                    });
-                    setChName("");
-                    setChTarget("");
-                  }}
-                >
-                  Crear
-                </button>
-              </div>
-              {addChannel.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(addChannel.error)}</p>}
+              {addChannelGroup.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(addChannelGroup.error)}</p>}
             </div>
           </div>
         </div>

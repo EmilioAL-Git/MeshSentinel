@@ -6,14 +6,23 @@
 > del mapa) y porque el segundo es precondición de datos para completar el
 > primero con una regla de "enlace nodo↔nodo perdido".
 >
+> **Nota (actualizada 3)**: §1 también **implementado** (migración 0017):
+> los 6 evaluadores de §1.2 registrados en `EVALUATORS` (puros, mismos
+> patrones), `NetworkSnapshot` ampliado con `links`/`neighbors`/
+> `node_offline_after_seconds` + método `scoped_to_group`,
+> `AlertRule.group_id` (opción A de §1.3, sin FK — degradación segura si el
+> grupo desaparece), siembra INCREMENTAL por rule_type ausente, validación
+> API (reglas de pasarela no admiten grupo), UI con selector de ámbito y
+> chip de grupo. `correlation_key` §1.4 NO cambió: la reconciliación ya
+> deduplica por rule_id y una regla global y su variante por grupo tienen
+> rule_id distintos — el componente extra era innecesario. Con esto, todo
+> el documento está ejecutado.
+>
 > **Nota (actualizada 2)**: §2 completo **implementado** ("Mapa como centro
 > operativo", ver CLAUDE.md): tabla `node_neighbors` (migración 0013),
 > `SqlNeighborRepository`, persistencia en `IngestService._on_neighbors`,
 > `GET /nodes/{id}/neighbors` y `GET /topology`, capa "Malla real" en el
-> mapa. La regla `neighbor_link_lost` y el resto de §1 (motor de reglas
-> generalizado, `AlertRule.group_id`) siguen sin implementar — quedan como
-> siguiente paso natural ahora que hay datos reales de topología con los
-> que calibrar `duration_seconds`, tal como sugería el orden del §3.
+> mapa.
 >
 > **Nota (actualizada)**: parte del trabajo de decodificación que este
 > documento pide en §2.2 (`decode_neighborinfo`, evento `neighbors.seen`)

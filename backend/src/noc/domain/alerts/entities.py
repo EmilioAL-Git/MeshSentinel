@@ -22,6 +22,14 @@ class AlertRule:
     duration_seconds: int | None = None
     cooldown_seconds: int = 0  # 0 = sin recordatorios mientras siga firing
     params: dict[str, Any] = field(default_factory=dict)
+    # Reglas por grupo (motor-de-reglas-y-topologia.md §1.3, opción A):
+    # None = regla global; con valor, el motor la evalúa SOLO sobre los
+    # nodos miembros de ese grupo (umbral diferenciado por grupo).
+    group_id: int | None = None
+    # Canales lógicos a los que despachar (N:M vía alert_rule_channels, no es
+    # columna propia): vacío = broadcast a todos los proveedores enabled
+    # (compat con el comportamiento previo a esta ampliación).
+    channel_ids: list[int] = field(default_factory=list)
     id: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -51,12 +59,34 @@ class Alert:
 
 
 @dataclass(slots=True)
-class NotificationChannelConfig:
+class NotificationProviderConfig:
+    """Instancia de proveedor configurada (p.ej. "bot de Telegram del
+    equipo"). `provider` es un registro extensible por string (ver
+    noc.adapters.notifications.PROVIDERS)."""
+
     name: str
-    channel_type: str  # "webhook" | "ntfy" (registro extensible)
-    config: dict[str, Any] = field(default_factory=dict)
+    provider: str  # "webhook" | "ntfy" | "telegram" (registro extensible)
+    configuration: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
     id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class NotificationChannel:
+    """Canal LÓGICO que las reglas conocen (p.ej. "Operadores", "Guardia").
+
+    Agrupa 1+ proveedores; `provider_ids` se carga/guarda vía el repo
+    (tabla puente notification_channel_providers), no es una columna propia
+    — mismo patrón que tags/grupos de nodos (M1.2)."""
+
+    name: str
+    description: str | None = None
+    provider_ids: list[int] = field(default_factory=list)
+    id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 @dataclass(slots=True, frozen=True)

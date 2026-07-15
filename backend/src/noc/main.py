@@ -34,7 +34,7 @@ from noc.application.admin.batches import BatchService
 from noc.application.admin.profiles import ProfileService
 from noc.application.admin.service import AdminOperationService
 from noc.application.alerting.engine import AlertEngine, AlertEngineLoop, AlertTransition
-from noc.application.alerting.notifier import AlertNotifier
+from noc.application.alerting.dispatcher import NotificationDispatcher
 from noc.application.alerting.seed import seed_default_rules
 from noc.application.auth.service import AuthService
 from noc.application.dashboard import DashboardService
@@ -103,7 +103,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Motor de alertas (ADR 0012): listeners = notificador + WebSocket
     await seed_default_rules(app.state.db.session_factory, settings)
     engine = AlertEngine(app.state.db.session_factory)
-    engine.add_listener(AlertNotifier(app.state.db.session_factory))
+    engine.add_listener(NotificationDispatcher(app.state.db.session_factory))
     engine.add_listener(_ws_alert_broadcaster)
     # Diario operativo: narrativa de transiciones de alertas (la lógica de
     # detección vive SOLO en el motor; aquí solo se redacta)

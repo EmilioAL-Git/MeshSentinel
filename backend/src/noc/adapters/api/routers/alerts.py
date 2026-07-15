@@ -2,16 +2,18 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from noc.adapters.api.deps import RequireAuthDep, SessionDep
-from noc.adapters.notifications import CHANNEL_TYPES, build_channel
+from noc.application.alerting.evaluators import GROUP_SCOPE_UNSUPPORTED
+from noc.adapters.notifications import PROVIDERS, build_provider
 from noc.adapters.persistence.alert_repositories import (
     SqlAlertRepository,
     SqlAlertRuleRepository,
-    SqlChannelRepository,
+    SqlNotificationChannelRepository,
+    SqlNotificationProviderRepository,
 )
-from noc.domain.alerts.entities import Alert, AlertRule, NotificationChannelConfig
+from noc.domain.alerts.entities import Alert, AlertRule, NotificationChannel, NotificationProviderConfig
 
 router = APIRouter(tags=["alerting"])
 
@@ -44,13 +46,36 @@ class AckIn(BaseModel):
 
 class RuleIn(BaseModel):
     name: str = Field(max_length=128)
-    rule_type: Literal["low_battery", "node_offline", "snr_degraded", "gateway_disconnected"]
+    rule_type: Literal[
+        "low_battery",
+        "node_offline",
+        "snr_degraded",
+        "gateway_disconnected",
+        "gateway_no_traffic",
+        "low_redundancy",
+        "temperature_high",
+        "channel_utilization_high",
+        "position_lost",
+        "neighbor_link_lost",
+    ]
     severity: Literal["INFO", "WARNING", "CRITICAL"]
     enabled: bool = True
     threshold: float | None = None
     duration_seconds: int | None = Field(default=None, ge=1)
     cooldown_seconds: int = Field(default=0, ge=0)
     params: dict[str, Any] = {}
+    channel_ids: list[int] = []
+    # Reglas por grupo (§1.3 opción A): None = global. Las reglas cuyo
+    # sujeto son pasarelas no admiten grupo (GROUP_SCOPE_UNSUPPORTED).
+    group_id: int | None = None
+
+    @model_validator(mode="after")
+    def _group_scope_supported(self) -> "RuleIn":
+        if self.group_id is not None and self.rule_type in GROUP_SCOPE_UNSUPPORTED:
+            raise ValueError(
+                f"rule_type '{self.rule_type}' no admite escopado por grupo (sujeto: pasarela)"
+            )
+        return self
 
 
 class RulePatch(BaseModel):
@@ -61,6 +86,7 @@ class RulePatch(BaseModel):
     duration_seconds: int | None = Field(default=None, ge=1)
     cooldown_seconds: int | None = Field(default=None, ge=0)
     params: dict[str, Any] | None = None
+    channel_ids: list[int] | None = None
 
 
 class RuleOut(RuleIn):
@@ -73,24 +99,55 @@ class RuleOut(RuleIn):
         return cls(**{f: getattr(r, f) for f in cls.model_fields})
 
 
+class ProviderIn(BaseModel):
+    name: str = Field(max_length=128)
+    provider: str = Field(max_length=32)
+    configuration: dict[str, Any]
+    enabled: bool = True
+
+
+class ProviderPatch(BaseModel):
+    name: str | None = Field(default=None, max_length=128)
+    configuration: dict[str, Any] | None = None
+    enabled: bool | None = None
+
+
+class ProviderOut(BaseModel):
+    id: int
+    name: str
+    provider: str
+    configuration: dict[str, Any]
+    enabled: bool
+    created_at: datetime | None
+    updated_at: datetime | None
+
+    @classmethod
+    def from_entity(cls, c: NotificationProviderConfig) -> "ProviderOut":
+        return cls(**{f: getattr(c, f) for f in cls.model_fields})
+
+
 class ChannelIn(BaseModel):
     name: str = Field(max_length=128)
-    channel_type: Literal["webhook", "ntfy"]
-    config: dict[str, Any]
-    enabled: bool = True
+    description: str | None = None
+    provider_ids: list[int] = []
 
 
 class ChannelPatch(BaseModel):
     name: str | None = Field(default=None, max_length=128)
-    config: dict[str, Any] | None = None
-    enabled: bool | None = None
+    description: str | None = None
+    provider_ids: list[int] | None = None
 
 
-class ChannelOut(ChannelIn):
+class ChannelOut(BaseModel):
     id: int
+    name: str
+    description: str | None
+    provider_ids: list[int]
+    created_at: datetime | None
+    updated_at: datetime | None
 
     @classmethod
-    def from_entity(cls, c: NotificationChannelConfig) -> "ChannelOut":
+    def from_entity(cls, c: NotificationChannel) -> "ChannelOut":
         return cls(**{f: getattr(c, f) for f in cls.model_fields})
 
 
@@ -168,67 +225,128 @@ async def delete_rule(rule_id: int, session: SessionDep, _user: RequireAuthDep) 
         raise HTTPException(status_code=404, detail="Rule not found")
 
 
-# En modo protegido, crear/editar/borrar reglas y canales exige sesión
-# (los canales además hacen que el backend haga POST a URLs arbitrarias).
-# El ACK de alertas queda abierto a propósito: es triaje, no configuración.
-# ── Canales ──────────────────────────────────────────────────────────────────
+# En modo protegido, crear/editar/borrar reglas, integraciones y canales
+# exige sesión (las integraciones además hacen que el backend haga POST a
+# URLs/APIs arbitrarias). El ACK de alertas queda abierto a propósito: es
+# triaje, no configuración.
+# ── Integraciones (instancias de proveedor) ─────────────────────────────────
 
 
-@router.get("/channels", response_model=list[ChannelOut])
+@router.get("/notification-providers", response_model=list[ProviderOut])
+async def list_providers(session: SessionDep) -> list[ProviderOut]:
+    providers = await SqlNotificationProviderRepository(session).list_all()
+    return [ProviderOut.from_entity(p) for p in providers]
+
+
+@router.post("/notification-providers", response_model=ProviderOut, status_code=201)
+async def create_provider(body: ProviderIn, session: SessionDep, _user: RequireAuthDep) -> ProviderOut:
+    if body.provider not in PROVIDERS:
+        raise HTTPException(status_code=422, detail=f"Unknown provider: {body.provider}")
+    errors = build_provider(NotificationProviderConfig(**body.model_dump())).validate()
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+    async with session.begin():
+        provider = await SqlNotificationProviderRepository(session).create(
+            NotificationProviderConfig(**body.model_dump())
+        )
+    return ProviderOut.from_entity(provider)
+
+
+@router.patch("/notification-providers/{provider_id}", response_model=ProviderOut)
+async def update_provider(
+    provider_id: int, body: ProviderPatch, session: SessionDep, _user: RequireAuthDep
+) -> ProviderOut:
+    if body.configuration is not None:
+        current = await SqlNotificationProviderRepository(session).get(provider_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Provider not found")
+        errors = build_provider(
+            NotificationProviderConfig(name=current.name, provider=current.provider, configuration=body.configuration)
+        ).validate()
+        if errors:
+            raise HTTPException(status_code=422, detail=errors)
+    async with session.begin():
+        provider = await SqlNotificationProviderRepository(session).update(
+            provider_id, body.model_dump(exclude_unset=True)
+        )
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return ProviderOut.from_entity(provider)
+
+
+@router.delete("/notification-providers/{provider_id}", status_code=204)
+async def delete_provider(provider_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
+    async with session.begin():
+        deleted = await SqlNotificationProviderRepository(session).delete(provider_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+
+@router.post("/notification-providers/{provider_id}/test")
+async def test_provider(provider_id: int, session: SessionDep, _user: RequireAuthDep) -> dict[str, str]:
+    config = await SqlNotificationProviderRepository(session).get(provider_id)
+    if config is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    provider = build_provider(config)
+    if provider is None:
+        raise HTTPException(status_code=422, detail=f"Unknown provider: {config.provider}")
+    try:
+        await provider.test()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Provider test failed: {exc}") from exc
+    return {"status": "sent"}
+
+
+@router.post("/notification-providers/{provider_id}/duplicate", response_model=ProviderOut, status_code=201)
+async def duplicate_provider(provider_id: int, session: SessionDep, _user: RequireAuthDep) -> ProviderOut:
+    async with session.begin():
+        repo = SqlNotificationProviderRepository(session)
+        source = await repo.get(provider_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Provider not found")
+        duplicate = await repo.create(
+            NotificationProviderConfig(
+                name=f"{source.name} (copia)",
+                provider=source.provider,
+                configuration=source.configuration,
+                enabled=source.enabled,
+            )
+        )
+    return ProviderOut.from_entity(duplicate)
+
+
+# ── Canales (agrupación lógica) ──────────────────────────────────────────────
+
+
+@router.get("/notification-channels", response_model=list[ChannelOut])
 async def list_channels(session: SessionDep) -> list[ChannelOut]:
-    channels = await SqlChannelRepository(session).list_all()
+    channels = await SqlNotificationChannelRepository(session).list_all()
     return [ChannelOut.from_entity(c) for c in channels]
 
 
-@router.post("/channels", response_model=ChannelOut, status_code=201)
+@router.post("/notification-channels", response_model=ChannelOut, status_code=201)
 async def create_channel(body: ChannelIn, session: SessionDep, _user: RequireAuthDep) -> ChannelOut:
-    if body.channel_type not in CHANNEL_TYPES:
-        raise HTTPException(status_code=422, detail=f"Unknown channel_type: {body.channel_type}")
     async with session.begin():
-        channel = await SqlChannelRepository(session).create(
-            NotificationChannelConfig(**body.model_dump())
-        )
+        channel = await SqlNotificationChannelRepository(session).create(NotificationChannel(**body.model_dump()))
     return ChannelOut.from_entity(channel)
 
 
-@router.patch("/channels/{channel_id}", response_model=ChannelOut)
-async def update_channel(channel_id: int, body: ChannelPatch, session: SessionDep, _user: RequireAuthDep) -> ChannelOut:
+@router.patch("/notification-channels/{channel_id}", response_model=ChannelOut)
+async def update_channel(
+    channel_id: int, body: ChannelPatch, session: SessionDep, _user: RequireAuthDep
+) -> ChannelOut:
     async with session.begin():
-        channel = await SqlChannelRepository(session).update(channel_id, body.model_dump(exclude_unset=True))
+        channel = await SqlNotificationChannelRepository(session).update(
+            channel_id, body.model_dump(exclude_unset=True)
+        )
     if channel is None:
         raise HTTPException(status_code=404, detail="Channel not found")
     return ChannelOut.from_entity(channel)
 
 
-@router.delete("/channels/{channel_id}", status_code=204)
+@router.delete("/notification-channels/{channel_id}", status_code=204)
 async def delete_channel(channel_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
     async with session.begin():
-        deleted = await SqlChannelRepository(session).delete(channel_id)
+        deleted = await SqlNotificationChannelRepository(session).delete(channel_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Channel not found")
-
-
-@router.post("/channels/{channel_id}/test")
-async def test_channel(channel_id: int, session: SessionDep, _user: RequireAuthDep) -> dict[str, str]:
-    config = await SqlChannelRepository(session).get(channel_id)
-    if config is None:
-        raise HTTPException(status_code=404, detail="Channel not found")
-    channel = build_channel(config)
-    if channel is None:
-        raise HTTPException(status_code=422, detail=f"Unknown channel_type: {config.channel_type}")
-    from datetime import timezone
-
-    test_alert = Alert(
-        rule_id=0,
-        rule_name="Prueba de canal",
-        subject_type="system",
-        subject_id="noc",
-        severity="INFO",
-        message=f"Mensaje de prueba del canal '{config.name}' — Meshtastic NOC",
-        fired_at=datetime.now(timezone.utc),
-    )
-    try:
-        await channel.send(test_alert, "test")
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Channel test failed: {exc}") from exc
-    return {"status": "sent"}

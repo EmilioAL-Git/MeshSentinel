@@ -1,15 +1,18 @@
-from noc.adapters.notifications.ntfy import NtfyChannel
-from noc.adapters.notifications.webhook import WebhookChannel
-from noc.application.alerting.ports import NotificationChannel
-from noc.domain.alerts.entities import NotificationChannelConfig
+from noc.adapters.notifications.ntfy import NtfyProvider
+from noc.adapters.notifications.telegram import TelegramProvider
+from noc.adapters.notifications.webhook import WebhookProvider
+from noc.application.alerting.ports import NotificationProvider
+from noc.domain.alerts.entities import NotificationProviderConfig
 
-# Registro extensible: añadir un canal = una entrada nueva (ADR 0008/0012)
-CHANNEL_TYPES: dict[str, type] = {
-    "webhook": WebhookChannel,
-    "ntfy": NtfyChannel,
+# Registro extensible: añadir un proveedor = una entrada nueva (ADR 0008/0012,
+# ampliado por la arquitectura multi-proveedor).
+PROVIDERS: dict[str, type] = {
+    "webhook": WebhookProvider,
+    "ntfy": NtfyProvider,
+    "telegram": TelegramProvider,
 }
 
 
-def build_channel(config: NotificationChannelConfig) -> NotificationChannel | None:
-    cls = CHANNEL_TYPES.get(config.channel_type)
-    return cls(config.config) if cls else None
+def build_provider(config: NotificationProviderConfig) -> NotificationProvider | None:
+    cls = PROVIDERS.get(config.provider)
+    return cls(config.configuration) if cls else None

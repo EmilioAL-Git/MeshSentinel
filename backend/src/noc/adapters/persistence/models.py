@@ -180,6 +180,10 @@ class AlertRuleModel(Base):
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     cooldown_seconds: Mapped[int] = mapped_column(Integer, default=0)
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Reglas por grupo (§1.3 opción A): sin FK, mismo criterio que
+    # nodes.preferred_gateway_id — un grupo borrado deja la regla sin
+    # coincidencias (degradación segura), nunca un error de integridad.
+    group_id: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -290,14 +294,55 @@ class ConfigProfileVersionModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class NotificationProviderModel(Base):
+    """Instancia de proveedor configurada (antes "notification_channels" /
+    canal_type — renombrado al introducir el canal LÓGICO, ver
+    NotificationChannelModel más abajo)."""
+
+    __tablename__ = "notification_providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class NotificationChannelModel(Base):
+    """Canal LÓGICO (p.ej. "Operadores", "Guardia") que las reglas conocen.
+    Agrupa 1+ proveedores vía notification_channel_providers."""
+
     __tablename__ = "notification_channels"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
-    channel_type: Mapped[str] = mapped_column(String(32))
-    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationChannelProviderModel(Base):
+    __tablename__ = "notification_channel_providers"
+
+    channel_id: Mapped[int] = mapped_column(
+        ForeignKey("notification_channels.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider_id: Mapped[int] = mapped_column(
+        ForeignKey("notification_providers.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class AlertRuleChannelModel(Base):
+    __tablename__ = "alert_rule_channels"
+
+    rule_id: Mapped[int] = mapped_column(
+        ForeignKey("alert_rules.id", ondelete="CASCADE"), primary_key=True
+    )
+    channel_id: Mapped[int] = mapped_column(
+        ForeignKey("notification_channels.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class ActivityLogModel(Base):

@@ -1,13 +1,22 @@
 from typing import Protocol
 
-from noc.domain.alerts.entities import Alert
+from noc.application.alerting.message import NotificationMessage
 
 
-class NotificationChannel(Protocol):
-    """Puerto de canal de notificación (ADR 0008).
+class NotificationProvider(Protocol):
+    """Puerto de proveedor de notificación (ADR 0008, ampliado — ver ADR de
+    notificaciones multi-proveedor).
 
-    kind: "fired" | "resolved" | "reminder" | "test".
     Las implementaciones viven en noc.adapters.notifications.
     """
 
-    async def send(self, alert: Alert, kind: str) -> None: ...
+    async def send(self, message: NotificationMessage) -> None: ...
+
+    async def test(self) -> None:
+        """Envía un mensaje de prueba canned (`message.test_message()`)."""
+        ...
+
+    def validate(self) -> list[str]:
+        """Errores de configuración (vacía = válida). Síncrona: solo mira la
+        forma de `configuration`, no hace I/O de red."""
+        ...

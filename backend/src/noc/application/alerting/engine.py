@@ -10,20 +10,31 @@ Desacoplado por diseño:
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from noc.adapters.persistence.alert_repositories import SqlAlertRepository, SqlAlertRuleRepository
-from noc.adapters.persistence.repositories import SqlGatewayRepository, SqlNodeRepository
+from noc.adapters.persistence.repositories import (
+    SqlGatewayRepository,
+    SqlNeighborRepository,
+    SqlNodeGatewayLinkRepository,
+    SqlNodeRepository,
+)
 from noc.application.alerting.evaluators import EVALUATORS, NetworkSnapshot
 from noc.application.dashboard import ensure_utc
+from noc.config import get_settings
 from noc.domain.alerts.entities import Alert, AlertCondition, AlertRule
 
 logger = logging.getLogger("noc.alerts")
 
 TransitionKind = Literal["fired", "resolved", "reminder"]
+
+# Ventana de carga de node_neighbors para el snapshot: un enlace perdido hace
+# más de esto desaparece del snapshot y su alerta neighbor_link_lost se
+# auto-resuelve (la tabla append-only lo conserva; solo acota la evaluación).
+NEIGHBOR_SNAPSHOT_WINDOW = timedelta(days=7)
 
 
 @dataclass(slots=True, frozen=True)
@@ -57,6 +68,7 @@ class AlertEngine:
 
     async def evaluate_once(self) -> list[AlertTransition]:
         """Evalúa todas las reglas habilitadas contra el estado actual."""
+        settings = get_settings()
         async with self._session_factory() as session:
             rules = await SqlAlertRuleRepository(session).list_enabled()
             snapshot = NetworkSnapshot(
@@ -66,6 +78,11 @@ class AlertEngine:
                     x for x in await SqlNodeRepository(session).list_summaries() if not x.node.is_ignored
                 ],
                 gateways=await SqlGatewayRepository(session).list_all(),
+                links=await SqlNodeGatewayLinkRepository(session).list_all(),
+                neighbors=await SqlNeighborRepository(session).list_latest_network(
+                    since=datetime.now(timezone.utc) - NEIGHBOR_SNAPSHOT_WINDOW
+                ),
+                node_offline_after_seconds=settings.node_offline_after_seconds,
             )
 
         transitions: list[AlertTransition] = []
@@ -74,7 +91,11 @@ class AlertEngine:
             if evaluator is None:
                 logger.warning("No evaluator for rule_type=%s (rule=%s)", rule.rule_type, rule.name)
                 continue
-            conditions = evaluator(rule, snapshot)
+            # Reglas por grupo (§1.3 opción A): mismo evaluador, snapshot
+            # pre-filtrado a los miembros. Un grupo borrado/vacío = cero
+            # coincidencias y sus alertas se auto-resuelven.
+            scope = snapshot if rule.group_id is None else snapshot.scoped_to_group(rule.group_id)
+            conditions = evaluator(rule, scope)
             transitions.extend(await self.reconcile_rule(rule, conditions, snapshot.now))
 
         for t in transitions:

@@ -418,14 +418,35 @@ export interface AlertRuleOut {
   duration_seconds: number | null;
   cooldown_seconds: number;
   params: Record<string, unknown>;
+  /** Reglas por grupo (§1.3): null = regla global. Solo se fija al crear. */
+  group_id: number | null;
+  /** Canales lógicos a los que despacha esta regla; vacío = todas las
+   * integraciones activas (broadcast, comportamiento por defecto). */
+  channel_ids: number[];
 }
 
+/** Instancia de proveedor configurada — "Integración" en la UI (antes
+ * "canal" en el backend de Fase 3C; el nombre cambió al introducir el
+ * Canal lógico, ver ChannelOut más abajo). */
+export interface ProviderOut {
+  id: number;
+  name: string;
+  provider: string;
+  configuration: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** Canal lógico (p.ej. "Operadores", "Guardia") que agrupa 1+ integraciones
+ * y al que las reglas pueden apuntar. */
 export interface ChannelOut {
   id: number;
   name: string;
-  channel_type: "webhook" | "ntfy";
-  config: Record<string, unknown>;
-  enabled: boolean;
+  description: string | null;
+  provider_ids: number[];
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -461,12 +482,23 @@ export const createAlertRule = (body: Omit<AlertRuleOut, "id">) => send<AlertRul
 export const patchAlertRule = (id: number, changes: Partial<AlertRuleOut>) =>
   send<AlertRuleOut>("PATCH", `/alert-rules/${id}`, changes);
 export const deleteAlertRule = (id: number) => send<void>("DELETE", `/alert-rules/${id}`);
-export const fetchChannels = () => get<ChannelOut[]>("/channels");
-export const createChannel = (body: Omit<ChannelOut, "id">) => send<ChannelOut>("POST", "/channels", body);
-export const patchChannel = (id: number, changes: Partial<Omit<ChannelOut, "id" | "channel_type">>) =>
-  send<ChannelOut>("PATCH", `/channels/${id}`, changes);
-export const deleteChannel = (id: number) => send<void>("DELETE", `/channels/${id}`);
-export const testChannel = (id: number) => send<{ status: string }>("POST", `/channels/${id}/test`);
+// ── Integraciones (instancias de proveedor: webhook/ntfy/telegram) ─────────
+export const fetchProviders = () => get<ProviderOut[]>("/notification-providers");
+export const createProvider = (body: { name: string; provider: string; configuration: Record<string, unknown>; enabled: boolean }) =>
+  send<ProviderOut>("POST", "/notification-providers", body);
+export const patchProvider = (id: number, changes: Partial<Pick<ProviderOut, "name" | "configuration" | "enabled">>) =>
+  send<ProviderOut>("PATCH", `/notification-providers/${id}`, changes);
+export const deleteProvider = (id: number) => send<void>("DELETE", `/notification-providers/${id}`);
+export const testProvider = (id: number) => send<{ status: string }>("POST", `/notification-providers/${id}/test`);
+export const duplicateProvider = (id: number) => send<ProviderOut>("POST", `/notification-providers/${id}/duplicate`);
+
+// ── Canales lógicos (agrupan integraciones; las reglas apuntan a estos) ────
+export const fetchChannels = () => get<ChannelOut[]>("/notification-channels");
+export const createChannel = (body: { name: string; description?: string | null; provider_ids: number[] }) =>
+  send<ChannelOut>("POST", "/notification-channels", body);
+export const patchChannel = (id: number, changes: Partial<Pick<ChannelOut, "name" | "description" | "provider_ids">>) =>
+  send<ChannelOut>("PATCH", `/notification-channels/${id}`, changes);
+export const deleteChannel = (id: number) => send<void>("DELETE", `/notification-channels/${id}`);
 
 export type OperationStatus =
   | "pending"
