@@ -19,6 +19,7 @@ from noc.adapters.api.routers import (
     health,
     nodes,
     organization,
+    settings as settings_router,
     system,
     topology,
 )
@@ -27,6 +28,7 @@ from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
 from noc.adapters.persistence.repositories import SqlNodeRepository
+from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.activity import activity
 from noc.application.activity_events import render_alert_transition
 from noc.application.activity_log import ActivityLogWriter
@@ -41,6 +43,7 @@ from noc.application.dashboard import DashboardService
 from noc.application.envelopes import make_event_envelope
 from noc.application.gateways.service import GatewayService
 from noc.application.ingest import IngestService
+from noc.application.settings_registry import apply_overrides
 from noc.config import get_settings
 
 logger = logging.getLogger("noc")
@@ -52,6 +55,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logging.basicConfig(level=settings.log_level)
 
     app.state.db = Database(settings.database_url)
+    # Ajustes (panel "Ajustes"): overrides guardados en BD se aplican AHORA,
+    # antes de construir cualquier servicio — todos comparten la misma
+    # instancia de Settings (get_settings() es @lru_cache), así que un cambio
+    # posterior desde la API (PATCH /settings) se ve al instante sin reiniciar.
+    async with app.state.db.session_factory() as _settings_session:
+        overrides = await SqlSystemSettingsRepository(_settings_session).list_all()
+    apply_overrides(settings, overrides)
     app.state.dashboard = DashboardService(app.state.db.session_factory, settings)
     app.state.event_bus = RedisEventBus(settings.redis_url, settings.events_channel)
     # Autenticación: cookie de sesión opaca + rate limit de login sobre Redis
@@ -200,6 +210,7 @@ def create_app() -> FastAPI:
     app.include_router(activity_router.router, prefix=settings.api_v1_prefix)
     app.include_router(chat.router, prefix=settings.api_v1_prefix)
     app.include_router(topology.router, prefix=settings.api_v1_prefix)
+    app.include_router(settings_router.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app
 

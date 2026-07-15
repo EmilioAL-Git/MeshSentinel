@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     admin_default_timeout_seconds: int = 120
     admin_max_attempts: int = 3
     admin_scheduler_interval_seconds: float = 2.0
+    # Gracia antes de dar por colgada una operación en vuelo sin respuesta
+    admin_watchdog_grace_seconds: int = 30
+    # Backoff de reintento por fallo: base * 2^(intentos-1), tope en el máximo
+    admin_retry_base_seconds: int = 10
+    admin_retry_max_seconds: int = 300
+    # ADR 0019 errata 4: pausa fija (no backoff) antes de un reenvío
+    # redundante de favorito/ignorado remoto ya "confirmado" por ACK aislado
+    admin_redundant_resend_seconds: int = 5
 
     # ── Registro persistente (hardening) ─────────────────────────────
     # Tope de filas de activity_log: el escritor poda las más antiguas al

@@ -37,6 +37,7 @@ import { OpsCenter } from "./components/opscenter/OpsCenter";
 import { LoginLogView } from "./components/LoginLogView";
 import { ProfilesView } from "./components/ProfilesView";
 import { UsersView } from "./components/UsersView";
+import { SettingsView } from "./components/SettingsView";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { FocusChip, type FocusState } from "./components/shell/FocusChip";
 import { GroupSelector } from "./components/shell/GroupSelector";
@@ -77,7 +78,8 @@ type View =
   | "activity"
   | "gateways"
   | "users"
-  | "login-log";
+  | "login-log"
+  | "settings";
 
 /**
  * Workspaces (identidad v0.8): no hay "páginas" — el riel de navegación
@@ -99,6 +101,9 @@ const VIEWS: { id: View; label: string; icon: string }[] = [
   // usuario); "Accesos" solo tiene sentido estando autenticado.
   { id: "users", label: "Usuarios", icon: "👤" },
   { id: "login-log", label: "Accesos", icon: "🔑" },
+  // Panel "Ajustes": umbrales operacionales editables sin redeploy — mismo
+  // criterio de visibilidad que Usuarios (RequireAdminDep en el backend).
+  { id: "settings", label: "Ajustes", icon: "🎚" },
 ];
 
 /** Ids históricos (componentes/documentos antiguos): siguen navegando bien. */
@@ -446,7 +451,7 @@ export default function App() {
   const hasCritAlert = (alertCounts.data?.critical_active ?? 0) > 0;
   const activeOpsCount = operationCounts.data?.active ?? 0;
   const railItems = VIEWS.filter((v) => {
-    if (v.id === "users") return !authState.protectedMode || authState.isAdmin;
+    if (v.id === "users" || v.id === "settings") return !authState.protectedMode || authState.isAdmin;
     if (v.id === "login-log") return authState.isAuthenticated;
     return true;
   }).map((v) => ({
@@ -708,6 +713,14 @@ export default function App() {
             <div className="ws">
               <div className="ws-scroll">
                 <LoginLogView />
+              </div>
+            </div>
+          )}
+
+          {view === "settings" && (
+            <div className="ws">
+              <div className="ws-scroll">
+                <SettingsView />
               </div>
             </div>
           )}

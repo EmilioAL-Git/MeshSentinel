@@ -26,16 +26,17 @@ from noc.domain.admin.entities import AdminOperation
 
 logger = logging.getLogger("noc.admin")
 
-WATCHDOG_GRACE_SECONDS = 30
+# Defaults de fábrica (ver Settings.admin_retry_base_seconds/admin_retry_max_seconds,
+# ahora editables en Ajustes); se conservan como fallback de retry_delay_seconds
+# para no romper su firma de función pura usada directamente en tests.
 RETRY_BASE_SECONDS = 10
 RETRY_MAX_SECONDS = 300
-# ADR 0019 errata 4: pausa fija (no exponencial: no es un reintento por
-# error) antes de un reenvío redundante de favorito/ignorado ya "confirmado".
-REDUNDANT_RESEND_SECONDS = 5
 
 
-def retry_delay_seconds(attempts: int) -> float:
-    return min(RETRY_BASE_SECONDS * (2 ** max(attempts - 1, 0)), RETRY_MAX_SECONDS)
+def retry_delay_seconds(
+    attempts: int, base_seconds: float = RETRY_BASE_SECONDS, max_seconds: float = RETRY_MAX_SECONDS
+) -> float:
+    return min(base_seconds * (2 ** max(attempts - 1, 0)), max_seconds)
 
 
 class AdminOperationService:
@@ -87,7 +88,7 @@ class AdminOperationService:
     async def _expire_stuck(self, now: datetime) -> None:
         async with self._session_factory() as session, session.begin():
             repo = SqlAdminOperationRepository(session)
-            for op in await repo.list_expired_in_flight(now, WATCHDOG_GRACE_SECONDS):
+            for op in await repo.list_expired_in_flight(now, self._settings.admin_watchdog_grace_seconds):
                 logger.warning("admin.op watchdog timeout id=%s node=%s", op.id, op.target_node_id)
                 await self._apply_failure(
                     repo, op, "timeout", "watchdog: no result from gateway", now, session
@@ -146,7 +147,7 @@ class AdminOperationService:
                 result = payload.get("result")
                 status = self._map_success_status(result)
                 if self._should_redundant_resend(op, status):
-                    delay = REDUNDANT_RESEND_SECONDS
+                    delay = self._settings.admin_redundant_resend_seconds
                     await repo.update_fields(
                         op_id,
                         {"status": "pending", "result": result, "next_attempt_at": now + timedelta(seconds=delay)},
@@ -217,7 +218,9 @@ class AdminOperationService:
         session: Any = None,
     ) -> None:
         if op.attempts < op.max_attempts:
-            delay = retry_delay_seconds(op.attempts)
+            delay = retry_delay_seconds(
+                op.attempts, self._settings.admin_retry_base_seconds, self._settings.admin_retry_max_seconds
+            )
             await repo.update_fields(
                 op.id or 0,
                 {

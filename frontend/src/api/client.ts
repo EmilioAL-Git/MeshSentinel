@@ -1118,3 +1118,24 @@ export interface LoginLogEntryOut {
 
 export const fetchLoginLog = (limit = 100, beforeId?: number | null) =>
   get<LoginLogEntryOut[]>(`/auth/login-log?limit=${limit}${beforeId != null ? `&before_id=${beforeId}` : ""}`);
+
+// ── Ajustes (umbrales operacionales editables sin redeploy, solo admin) ────
+
+export interface SettingOut {
+  key: string;
+  category: string;
+  category_label: string;
+  label: string;
+  description: string;
+  value_type: "int" | "float";
+  unit: string | null;
+  min_value: number | null;
+  default_value: number;
+  value: number;
+  overridden: boolean;
+}
+
+export const fetchSettings = () => get<SettingOut[]>("/settings");
+export const patchSetting = (key: string, value: number) =>
+  send<SettingOut>("PATCH", `/settings/${encodeURIComponent(key)}`, { value });
+export const resetSetting = (key: string) => send<SettingOut>("DELETE", `/settings/${encodeURIComponent(key)}`);

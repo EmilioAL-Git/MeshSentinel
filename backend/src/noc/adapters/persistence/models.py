@@ -488,3 +488,18 @@ class AuthLoginLogModel(Base):
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class SystemSettingModel(Base):
+    """Override en BD de un campo tunable de `noc.config.Settings` (panel
+    Ajustes). Solo existen filas para claves explícitamente modificadas por
+    un operador — ausencia de fila = usar el default de `Settings` (env/
+    literal). `key` es el nombre del campo en `Settings`, validado contra
+    `settings_registry.SETTINGS_REGISTRY` antes de escribir."""
+
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[Any] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
