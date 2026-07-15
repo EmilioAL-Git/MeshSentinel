@@ -469,7 +469,17 @@ export function Inspector({
               background: focusActive ? t.accentTint : "transparent",
             }}
             title={focusActive ? "Salir de Focus" : "Enfocar: el mapa, la actividad y los trabajos priorizan este nodo (nada se oculta)"}
-            onClick={onToggleFocus}
+            onClick={() => {
+              // El tooltip nativo (hover) apenas se descubre — al activar
+              // Focus, explicarlo también por toast (pedido del usuario).
+              if (!focusActive) {
+                toast(
+                  `Focus activado en ${n?.short_name ?? nodeId}: el mapa lo resalta (y atenúa el resto salvo alertas), ` +
+                    "la Actividad y los Trabajos lo priorizan arriba — nada se oculta. Pulsa ◎ otra vez para salir.",
+                );
+              }
+              onToggleFocus();
+            }}
           >
             ◎
           </button>

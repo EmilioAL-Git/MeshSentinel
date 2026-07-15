@@ -92,6 +92,25 @@ export function FloatingWindow({
 
   const dragState = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
   const resizeState = useRef<{ startX: number; startY: number; origW: number; origH: number; edge: "e" | "s" | "se" } | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Clic fuera de la ventana = cerrarla (pedido explícito del usuario: antes
+  // era intencionalmente no-modal — el velo de fondo no bloquea clics — pero
+  // sin esto la única forma de cerrar era la ✕/Esc). `pointerdown` en fase de
+  // captura: se dispara ANTES que el `onClick` de un marcador/fila que abra
+  // OTRO nodo, así que abrir un nodo distinto cierra y reabre con el nuevo
+  // sin quedar "atascado" cerrado.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
 
   const onHeaderPointerDown = useCallback((e: ReactPointerEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;
@@ -189,7 +208,7 @@ export function FloatingWindow({
   return createPortal(
     <>
       <div style={backdropStyle} />
-      <div className="panel" style={windowStyle}>
+      <div ref={panelRef} className="panel" style={windowStyle}>
       <div
         className="panel-head"
         style={{ cursor: "grab", touchAction: "none" }}
