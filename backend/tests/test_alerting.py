@@ -309,6 +309,20 @@ def test_group_scoped_snapshot_filters_members():
     assert len(EVALUATORS["low_battery"](AlertRule(id=2, name="b2", rule_type="low_battery", severity="WARNING", threshold=20), snap)) == 2
 
 
+def test_node_scoped_snapshot_filters_single_node():
+    snap = NetworkSnapshot(
+        summaries=[
+            _summary("!00000001", battery_level=5),
+            _summary("!00000002", battery_level=5),
+        ]
+    )
+    rule = AlertRule(id=1, name="b", rule_type="low_battery", severity="WARNING", threshold=20, node_id="!00000001")
+    conds = EVALUATORS["low_battery"](rule, snap.scoped_to_node("!00000001"))
+    assert [c.subject_id for c in conds] == ["!00000001"]
+    # Nodo inexistente -> cero coincidencias (degradación segura)
+    assert EVALUATORS["low_battery"](rule, snap.scoped_to_node("!ffffffff")) == []
+
+
 async def test_group_rule_end_to_end(session_factory):
     """Regla por grupo en el engine real: solo alerta a los miembros."""
     from noc.adapters.persistence.organization_repositories import SqlGroupRepository

@@ -26,6 +26,10 @@ class AlertRule:
     # None = regla global; con valor, el motor la evalúa SOLO sobre los
     # nodos miembros de ese grupo (umbral diferenciado por grupo).
     group_id: int | None = None
+    # Reglas por nodo individual: mutuamente excluyente con group_id
+    # (validado en la API) — vigilar un solo nodo en vez de toda la red o
+    # un grupo.
+    node_id: str | None = None
     # Canales lógicos a los que despachar (N:M vía alert_rule_channels, no es
     # columna propia): vacío = broadcast a todos los proveedores enabled
     # (compat con el comportamiento previo a esta ampliación).

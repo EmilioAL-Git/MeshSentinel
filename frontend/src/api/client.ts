@@ -420,6 +420,9 @@ export interface AlertRuleOut {
   params: Record<string, unknown>;
   /** Reglas por grupo (§1.3): null = regla global. Solo se fija al crear. */
   group_id: number | null;
+  /** Reglas por nodo individual: mutuamente excluyente con group_id. Solo
+   * se fija al crear (igual que group_id). */
+  node_id: string | null;
   /** Canales lógicos a los que despacha esta regla; vacío = todas las
    * integraciones activas (broadcast, comportamiento por defecto). */
   channel_ids: number[];

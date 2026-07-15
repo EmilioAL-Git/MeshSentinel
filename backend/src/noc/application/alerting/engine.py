@@ -91,10 +91,16 @@ class AlertEngine:
             if evaluator is None:
                 logger.warning("No evaluator for rule_type=%s (rule=%s)", rule.rule_type, rule.name)
                 continue
-            # Reglas por grupo (§1.3 opción A): mismo evaluador, snapshot
-            # pre-filtrado a los miembros. Un grupo borrado/vacío = cero
-            # coincidencias y sus alertas se auto-resuelven.
-            scope = snapshot if rule.group_id is None else snapshot.scoped_to_group(rule.group_id)
+            # Reglas por grupo o por nodo individual (§1.3 opción A,
+            # ampliada): mismo evaluador, snapshot pre-filtrado. Mutuamente
+            # excluyentes (validado en la API); un grupo/nodo borrado =
+            # cero coincidencias y sus alertas se auto-resuelven.
+            if rule.node_id is not None:
+                scope = snapshot.scoped_to_node(rule.node_id)
+            elif rule.group_id is not None:
+                scope = snapshot.scoped_to_group(rule.group_id)
+            else:
+                scope = snapshot
             conditions = evaluator(rule, scope)
             transitions.extend(await self.reconcile_rule(rule, conditions, snapshot.now))
 

@@ -65,15 +65,20 @@ class RuleIn(BaseModel):
     cooldown_seconds: int = Field(default=0, ge=0)
     params: dict[str, Any] = {}
     channel_ids: list[int] = []
-    # Reglas por grupo (§1.3 opción A): None = global. Las reglas cuyo
-    # sujeto son pasarelas no admiten grupo (GROUP_SCOPE_UNSUPPORTED).
+    # Ámbito de la regla (§1.3 opción A, ampliada): None/None = toda la red.
+    # group_id = un grupo de nodos; node_id = un único nodo. Mutuamente
+    # excluyentes; ninguno de los dos se admite en reglas cuyo sujeto son
+    # pasarelas (GROUP_SCOPE_UNSUPPORTED).
     group_id: int | None = None
+    node_id: str | None = None
 
     @model_validator(mode="after")
-    def _group_scope_supported(self) -> "RuleIn":
-        if self.group_id is not None and self.rule_type in GROUP_SCOPE_UNSUPPORTED:
+    def _scope_supported(self) -> "RuleIn":
+        if self.group_id is not None and self.node_id is not None:
+            raise ValueError("group_id y node_id son mutuamente excluyentes")
+        if (self.group_id is not None or self.node_id is not None) and self.rule_type in GROUP_SCOPE_UNSUPPORTED:
             raise ValueError(
-                f"rule_type '{self.rule_type}' no admite escopado por grupo (sujeto: pasarela)"
+                f"rule_type '{self.rule_type}' no admite escopado por grupo o nodo (sujeto: pasarela)"
             )
         return self
 

@@ -111,6 +111,7 @@ class SqlAlertRuleRepository:
             cooldown_seconds=rule.cooldown_seconds,
             params=rule.params,
             group_id=rule.group_id,
+            node_id=rule.node_id,
             created_at=now,
             updated_at=now,
         )

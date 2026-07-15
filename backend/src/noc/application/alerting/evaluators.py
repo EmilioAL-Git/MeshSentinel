@@ -46,6 +46,19 @@ class NetworkSnapshot:
             neighbors=[n for n in self.neighbors if n.node_id in members],
         )
 
+    def scoped_to_node(self, node_id: str) -> "NetworkSnapshot":
+        """Sub-snapshot con un único nodo (mismo principio que
+        `scoped_to_group`, mutuamente excluyente con él): una regla puede
+        vigilar un nodo concreto en vez de toda la red o un grupo. Un nodo
+        borrado/inexistente = cero coincidencias (misma degradación segura
+        que un grupo vacío)."""
+        return replace(
+            self,
+            summaries=[s for s in self.summaries if s.node.node_id == node_id],
+            links=[link for link in self.links if link.node_id == node_id],
+            neighbors=[n for n in self.neighbors if n.node_id == node_id],
+        )
+
 
 Evaluator = Callable[[AlertRule, NetworkSnapshot], list[AlertCondition]]
 

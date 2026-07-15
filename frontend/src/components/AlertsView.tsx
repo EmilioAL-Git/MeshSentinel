@@ -8,6 +8,7 @@ import {
   deleteAlertRule,
   deleteChannel,
   deleteProvider,
+  displayName,
   duplicateProvider,
   fetchAlertRules,
   fetchAlerts,
@@ -261,31 +262,58 @@ function NewRuleForm({
   const [durationUi, setDurationUi] = useState(meta.duration?.default ?? 0);
   const [cooldown, setCooldown] = useState(0);
   const [channelIds, setChannelIds] = useState<number[]>([]);
-  // Reglas por grupo (§1.3): null = toda la red. El nombre por defecto
-  // incorpora el grupo — `name` es UNIQUE en BD y la variante por grupo
-  // colisionaría con la regla global sembrada del mismo tipo.
+  // Ámbito de la regla (§1.3, ampliado): toda la red / un grupo / un nodo
+  // concreto, mutuamente excluyentes. El nombre por defecto incorpora el
+  // ámbito — `name` es UNIQUE en BD y colisionaría con la regla global
+  // sembrada del mismo tipo.
+  const [scopeKind, setScopeKind] = useState<"all" | "group" | "node">("all");
   const [groupId, setGroupId] = useState<number | null>(null);
+  const [nodeId, setNodeId] = useState<string | null>(null);
   const groups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
+  const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes() });
 
-  const defaultName = (t: keyof typeof RULE_FIELD_META, gid: number | null) => {
+  const defaultName = (t: keyof typeof RULE_FIELD_META, kind: "all" | "group" | "node", gid: number | null, nid: string | null) => {
     const base = RULE_FIELD_META[t].label;
-    const group = (groups.data ?? []).find((g) => g.id === gid);
-    return group ? `${base} · ${group.name}` : base;
+    if (kind === "group") {
+      const group = (groups.data ?? []).find((g) => g.id === gid);
+      return group ? `${base} · ${group.name}` : base;
+    }
+    if (kind === "node") {
+      const node = (nodes.data ?? []).find((n) => n.node.node_id === nid);
+      return node ? `${base} · ${displayName(node.node)}` : base;
+    }
+    return base;
   };
 
   const changeType = (t: keyof typeof RULE_FIELD_META) => {
     setRuleType(t);
-    const gid = GROUP_UNSUPPORTED.has(t) ? null : groupId;
-    if (GROUP_UNSUPPORTED.has(t)) setGroupId(null);
-    setName(defaultName(t, gid));
+    const kind = GROUP_UNSUPPORTED.has(t) ? "all" : scopeKind;
+    if (GROUP_UNSUPPORTED.has(t)) {
+      setScopeKind("all");
+      setGroupId(null);
+      setNodeId(null);
+    }
+    setName(defaultName(t, kind, groupId, nodeId));
     setThreshold(RULE_FIELD_META[t].threshold?.default ?? 0);
     setDurationUi(RULE_FIELD_META[t].duration?.default ?? 0);
   };
 
+  const changeScopeKind = (kind: "all" | "group" | "node") => {
+    // Si el nombre sigue siendo el autogenerado, se regenera con el ámbito nuevo
+    if (name === defaultName(ruleType, scopeKind, groupId, nodeId)) setName(defaultName(ruleType, kind, null, null));
+    setScopeKind(kind);
+    setGroupId(null);
+    setNodeId(null);
+  };
+
   const changeGroup = (gid: number | null) => {
-    // Si el nombre sigue siendo el autogenerado, se regenera con el grupo
-    if (name === defaultName(ruleType, groupId)) setName(defaultName(ruleType, gid));
+    if (name === defaultName(ruleType, scopeKind, groupId, nodeId)) setName(defaultName(ruleType, "group", gid, null));
     setGroupId(gid);
+  };
+
+  const changeNode = (nid: string | null) => {
+    if (name === defaultName(ruleType, scopeKind, groupId, nodeId)) setName(defaultName(ruleType, "node", null, nid));
+    setNodeId(nid);
   };
 
   return (
@@ -311,14 +339,29 @@ function NewRuleForm({
           <span className="microlabel" style={{ minWidth: 70 }}>Ámbito</span>
           <select
             className="input"
-            value={groupId ?? ""}
-            onChange={(e) => changeGroup(e.target.value === "" ? null : Number(e.target.value))}
+            value={scopeKind}
+            onChange={(e) => changeScopeKind(e.target.value as "all" | "group" | "node")}
           >
-            <option value="">Toda la red</option>
-            {(groups.data ?? []).map((g) => (
-              <option key={g.id} value={g.id}>Grupo: {g.name}</option>
-            ))}
+            <option value="all">Toda la red</option>
+            <option value="group">Un grupo</option>
+            <option value="node">Un nodo</option>
           </select>
+          {scopeKind === "group" && (
+            <select className="input" style={{ flex: 1 }} value={groupId ?? ""} onChange={(e) => changeGroup(e.target.value === "" ? null : Number(e.target.value))}>
+              <option value="" disabled>Elegir grupo…</option>
+              {(groups.data ?? []).map((g) => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          )}
+          {scopeKind === "node" && (
+            <select className="input" style={{ flex: 1 }} value={nodeId ?? ""} onChange={(e) => changeNode(e.target.value === "" ? null : e.target.value)}>
+              <option value="" disabled>Elegir nodo…</option>
+              {(nodes.data ?? []).map((n) => (
+                <option key={n.node.node_id} value={n.node.node_id}>{displayName(n.node)}</option>
+              ))}
+            </select>
+          )}
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -359,7 +402,7 @@ function NewRuleForm({
       <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
         <button
           className="btn"
-          disabled={!name.trim()}
+          disabled={!name.trim() || (scopeKind === "group" && groupId == null) || (scopeKind === "node" && nodeId == null)}
           style={{ fontSize: 11 }}
           onClick={() =>
             onSave({
@@ -371,7 +414,8 @@ function NewRuleForm({
               duration_seconds: meta.duration ? meta.duration.fromUi(durationUi) : null,
               cooldown_seconds: cooldown,
               params: {},
-              group_id: groupId,
+              group_id: scopeKind === "group" ? groupId : null,
+              node_id: scopeKind === "node" ? nodeId : null,
               channel_ids: channelIds,
             })
           }
@@ -677,6 +721,11 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   // Mismo queryKey que App.tsx/GroupContext: caché compartida, sin fetch nuevo.
   const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes() });
   const groupNodeIds = useGroupNodeIds(nodes.data ?? []);
+  const nodeLabel = (id: string | null) => {
+    if (id == null) return null;
+    const node = (nodes.data ?? []).find((n) => n.node.node_id === id);
+    return node ? displayName(node.node) : id;
+  };
 
   const doAck = useMutation({ mutationFn: ackAlert, onSettled: invalidate });
   const toggleRule = useMutation({
@@ -839,6 +888,11 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                     {r.group_id != null && (
                       <span className="chip" style={{ marginLeft: 6 }} title="Regla escopada a un grupo">
                         ◉ {groupName(r.group_id)}
+                      </span>
+                    )}
+                    {r.node_id != null && (
+                      <span className="chip" style={{ marginLeft: 6 }} title="Regla escopada a un nodo">
+                        ◎ {nodeLabel(r.node_id)}
                       </span>
                     )}
                     {r.channel_ids.length > 0 && (

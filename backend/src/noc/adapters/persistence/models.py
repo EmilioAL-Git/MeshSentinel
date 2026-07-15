@@ -184,6 +184,10 @@ class AlertRuleModel(Base):
     # nodes.preferred_gateway_id — un grupo borrado deja la regla sin
     # coincidencias (degradación segura), nunca un error de integridad.
     group_id: Mapped[int | None] = mapped_column(Integer)
+    # Reglas por nodo individual: mutuamente excluyente con group_id (validado
+    # en la API). Mismo criterio sin FK que group_id: un nodo borrado deja la
+    # regla sin coincidencias, nunca un error de integridad.
+    node_id: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
