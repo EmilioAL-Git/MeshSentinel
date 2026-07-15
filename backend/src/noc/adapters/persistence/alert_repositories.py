@@ -67,10 +67,13 @@ class SqlAlertRuleRepository:
         return await self._attach_channel_ids([_rule_entity(r) for r in rows])
 
     async def list_enabled(self) -> list[AlertRule]:
+        # Sin channel_ids a propósito: la usa solo el bucle de evaluación
+        # (engine.py), que nunca enruta notificaciones — el dispatcher
+        # resuelve channel_ids con get() para la única regla que dispara.
         rows = await self._session.scalars(
             select(AlertRuleModel).where(AlertRuleModel.enabled.is_(True)).order_by(AlertRuleModel.id)
         )
-        return await self._attach_channel_ids([_rule_entity(r) for r in rows])
+        return [_rule_entity(r) for r in rows]
 
     async def get(self, rule_id: int) -> AlertRule | None:
         m = await self._session.get(AlertRuleModel, rule_id)

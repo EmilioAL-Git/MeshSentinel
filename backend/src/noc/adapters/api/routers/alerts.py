@@ -256,6 +256,9 @@ async def create_provider(body: ProviderIn, session: SessionDep, _user: RequireA
 async def update_provider(
     provider_id: int, body: ProviderPatch, session: SessionDep, _user: RequireAuthDep
 ) -> ProviderOut:
+    # El SELECT previo (validar configuration) ya abre la transacción implícita
+    # de la sesión, por lo que aquí NO puede usarse session.begin(): se cierra
+    # con commit() (mismo patrón que admin_operations.create_operation).
     if body.configuration is not None:
         current = await SqlNotificationProviderRepository(session).get(provider_id)
         if current is None:
@@ -265,12 +268,12 @@ async def update_provider(
         ).validate()
         if errors:
             raise HTTPException(status_code=422, detail=errors)
-    async with session.begin():
-        provider = await SqlNotificationProviderRepository(session).update(
-            provider_id, body.model_dump(exclude_unset=True)
-        )
+    provider = await SqlNotificationProviderRepository(session).update(
+        provider_id, body.model_dump(exclude_unset=True)
+    )
     if provider is None:
         raise HTTPException(status_code=404, detail="Provider not found")
+    await session.commit()
     return ProviderOut.from_entity(provider)
 
 
@@ -297,6 +300,15 @@ async def test_provider(provider_id: int, session: SessionDep, _user: RequireAut
     return {"status": "sent"}
 
 
+def _unique_copy_name(taken: set[str], base: str) -> str:
+    candidate = f"{base} (copia)"
+    n = 2
+    while candidate in taken:
+        candidate = f"{base} (copia {n})"
+        n += 1
+    return candidate
+
+
 @router.post("/notification-providers/{provider_id}/duplicate", response_model=ProviderOut, status_code=201)
 async def duplicate_provider(provider_id: int, session: SessionDep, _user: RequireAuthDep) -> ProviderOut:
     async with session.begin():
@@ -304,9 +316,10 @@ async def duplicate_provider(provider_id: int, session: SessionDep, _user: Requi
         source = await repo.get(provider_id)
         if source is None:
             raise HTTPException(status_code=404, detail="Provider not found")
+        taken = {p.name for p in await repo.list_all()}
         duplicate = await repo.create(
             NotificationProviderConfig(
-                name=f"{source.name} (copia)",
+                name=_unique_copy_name(taken, source.name),
                 provider=source.provider,
                 configuration=source.configuration,
                 enabled=source.enabled,

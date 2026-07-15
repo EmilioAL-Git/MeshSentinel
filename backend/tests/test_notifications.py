@@ -4,6 +4,7 @@ notificaciones multi-proveedor."""
 
 from datetime import datetime, timezone
 
+from noc.adapters.api.routers.alerts import ProviderPatch, duplicate_provider, update_provider
 from noc.adapters.notifications import PROVIDERS, build_provider
 from noc.adapters.notifications.ntfy import NtfyProvider
 from noc.adapters.notifications.telegram import TelegramProvider
@@ -237,3 +238,35 @@ def test_render_message_shape():
     assert message.kind == "fired"
     assert message.subject_label == "node:!00000002"
     assert "Batería baja" in message.title
+
+
+# ── Rutas del router llamadas directamente (mismo patrón que el resto de este
+# archivo: sin infraestructura HTTP, la sesión de FastAPI nunca hace begin()
+# de antemano — session_factory() sin `session.begin()` la reproduce fiel) ──
+
+
+async def test_update_provider_with_configuration_does_not_double_begin(session_factory):
+    async with session_factory() as session, session.begin():
+        p = await SqlNotificationProviderRepository(session).create(
+            NotificationProviderConfig(name="p1", provider="ntfy", configuration={"topic": "a"})
+        )
+
+    async with session_factory() as session:
+        updated = await update_provider(
+            p.id, ProviderPatch(configuration={"topic": "b"}), session, None
+        )
+    assert updated.configuration == {"topic": "b"}
+
+
+async def test_duplicate_provider_twice_gets_distinct_names(session_factory):
+    async with session_factory() as session, session.begin():
+        p = await SqlNotificationProviderRepository(session).create(
+            NotificationProviderConfig(name="Ops", provider="ntfy", configuration={"topic": "a"})
+        )
+
+    async with session_factory() as session:
+        first = await duplicate_provider(p.id, session, None)
+    async with session_factory() as session:
+        second = await duplicate_provider(p.id, session, None)
+
+    assert {first.name, second.name} == {"Ops (copia)", "Ops (copia 2)"}
