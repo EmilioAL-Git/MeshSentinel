@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { NodeSummaryOut } from "../../api/client";
 import { BlockAccordion } from "../shell/BlockAccordion";
 import { CATEGORY_DEFS, groupByCategory } from "./classify";
-import { FleetRow, RosterHead } from "./instruments";
+import { FleetRow, RosterHead, type FleetColumnId } from "./instruments";
 
 /**
  * Vista de bloques dentro de un grupo activo (fase "Flota orientada a
@@ -22,6 +22,7 @@ export function FleetBlocks({
   onToggleIgnored,
   onCheckedChange,
   lowBatteryThreshold,
+  visibleColumns,
 }: {
   summaries: NodeSummaryOut[];
   gatewayNodeIds: Set<string>;
@@ -34,6 +35,7 @@ export function FleetBlocks({
   onCheckedChange: (ids: Set<string>) => void;
   /** Umbral de batería baja (thresholds del backend, no hardcodeado). */
   lowBatteryThreshold?: number;
+  visibleColumns: FleetColumnId[];
 }) {
   const byCategory = useMemo(() => groupByCategory(summaries, gatewayNodeIds), [summaries, gatewayNodeIds]);
 
@@ -79,7 +81,7 @@ export function FleetBlocks({
               </button>
             }
           >
-            <RosterHead />
+            <RosterHead visibleColumns={visibleColumns} />
             {items.map((summary) => (
               <FleetRow
                 key={summary.node.node_id}
@@ -91,6 +93,8 @@ export function FleetBlocks({
                 onToggleFavorite={onToggleFavorite}
                 onToggleIgnored={onToggleIgnored}
                 onToggleChecked={toggleChecked}
+                visibleColumns={visibleColumns}
+                gatewayNodeIds={gatewayNodeIds}
                 lowBatteryThreshold={lowBatteryThreshold}
               />
             ))}

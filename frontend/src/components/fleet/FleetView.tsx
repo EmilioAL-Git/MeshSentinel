@@ -8,12 +8,14 @@ import {
   type NodeSummaryOut,
   type TagOut,
 } from "../../api/client";
+import { usePersistedState } from "../../hooks/usePersistedState";
 import { AddToGroupMenu } from "./AddToGroupMenu";
 import { AssignNodeTypeMenu } from "./AssignNodeTypeMenu";
+import { ColumnPicker } from "./ColumnPicker";
 import { FleetBlocks } from "./FleetBlocks";
 import { GroupBar } from "./GroupBar";
 import { computeFleetGroupMetrics } from "./groupStats";
-import { FleetRow, GRID } from "./instruments";
+import { DEFAULT_FLEET_COLUMNS, FLEET_COLUMNS, FleetRow, buildFleetGrid, type FleetColumnId } from "./instruments";
 
 /**
  * Flota (fase "Flota orientada a grupos", v0.8.x): con grupo activo deja de
@@ -79,6 +81,10 @@ export function FleetView({
   const set = (patch: NodeFilterParams) => onFiltersChange({ ...filters, ...patch });
   const hasFilters = Object.values(filters).some((v) => v !== undefined && v !== "" && v !== false);
   const isGrouped = activeGroup != null;
+  // Columnas del roster configurables (pedido del usuario): persistidas,
+  // reutilizadas por el modo plano y por bloques (FleetBlocks) — misma
+  // fila en ambos, ver instruments.tsx.
+  const [visibleColumns, setVisibleColumns] = usePersistedState<FleetColumnId[]>("fleet.columns", DEFAULT_FLEET_COLUMNS);
 
   // Orden ESTABLE del roster (hardening): el backend ordena por
   // last_seen_at desc, que reordena filas bajo el cursor con cada refetch —
@@ -256,6 +262,8 @@ export function FleetView({
             ✕ limpiar
           </button>
         )}
+        <span style={{ marginLeft: "auto" }} />
+        <ColumnPicker visible={visibleColumns} onChange={setVisibleColumns} />
       </div>
 
       {/* Roster: bloques por categoría dentro de un grupo, lista plana en "Toda la red" */}
@@ -278,12 +286,14 @@ export function FleetView({
               onToggleIgnored={onToggleIgnored}
               onCheckedChange={onCheckedChange}
               lowBatteryThreshold={lowBatteryThreshold}
+              visibleColumns={visibleColumns}
             />
           )}
           {!loading && summaries.length > 0 && !isGrouped && (
             <>
               <RosterHeadWithSelectAll
                 allVisibleChecked={allVisibleChecked}
+                visibleColumns={visibleColumns}
                 onToggleAll={() => {
                   const next = new Set(checkedIds);
                   for (const s of summaries) {
@@ -304,6 +314,8 @@ export function FleetView({
                   onToggleFavorite={onToggleFavorite}
                   onToggleIgnored={onToggleIgnored}
                   onToggleChecked={toggleChecked}
+                  visibleColumns={visibleColumns}
+                  gatewayNodeIds={gatewayNodeIds}
                   lowBatteryThreshold={lowBatteryThreshold}
                 />
               ))}
@@ -372,12 +384,14 @@ export function FleetView({
 function RosterHeadWithSelectAll({
   allVisibleChecked,
   onToggleAll,
+  visibleColumns,
 }: {
   allVisibleChecked: boolean;
   onToggleAll: () => void;
+  visibleColumns: FleetColumnId[];
 }) {
   return (
-    <div className="roster-head" style={{ gridTemplateColumns: GRID }}>
+    <div className="roster-head" style={{ gridTemplateColumns: buildFleetGrid(visibleColumns) }}>
       <span>
         <input type="checkbox" checked={allVisibleChecked} onChange={onToggleAll} title="Armar/desarmar todos los visibles" />
       </span>
@@ -385,11 +399,9 @@ function RosterHeadWithSelectAll({
       <span />
       <span>Nodo</span>
       <span>ID</span>
-      <span>Etiquetas</span>
-      <span>Batería</span>
-      <span>Señal</span>
-      <span>Pasarela</span>
-      <span>Visto</span>
+      {FLEET_COLUMNS.filter((c) => visibleColumns.includes(c.id)).map((c) => (
+        <span key={c.id}>{c.label}</span>
+      ))}
       <span />
     </div>
   );
