@@ -48,16 +48,28 @@ export function ConsoleRail({
 
   return (
     <div style={{ display: "flex", height: "100%", borderLeft: `1px solid ${t.border}` }}>
-      {/* Panel activo: todos montados, solo se alterna display (cambio instantáneo) */}
-      {open && (
-        <div style={{ width, background: t.surface, height: "100%", minWidth: 0 }}>
+      {/* Panel activo: todos montados, solo se alterna display (cambio instantáneo).
+          Ancho animado (nunca desmontado/remontado) — mismo tratamiento que el
+          panel de estado izquierdo, para que ambos plieguen con la misma
+          transición en vez de desaparecer de golpe. */}
+      <div
+        style={{
+          width: open ? width : 0,
+          background: t.surface,
+          height: "100%",
+          minWidth: 0,
+          overflow: "hidden",
+          transition: "width 180ms ease-out",
+        }}
+      >
+        <div style={{ width, height: "100%" }}>
           {panels.map((p) => (
             <div key={p.id} style={{ display: p.id === active?.id ? "block" : "none", height: "100%" }}>
               {p.content}
             </div>
           ))}
         </div>
-      )}
+      </div>
       {/* Riel de iconos, siempre visible */}
       <div
         style={{
