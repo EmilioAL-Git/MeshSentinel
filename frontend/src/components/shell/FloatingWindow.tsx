@@ -175,8 +175,21 @@ export function FloatingWindow({
     touchAction: "none",
   });
 
+  // Velo de fondo (solo visual, NUNCA modal): la ventana sigue sin bloquear
+  // el mapa/resto de la UI — `pointer-events: none` deja pasar todos los
+  // clics/drags al contenido de detrás. Solo sube el contraste del panel.
+  const backdropStyle: CSSProperties = {
+    position: "fixed",
+    inset: 0,
+    zIndex: zIndex - 1,
+    background: "rgba(0, 0, 0, 0.4)",
+    pointerEvents: "none",
+  };
+
   return createPortal(
-    <div className="panel" style={windowStyle}>
+    <>
+      <div style={backdropStyle} />
+      <div className="panel" style={windowStyle}>
       <div
         className="panel-head"
         style={{ cursor: "grab", touchAction: "none" }}
@@ -210,7 +223,8 @@ export function FloatingWindow({
         onPointerMove={onResizePointerMove}
         onPointerUp={onResizePointerUp}
       />
-    </div>,
+      </div>
+    </>,
     document.body,
   );
 }
