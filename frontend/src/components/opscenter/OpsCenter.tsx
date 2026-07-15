@@ -29,17 +29,22 @@ import { StatusPanel } from "./StatusPanel";
  * este componente solo selecciona; el cajón es el mismo en toda la app.
  */
 
+// Se renderiza dentro del contenedor del MAPA (no del panel que colapsa), en
+// el borde que linda con ese panel: "left" = pegado al borde IZQUIERDO del
+// mapa (linda con StatusPanel), "right" = pegado al borde DERECHO (linda con
+// ConsoleRail). Antes usaba `right:-1` para "left", lo que lo pegaba al lado
+// contrario (junto al riel derecho) — bug reportado por el usuario.
 const collapseBtn = (side: "left" | "right"): React.CSSProperties => ({
   position: "absolute",
   top: "50%",
-  [side === "left" ? "right" : "left"]: -1,
+  [side]: -1,
   transform: "translateY(-50%)",
   zIndex: 810,
   width: 14,
   height: 44,
   background: t.surface,
   border: `1px solid ${t.border}`,
-  borderRadius: side === "left" ? "0 4px 4px 0" : "4px 0 0 4px",
+  borderRadius: side === "left" ? "4px 0 0 4px" : "0 4px 4px 0",
   color: t.textDim,
   cursor: "pointer",
   fontSize: 9,
