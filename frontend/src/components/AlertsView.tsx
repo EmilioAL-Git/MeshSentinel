@@ -335,10 +335,11 @@ function NewRuleForm({
         </select>
       </div>
       {!GROUP_UNSUPPORTED.has(ruleType) && (
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <span className="microlabel" style={{ minWidth: 70 }}>Ámbito</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
+          <span className="microlabel" style={{ minWidth: 70, flexShrink: 0 }}>Ámbito</span>
           <select
             className="input"
+            style={{ flexShrink: 0 }}
             value={scopeKind}
             onChange={(e) => changeScopeKind(e.target.value as "all" | "group" | "node")}
           >
@@ -347,7 +348,12 @@ function NewRuleForm({
             <option value="node">Un nodo</option>
           </select>
           {scopeKind === "group" && (
-            <select className="input" style={{ flex: 1 }} value={groupId ?? ""} onChange={(e) => changeGroup(e.target.value === "" ? null : Number(e.target.value))}>
+            <select
+              className="input"
+              style={{ flex: 1, minWidth: 0, width: 0 }}
+              value={groupId ?? ""}
+              onChange={(e) => changeGroup(e.target.value === "" ? null : Number(e.target.value))}
+            >
               <option value="" disabled>Elegir grupo…</option>
               {(groups.data ?? []).map((g) => (
                 <option key={g.id} value={g.id}>{g.name}</option>
@@ -355,7 +361,12 @@ function NewRuleForm({
             </select>
           )}
           {scopeKind === "node" && (
-            <select className="input" style={{ flex: 1 }} value={nodeId ?? ""} onChange={(e) => changeNode(e.target.value === "" ? null : e.target.value)}>
+            <select
+              className="input"
+              style={{ flex: 1, minWidth: 0, width: 0 }}
+              value={nodeId ?? ""}
+              onChange={(e) => changeNode(e.target.value === "" ? null : e.target.value)}
+            >
               <option value="" disabled>Elegir nodo…</option>
               {(nodes.data ?? []).map((n) => (
                 <option key={n.node.node_id} value={n.node.node_id}>{displayName(n.node)}</option>
