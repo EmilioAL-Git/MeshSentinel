@@ -31,9 +31,19 @@ const railBtn = (active: boolean): CSSProperties => ({
   fontSize: 15,
 });
 
-export function ConsoleRail({ panels, width }: { panels: RailPanelDef[]; width: number }) {
+export function ConsoleRail({
+  panels,
+  width,
+  open,
+  onToggleOpen,
+}: {
+  panels: RailPanelDef[];
+  width: number;
+  /** Controlado por el padre (OpsCenter): permite además una flecha de borde simétrica a la del panel izquierdo. */
+  open: boolean;
+  onToggleOpen: (open: boolean) => void;
+}) {
   const [activeId, setActiveId] = usePersistedState<string>("rail.active", panels[0]?.id ?? "");
-  const [open, setOpen] = usePersistedState<boolean>("rail.open", true);
   const active = panels.find((p) => p.id === activeId) ?? panels[0];
 
   return (
@@ -67,10 +77,10 @@ export function ConsoleRail({ panels, width }: { panels: RailPanelDef[]; width: 
               title={p.title}
               style={railBtn(isActive)}
               onClick={() => {
-                if (isActive) setOpen(false); // clic en el activo = plegar
+                if (isActive) onToggleOpen(false); // clic en el activo = plegar
                 else {
                   setActiveId(p.id);
-                  setOpen(true);
+                  onToggleOpen(true);
                 }
               }}
             >

@@ -44,7 +44,7 @@ const collapseBtn = (side: "left" | "right"): React.CSSProperties => ({
   height: 44,
   background: t.surface,
   border: `1px solid ${t.border}`,
-  borderRadius: side === "left" ? "4px 0 0 4px" : "0 4px 4px 0",
+  borderRadius: side === "left" ? "0 4px 4px 0" : "4px 0 0 4px",
   color: t.textDim,
   cursor: "pointer",
   fontSize: 9,
@@ -83,6 +83,11 @@ export function OpsCenter({
   onMapReady: (map: L.Map) => void;
 }) {
   const [leftOpen, setLeftOpen] = usePersistedState<boolean>("ops.left.open", true);
+  // Plegado del riel derecho (ConsoleRail): antes solo se podía plegar
+  // clicando el icono activo dentro del propio riel; controlado aquí para
+  // poder ofrecer también la flecha de borde, simétrica a la del panel
+  // izquierdo.
+  const [railOpen, setRailOpen] = usePersistedState<boolean>("rail.open", true);
   const setSelected = onSelect;
 
   // ── Mapa vivo (v0.7.3): un pulso de una sola vez por evento nuevo ──────────
@@ -239,11 +244,20 @@ export function OpsCenter({
         >
           {leftOpen ? "◂" : "▸"}
         </button>
+        <button
+          style={collapseBtn("right")}
+          onClick={() => setRailOpen(!railOpen)}
+          title={railOpen ? "Plegar consola" : "Desplegar consola"}
+        >
+          {railOpen ? "▸" : "◂"}
+        </button>
       </div>
 
       {/* Consola operativa: riel de iconos (actuar) */}
       <ConsoleRail
         width={360}
+        open={railOpen}
+        onToggleOpen={setRailOpen}
         panels={[
           {
             id: "activity",
