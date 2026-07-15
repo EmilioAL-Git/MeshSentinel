@@ -28,6 +28,7 @@ import {
 import { scopeAlertsToGroup, useGroupNodeIds } from "../context/GroupContext";
 import { relativeTime } from "../time";
 import { GroupScopeBanner } from "./shell/GroupScopeBanner";
+import { Modal } from "./shell/Modal";
 
 /**
  * Alertas (identidad v0.8): un puesto de triaje, no una página de tablas.
@@ -185,8 +186,6 @@ function RuleEditor({
         flexDirection: "column",
         gap: "0.4rem",
         padding: "0.5rem 0.75rem 0.7rem",
-        borderBottom: "1px solid var(--border-subtle)",
-        background: "var(--surface-2, rgba(255,255,255,0.03))",
         fontSize: 12,
       }}
     >
@@ -296,8 +295,6 @@ function NewRuleForm({
         flexDirection: "column",
         gap: "0.4rem",
         padding: "0.5rem 0.75rem 0.7rem",
-        borderBottom: "1px solid var(--border-subtle)",
-        background: "var(--surface-2, rgba(255,255,255,0.03))",
         fontSize: 12,
       }}
     >
@@ -440,8 +437,6 @@ function ProviderEditor({
         flexDirection: "column",
         gap: "0.4rem",
         padding: "0.5rem 0.75rem 0.7rem",
-        borderBottom: "1px solid var(--border-subtle)",
-        background: "var(--surface-2, rgba(255,255,255,0.03))",
         fontSize: 12,
       }}
     >
@@ -492,8 +487,6 @@ function NewProviderForm({
         flexDirection: "column",
         gap: "0.4rem",
         padding: "0.5rem 0.75rem 0.7rem",
-        borderBottom: "1px solid var(--border-subtle)",
-        background: "var(--surface-2, rgba(255,255,255,0.03))",
         fontSize: 12,
       }}
     >
@@ -554,8 +547,6 @@ function ChannelForm({
         flexDirection: "column",
         gap: "0.4rem",
         padding: "0.5rem 0.75rem 0.7rem",
-        borderBottom: "1px solid var(--border-subtle)",
-        background: "var(--surface-2, rgba(255,255,255,0.03))",
         fontSize: 12,
       }}
     >
@@ -817,95 +808,65 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
               <button
                 className="btn ghost"
                 style={{ marginLeft: "auto", padding: "0.1rem 0.5rem", fontSize: 11 }}
-                onClick={() => {
-                  setCreatingRule((v) => !v);
-                  setEditingRuleId(null);
-                }}
+                onClick={() => setCreatingRule(true)}
               >
-                {creatingRule ? "▲" : "+ Nueva"}
+                + Nueva
               </button>
             </div>
             <div className="panel-body flush">
-              {creatingRule && (
-                <NewRuleForm
-                  channels={channels.data ?? []}
-                  onCancel={() => setCreatingRule(false)}
-                  onSave={(rule) => {
-                    newRule.mutate(rule);
-                    setCreatingRule(false);
-                  }}
-                />
-              )}
               {(rules.data ?? []).map((r) => (
-                <div key={r.id}>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.6rem",
-                      padding: "0.4rem 0.75rem",
-                      borderBottom: editingRuleId === r.id ? "none" : "1px solid var(--border-subtle)",
-                      cursor: "pointer",
-                      fontSize: 12,
+                <div
+                  key={r.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.6rem",
+                    padding: "0.4rem 0.75rem",
+                    borderBottom: "1px solid var(--border-subtle)",
+                    fontSize: 12,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={r.enabled}
+                    onChange={(e) => toggleRule.mutate({ id: r.id, enabled: e.target.checked })}
+                  />
+                  <span className="mono" style={{ color: SEV_COLOR[r.severity], fontSize: 10, minWidth: 60 }}>
+                    {r.severity}
+                  </span>
+                  <span style={{ color: r.enabled ? "var(--text)" : "var(--text-faint)", flex: 1 }}>
+                    {r.name}
+                    {r.group_id != null && (
+                      <span className="chip" style={{ marginLeft: 6 }} title="Regla escopada a un grupo">
+                        ◉ {groupName(r.group_id)}
+                      </span>
+                    )}
+                    {r.channel_ids.length > 0 && (
+                      <span className="chip" style={{ marginLeft: 6 }} title={r.channel_ids.map(channelName).join(", ")}>
+                        ✉ {r.channel_ids.length}
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    className="btn ghost"
+                    style={{ padding: "0.1rem 0.5rem", fontSize: 11 }}
+                    onClick={() => setEditingRuleId(r.id)}
+                  >
+                    Ajustar
+                  </button>
+                  <button
+                    className="btn ghost"
+                    style={{ padding: "0.1rem 0.5rem", fontSize: 11 }}
+                    title="Borrar regla"
+                    onClick={() => {
+                      if (window.confirm(`¿Borrar la regla «${r.name}»?`)) removeRule.mutate(r.id);
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={r.enabled}
-                      onChange={(e) => toggleRule.mutate({ id: r.id, enabled: e.target.checked })}
-                    />
-                    <span className="mono" style={{ color: SEV_COLOR[r.severity], fontSize: 10, minWidth: 60 }}>
-                      {r.severity}
-                    </span>
-                    <span style={{ color: r.enabled ? "var(--text)" : "var(--text-faint)", flex: 1 }}>
-                      {r.name}
-                      {r.group_id != null && (
-                        <span className="chip" style={{ marginLeft: 6 }} title="Regla escopada a un grupo">
-                          ◉ {groupName(r.group_id)}
-                        </span>
-                      )}
-                      {r.channel_ids.length > 0 && (
-                        <span className="chip" style={{ marginLeft: 6 }} title={r.channel_ids.map(channelName).join(", ")}>
-                          ✉ {r.channel_ids.length}
-                        </span>
-                      )}
-                    </span>
-                    <button
-                      className="btn ghost"
-                      style={{ padding: "0.1rem 0.5rem", fontSize: 11 }}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setEditingRuleId(editingRuleId === r.id ? null : r.id);
-                        setCreatingRule(false);
-                      }}
-                    >
-                      {editingRuleId === r.id ? "▲" : "Ajustar"}
-                    </button>
-                    <button
-                      className="btn ghost"
-                      style={{ padding: "0.1rem 0.5rem", fontSize: 11 }}
-                      title="Borrar regla"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        if (window.confirm(`¿Borrar la regla «${r.name}»?`)) removeRule.mutate(r.id);
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </label>
-                  {editingRuleId === r.id && (
-                    <RuleEditor
-                      rule={r}
-                      channels={channels.data ?? []}
-                      onCancel={() => setEditingRuleId(null)}
-                      onSave={(changes) => {
-                        editRule.mutate({ id: r.id, changes });
-                        setEditingRuleId(null);
-                      }}
-                    />
-                  )}
+                    ✕
+                  </button>
                 </div>
               ))}
+              {(rules.data ?? []).length === 0 && <div className="empty">Sin reglas creadas.</div>}
             </div>
           </div>
 
@@ -916,76 +877,55 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
               <button
                 className="btn ghost"
                 style={{ marginLeft: "auto", padding: "0.1rem 0.5rem", fontSize: 11 }}
-                onClick={() => {
-                  setCreatingProvider((v) => !v);
-                  setEditingProviderId(null);
-                }}
+                onClick={() => setCreatingProvider(true)}
               >
-                {creatingProvider ? "▲" : "+ Nueva"}
+                + Nueva
               </button>
             </div>
-            <div className="panel-body">
-              {creatingProvider && (
-                <NewProviderForm
-                  onCancel={() => setCreatingProvider(false)}
-                  onSave={(provider) => {
-                    addProvider.mutate(provider);
-                    setCreatingProvider(false);
-                  }}
-                />
-              )}
-              {(providers.data ?? []).length === 0 && !creatingProvider && (
-                <p style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 0 }}>
-                  Sin integraciones. Las alertas solo se verán en el NOC.
-                </p>
+            <div className="panel-body flush">
+              {(providers.data ?? []).length === 0 && (
+                <div className="empty">Sin integraciones. Las alertas solo se verán en el NOC.</div>
               )}
               {(providers.data ?? []).map((p) => (
-                <div key={p.id} style={{ marginBottom: "0.4rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 12, padding: "0.2rem 0.75rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={p.enabled}
-                      title={p.enabled ? "Integración activa" : "Integración desactivada"}
-                      onChange={(e) => toggleProvider.mutate({ id: p.id, enabled: e.target.checked })}
-                    />
-                    <span className="mono" style={{ color: p.enabled ? "var(--text)" : "var(--text-faint)" }}>{p.name}</span>
-                    <span className="chip">{PROVIDER_FIELD_META[p.provider]?.label ?? p.provider}</span>
-                    <span style={{ marginLeft: "auto", display: "flex", gap: "0.3rem" }}>
-                      <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => testProviderMut.mutate(p.id)}>Probar</button>
-                      <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => dupProvider.mutate(p.id)}>Duplicar</button>
-                      <button
-                        className="btn ghost"
-                        style={{ fontSize: 11 }}
-                        onClick={() => setEditingProviderId(editingProviderId === p.id ? null : p.id)}
-                      >
-                        {editingProviderId === p.id ? "▲" : "Editar"}
-                      </button>
-                      <button
-                        className="btn ghost"
-                        style={{ fontSize: 11 }}
-                        onClick={() => {
-                          if (window.confirm(`¿Borrar la integración «${p.name}»?`)) removeProvider.mutate(p.id);
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  </div>
-                  {editingProviderId === p.id && (
-                    <ProviderEditor
-                      provider={p}
-                      onCancel={() => setEditingProviderId(null)}
-                      onSave={(changes) => {
-                        editProvider.mutate({ id: p.id, changes });
-                        setEditingProviderId(null);
+                <div
+                  key={p.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    fontSize: 12,
+                    padding: "0.4rem 0.75rem",
+                    borderBottom: "1px solid var(--border-subtle)",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={p.enabled}
+                    title={p.enabled ? "Integración activa" : "Integración desactivada"}
+                    onChange={(e) => toggleProvider.mutate({ id: p.id, enabled: e.target.checked })}
+                  />
+                  <span className="mono" style={{ color: p.enabled ? "var(--text)" : "var(--text-faint)" }}>{p.name}</span>
+                  <span className="chip">{PROVIDER_FIELD_META[p.provider]?.label ?? p.provider}</span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: "0.3rem" }}>
+                    <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => testProviderMut.mutate(p.id)}>Probar</button>
+                    <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => dupProvider.mutate(p.id)}>Duplicar</button>
+                    <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => setEditingProviderId(p.id)}>
+                      Editar
+                    </button>
+                    <button
+                      className="btn ghost"
+                      style={{ fontSize: 11 }}
+                      onClick={() => {
+                        if (window.confirm(`¿Borrar la integración «${p.name}»?`)) removeProvider.mutate(p.id);
                       }}
-                    />
-                  )}
+                    >
+                      ✕
+                    </button>
+                  </span>
                 </div>
               ))}
-              {testProviderMut.isSuccess && <p style={{ color: "var(--ok)", fontSize: 12 }}>Mensaje de prueba enviado.</p>}
-              {testProviderMut.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(testProviderMut.error)}</p>}
-              {addProvider.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(addProvider.error)}</p>}
+              {testProviderMut.isSuccess && <p style={{ color: "var(--ok)", fontSize: 12, padding: "0 0.75rem" }}>Mensaje de prueba enviado.</p>}
+              {testProviderMut.isError && <p style={{ color: "var(--crit)", fontSize: 12, padding: "0 0.75rem" }}>{String(testProviderMut.error)}</p>}
             </div>
           </div>
 
@@ -996,72 +936,135 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
               <button
                 className="btn ghost"
                 style={{ marginLeft: "auto", padding: "0.1rem 0.5rem", fontSize: 11 }}
-                onClick={() => {
-                  setCreatingChannel((v) => !v);
-                  setEditingChannelId(null);
-                }}
+                onClick={() => setCreatingChannel(true)}
               >
-                {creatingChannel ? "▲" : "+ Nuevo"}
+                + Nuevo
               </button>
             </div>
-            <div className="panel-body">
-              {creatingChannel && (
-                <ChannelForm
-                  providers={providers.data ?? []}
-                  onCancel={() => setCreatingChannel(false)}
-                  onSave={(channel) => {
-                    addChannelGroup.mutate(channel);
-                    setCreatingChannel(false);
-                  }}
-                />
-              )}
-              {(channels.data ?? []).length === 0 && !creatingChannel && (
-                <p style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 0 }}>
-                  Sin canales — las reglas sin canal asignado difunden a todas las integraciones activas.
-                </p>
+            <div className="panel-body flush">
+              {(channels.data ?? []).length === 0 && (
+                <div className="empty">Sin canales — las reglas sin canal asignado difunden a todas las integraciones activas.</div>
               )}
               {(channels.data ?? []).map((c) => (
-                <div key={c.id} style={{ marginBottom: "0.4rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: 12, padding: "0.2rem 0.75rem" }}>
-                    <span className="mono" style={{ color: "var(--text)" }}>{c.name}</span>
-                    <span className="chip">{c.provider_ids.length} integr.</span>
-                    <span style={{ marginLeft: "auto", display: "flex", gap: "0.3rem" }}>
-                      <button
-                        className="btn ghost"
-                        style={{ fontSize: 11 }}
-                        onClick={() => setEditingChannelId(editingChannelId === c.id ? null : c.id)}
-                      >
-                        {editingChannelId === c.id ? "▲" : "Editar"}
-                      </button>
-                      <button
-                        className="btn ghost"
-                        style={{ fontSize: 11 }}
-                        onClick={() => {
-                          if (window.confirm(`¿Borrar el canal «${c.name}»?`)) removeChannelGroup.mutate(c.id);
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  </div>
-                  {editingChannelId === c.id && (
-                    <ChannelForm
-                      channel={c}
-                      providers={providers.data ?? []}
-                      onCancel={() => setEditingChannelId(null)}
-                      onSave={(changes) => {
-                        editChannelGroup.mutate({ id: c.id, changes });
-                        setEditingChannelId(null);
+                <div
+                  key={c.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    fontSize: 12,
+                    padding: "0.4rem 0.75rem",
+                    borderBottom: "1px solid var(--border-subtle)",
+                  }}
+                >
+                  <span className="mono" style={{ color: "var(--text)" }}>{c.name}</span>
+                  <span className="chip">{c.provider_ids.length} integr.</span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: "0.3rem" }}>
+                    <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => setEditingChannelId(c.id)}>
+                      Editar
+                    </button>
+                    <button
+                      className="btn ghost"
+                      style={{ fontSize: 11 }}
+                      onClick={() => {
+                        if (window.confirm(`¿Borrar el canal «${c.name}»?`)) removeChannelGroup.mutate(c.id);
                       }}
-                    />
-                  )}
+                    >
+                      ✕
+                    </button>
+                  </span>
                 </div>
               ))}
-              {addChannelGroup.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(addChannelGroup.error)}</p>}
+              {addChannelGroup.isError && <p style={{ color: "var(--crit)", fontSize: 12, padding: "0 0.75rem" }}>{String(addChannelGroup.error)}</p>}
             </div>
           </div>
         </div>
       </div>
+
+      {creatingRule && (
+        <Modal title="Nueva regla" onClose={() => setCreatingRule(false)}>
+          <NewRuleForm
+            channels={channels.data ?? []}
+            onCancel={() => setCreatingRule(false)}
+            onSave={(rule) => {
+              newRule.mutate(rule);
+              setCreatingRule(false);
+            }}
+          />
+        </Modal>
+      )}
+      {editingRuleId != null && (() => {
+        const rule = (rules.data ?? []).find((r) => r.id === editingRuleId);
+        return rule ? (
+          <Modal title={`Ajustar «${rule.name}»`} onClose={() => setEditingRuleId(null)}>
+            <RuleEditor
+              rule={rule}
+              channels={channels.data ?? []}
+              onCancel={() => setEditingRuleId(null)}
+              onSave={(changes) => {
+                editRule.mutate({ id: rule.id, changes });
+                setEditingRuleId(null);
+              }}
+            />
+          </Modal>
+        ) : null;
+      })()}
+
+      {creatingProvider && (
+        <Modal title="Nueva integración" onClose={() => setCreatingProvider(false)}>
+          <NewProviderForm
+            onCancel={() => setCreatingProvider(false)}
+            onSave={(provider) => {
+              addProvider.mutate(provider);
+              setCreatingProvider(false);
+            }}
+          />
+        </Modal>
+      )}
+      {editingProviderId != null && (() => {
+        const provider = (providers.data ?? []).find((p) => p.id === editingProviderId);
+        return provider ? (
+          <Modal title={`Editar «${provider.name}»`} onClose={() => setEditingProviderId(null)}>
+            <ProviderEditor
+              provider={provider}
+              onCancel={() => setEditingProviderId(null)}
+              onSave={(changes) => {
+                editProvider.mutate({ id: provider.id, changes });
+                setEditingProviderId(null);
+              }}
+            />
+          </Modal>
+        ) : null;
+      })()}
+
+      {creatingChannel && (
+        <Modal title="Nuevo canal" onClose={() => setCreatingChannel(false)}>
+          <ChannelForm
+            providers={providers.data ?? []}
+            onCancel={() => setCreatingChannel(false)}
+            onSave={(channel) => {
+              addChannelGroup.mutate(channel);
+              setCreatingChannel(false);
+            }}
+          />
+        </Modal>
+      )}
+      {editingChannelId != null && (() => {
+        const channel = (channels.data ?? []).find((c) => c.id === editingChannelId);
+        return channel ? (
+          <Modal title={`Editar «${channel.name}»`} onClose={() => setEditingChannelId(null)}>
+            <ChannelForm
+              channel={channel}
+              providers={providers.data ?? []}
+              onCancel={() => setEditingChannelId(null)}
+              onSave={(changes) => {
+                editChannelGroup.mutate({ id: channel.id, changes });
+                setEditingChannelId(null);
+              }}
+            />
+          </Modal>
+        ) : null;
+      })()}
     </div>
   );
 }
