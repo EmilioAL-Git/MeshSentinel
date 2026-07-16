@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, type CSSProperties, type ReactNode } from "react";
 import {
   ackAlert,
+  resolveAlert,
   fetchGatewayStats,
   type AlertOut,
   type CriticalNodeOut,
@@ -209,6 +210,13 @@ export function StatusPanel({
   const queryClient = useQueryClient();
   const doAck = useMutation({
     mutationFn: (id: number) => ackAlert(id),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["alerts"] });
+      queryClient.invalidateQueries({ queryKey: ["alert-counts"] });
+    },
+  });
+  const doResolve = useMutation({
+    mutationFn: (id: number) => resolveAlert(id),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["alerts"] });
       queryClient.invalidateQueries({ queryKey: ["alert-counts"] });
@@ -453,6 +461,14 @@ export function StatusPanel({
                     ACK
                   </button>
                 )}
+                <button
+                  style={smallBtn}
+                  title="Cerrar manualmente (si la condición sigue vigente y la regla está activa, puede volver a dispararse en el próximo ciclo)"
+                  disabled={doResolve.isPending}
+                  onClick={() => doResolve.mutate(a.id)}
+                >
+                  Resolver
+                </button>
               </div>
             ))}
           </div>

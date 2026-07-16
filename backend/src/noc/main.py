@@ -118,6 +118,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Diario operativo: narrativa de transiciones de alertas (la lógica de
     # detección vive SOLO en el motor; aquí solo se redacta)
     engine.add_listener(_make_alert_narrator(app.state.db.session_factory))
+    app.state.alert_engine = engine
     alert_loop = AlertEngineLoop(engine, settings.alert_eval_interval_seconds)
     alert_loop.start()
 

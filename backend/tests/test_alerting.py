@@ -80,6 +80,37 @@ async def test_fires_resolves_and_deduplicates(session_factory):
     assert resolved[0].alert.resolved_at is not None
 
 
+async def test_disabling_rule_resolves_dangling_alerts(session_factory):
+    """Regresión: evaluate_once solo itera list_enabled(), así que una regla
+    desactivada deja de reconciliarse y sus alertas activas quedaban
+    huérfanas para siempre (nunca "resolved"). El router llama a
+    reconcile_rule(rule, []) al desactivar/borrar una regla; aquí se
+    reproduce ese mismo mecanismo directamente sobre el engine."""
+    await seed_network(session_factory)
+    engine, _ = await setup_engine(session_factory)
+    transitions = await engine.evaluate_once()
+    alert = next(t.alert for t in transitions if t.alert.rule_name == "Batería baja")
+
+    async with session_factory() as session:
+        rule = await SqlAlertRuleRepository(session).update(alert.rule_id, {"enabled": False})
+
+    # Sin el fix, evaluate_once ya no vuelve a tocar esta regla y la alerta
+    # se queda "firing" para siempre pese a estar desactivada.
+    assert await engine.evaluate_once() == []
+    async with session_factory() as session:
+        still_active = await SqlAlertRepository(session).get(alert.id)
+    assert still_active is not None and still_active.status == "firing"
+
+    resolved = await engine.reconcile_rule(rule, [])
+    assert len(resolved) == 1
+    assert resolved[0].kind == "resolved"
+    assert resolved[0].alert.subject_id == alert.subject_id
+
+    async with session_factory() as session:
+        after = await SqlAlertRepository(session).get(alert.id)
+    assert after is not None and after.status == "resolved"
+
+
 async def test_severity_propagates_from_rule(session_factory):
     await seed_network(session_factory)
     engine, _ = await setup_engine(session_factory)

@@ -469,6 +469,7 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 export const fetchAlerts = (status?: string, limit = 100) =>
   get<AlertOut[]>(`/alerts?limit=${limit}${status ? `&status=${status}` : ""}`);
 export const ackAlert = (id: number) => send<AlertOut>("POST", `/alerts/${id}/ack`);
+export const resolveAlert = (id: number) => send<AlertOut>("POST", `/alerts/${id}/resolve`);
 
 /** Agregados reales de alertas activas (hardening): la fuente de los
  * contadores del HUD/StatusBar/insignias — nunca una lista truncada. */

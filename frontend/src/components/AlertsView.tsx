@@ -18,6 +18,7 @@ import {
   fetchProviders,
   patchAlertRule,
   patchChannel,
+  resolveAlert,
   patchProvider,
   testProvider,
   type AlertOut,
@@ -648,11 +649,13 @@ function ChannelForm({
 function AlertRow({
   alert,
   onAck,
+  onResolve,
   onOpenNode,
   outOfGroup,
 }: {
   alert: AlertOut;
   onAck?: (id: number) => void;
+  onResolve?: (id: number) => void;
   onOpenNode?: (nodeId: string) => void;
   outOfGroup?: boolean;
 }) {
@@ -698,6 +701,16 @@ function AlertRow({
           ACK
         </button>
       )}
+      {!resolved && onResolve && (
+        <button
+          className="btn ghost"
+          style={{ padding: "0.1rem 0.5rem", fontSize: 11 }}
+          title="Cerrar manualmente (si la condición sigue vigente y la regla está activa, puede volver a dispararse en el próximo ciclo)"
+          onClick={() => onResolve(alert.id)}
+        >
+          Resolver
+        </button>
+      )}
       {alert.subject_type === "node" && onOpenNode && (
         <button
           className="btn ghost"
@@ -740,6 +753,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   };
 
   const doAck = useMutation({ mutationFn: ackAlert, onSettled: invalidate });
+  const doResolve = useMutation({ mutationFn: resolveAlert, onSettled: invalidate });
   const toggleRule = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => patchAlertRule(id, { enabled }),
     onSettled: invalidate,
@@ -853,6 +867,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                   key={a.id}
                   alert={a}
                   onAck={(id) => doAck.mutate(id)}
+                  onResolve={(id) => doResolve.mutate(id)}
                   onOpenNode={onOpenNode}
                   outOfGroup={isOutOfGroupCritical(a)}
                 />

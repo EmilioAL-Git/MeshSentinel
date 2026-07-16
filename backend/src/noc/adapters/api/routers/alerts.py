@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, model_validator
 
 from noc.adapters.api.deps import RequireAuthDep, SessionDep
@@ -196,6 +196,20 @@ async def acknowledge_alert(alert_id: int, session: SessionDep, body: AckIn | No
     return AlertOut.from_entity(alert)
 
 
+@router.post("/alerts/{alert_id}/resolve", response_model=AlertOut)
+async def resolve_alert(alert_id: int, session: SessionDep) -> AlertOut:
+    """Cierre manual (triaje, no configuración — igual que /ack): vía de
+    escape para alertas huérfanas (regla desactivada/borrada/reajustada tras
+    el disparo) que de otro modo no tienen forma de dejar de estar activas.
+    Si la condición sigue siendo cierta y la regla sigue habilitada, el
+    próximo ciclo del motor la vuelve a disparar — comportamiento esperado."""
+    async with session.begin():
+        alert = await SqlAlertRepository(session).resolve(alert_id, datetime.now(timezone.utc))
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Active alert not found")
+    return AlertOut.from_entity(alert)
+
+
 # ── Reglas ───────────────────────────────────────────────────────────────────
 
 
@@ -213,21 +227,31 @@ async def create_rule(body: RuleIn, session: SessionDep, _user: RequireAuthDep) 
 
 
 @router.patch("/alert-rules/{rule_id}", response_model=RuleOut)
-async def update_rule(rule_id: int, body: RulePatch, session: SessionDep, _user: RequireAuthDep) -> RuleOut:
+async def update_rule(
+    rule_id: int, body: RulePatch, request: Request, session: SessionDep, _user: RequireAuthDep
+) -> RuleOut:
     changes = body.model_dump(exclude_unset=True)
     async with session.begin():
         rule = await SqlAlertRuleRepository(session).update(rule_id, changes)
     if rule is None:
         raise HTTPException(status_code=404, detail="Rule not found")
+    # Una regla desactivada deja de evaluarse (engine.py: evaluate_once solo
+    # itera list_enabled()) — sin esto sus alertas activas quedan huérfanas
+    # para siempre en vez de resolverse.
+    if not rule.enabled:
+        await request.app.state.alert_engine.reconcile_rule(rule, [])
     return RuleOut.from_entity(rule)
 
 
 @router.delete("/alert-rules/{rule_id}", status_code=204)
-async def delete_rule(rule_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
+async def delete_rule(rule_id: int, request: Request, session: SessionDep, _user: RequireAuthDep) -> None:
     async with session.begin():
-        deleted = await SqlAlertRuleRepository(session).delete(rule_id)
+        rule = await SqlAlertRuleRepository(session).get(rule_id)
+        deleted = await SqlAlertRuleRepository(session).delete(rule_id) if rule else False
     if not deleted:
         raise HTTPException(status_code=404, detail="Rule not found")
+    assert rule is not None
+    await request.app.state.alert_engine.reconcile_rule(rule, [])
 
 
 # En modo protegido, crear/editar/borrar reglas, integraciones y canales

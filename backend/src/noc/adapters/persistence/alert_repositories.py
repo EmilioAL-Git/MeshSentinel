@@ -227,7 +227,7 @@ class SqlAlertRepository:
 
     async def resolve(self, alert_id: int, now: datetime) -> Alert | None:
         m = await self._session.get(AlertModel, alert_id)
-        if m is None:
+        if m is None or m.status not in ACTIVE_STATUSES:
             return None
         m.status = "resolved"
         m.resolved_at = now
