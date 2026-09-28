@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { activeGatewayCount, type NodeSummaryOut } from "../../api/client";
+import { NexusCatIcon } from "../nexus/NexusCatIcon";
+import { useNexusMode } from "../nexus/useNexusMode";
 import { relTime } from "../../time";
 import { CATEGORY_DEFS, classifyNode } from "./classify";
 
@@ -276,6 +278,9 @@ export function FleetRow({
     .filter(Boolean)
     .join(" ");
   const ctx: ColumnCtx = { gatewayNodeIds, lowBatteryThreshold };
+  // Insignia JenTastic-Nexus (ADR 0027, §8 del encargo): solo visible con el
+  // flag global ON Y el nodo marcado — ninguno de los dos basta por sí solo.
+  const nexusModeOn = useNexusMode();
   return (
     <div
       key={node.node_id}
@@ -303,6 +308,11 @@ export function FleetRow({
         {node.online ? "●" : "○"}
       </span>
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {nexusModeOn && node.is_nexus && (
+          <span style={{ marginRight: 5 }}>
+            <NexusCatIcon />
+          </span>
+        )}
         <strong>{node.short_name ?? "?"}</strong>{" "}
         <span style={{ color: "var(--text-dim)" }}>{node.long_name ?? ""}</span>
         {node.is_ignored && <span style={{ color: "var(--text-faint)" }}> · ignorado</span>}

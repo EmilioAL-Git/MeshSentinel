@@ -26,6 +26,7 @@ export interface NodeOut {
   last_seen_at: string | null;
   is_favorite: boolean;
   is_ignored: boolean;
+  is_nexus: boolean;
   preferred_gateway_id: string | null;
   node_type_override: string | null;
   online: boolean;
@@ -293,6 +294,8 @@ export const setNodeFavorite = (id: string, value: boolean) =>
   send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/favorite`, { value });
 export const setNodeIgnored = (id: string, value: boolean) =>
   send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/ignored`, { value });
+export const setNodeNexus = (id: string, value: boolean) =>
+  send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/nexus`, { value });
 export const setNodeTags = (id: string, tag_ids: number[]) =>
   send<void>("PUT", `/nodes/${encodeURIComponent(id)}/tags`, { tag_ids });
 export const fetchTags = () => get<TagOut[]>("/tags");
@@ -1140,3 +1143,112 @@ export const fetchSettings = () => get<SettingOut[]>("/settings");
 export const patchSetting = (key: string, value: number) =>
   send<SettingOut>("PATCH", `/settings/${encodeURIComponent(key)}`, { value });
 export const resetSetting = (key: string) => send<SettingOut>("DELETE", `/settings/${encodeURIComponent(key)}`);
+
+// ── JenTastic-Nexus (ADR 0027) ───────────────────────────────────────────────
+// El interruptor global gatea el módulo entero; la detección SOLO sugiere —
+// el marcado (setNodeNexus, arriba) es un paso aparte, siempre confirmado
+// por el operador.
+
+export interface NexusModeOut {
+  enabled: boolean;
+}
+
+export interface NexusCandidateOut {
+  node_id: string;
+  short_name: string | null;
+  version: string | null;
+  role: string | null;
+  marker: string | null;
+  already_marked: boolean;
+}
+
+export interface NexusScanOut {
+  candidates: NexusCandidateOut[];
+}
+
+export const fetchNexusMode = () => get<NexusModeOut>("/nexus/mode");
+export const setNexusMode = (enabled: boolean) => send<NexusModeOut>("PUT", "/nexus/mode", { enabled });
+export const scanForNexusNodes = (gatewayId: string, windowSeconds = 30) =>
+  send<NexusScanOut>("POST", "/nexus/scan", { gateway_id: gatewayId, window_seconds: windowSeconds });
+
+// ── Cola de operaciones (ADR 0027 §4) ────────────────────────────────────────
+// Vocabulario de operador (M4.1): pending/sent/confirmed/no_response — nunca
+// el vocabulario del pipeline de administración (modelo distinto: el
+// gateway nunca reporta resultado, la correlación es del backend).
+
+export type NexusTargetKind = "broadcast" | "local" | "node" | "mac" | "group";
+export type NexusOperationStatus = "pending" | "sent" | "confirmed" | "no_response";
+
+export interface NexusOperationIn {
+  gateway_id: string;
+  command: string;
+  args?: string[];
+  target_kind: NexusTargetKind;
+  target_value?: string | null;
+}
+
+export interface NexusOperationPreviewOut {
+  text: string;
+  destructive: boolean;
+  requires_save: boolean;
+  busy_seconds: number;
+}
+
+export interface NexusOperationOut {
+  id: number;
+  gateway_id: string;
+  target_kind: NexusTargetKind;
+  target_value: string | null;
+  command_name: string;
+  args: string[];
+  text: string;
+  destructive: boolean;
+  requires_save: boolean;
+  busy_seconds: number;
+  status: NexusOperationStatus;
+  created_by: string | null;
+  created_at: string | null;
+  sent_at: string | null;
+  response_at: string | null;
+  response_text: string | null;
+  response_kind: "structured" | "raw" | "unsupported" | null;
+  response_data: Record<string, unknown> | null;
+}
+
+export const previewNexusOperation = (body: NexusOperationIn) =>
+  send<NexusOperationPreviewOut>("POST", "/nexus/operations/preview", body);
+export const createNexusOperation = (body: NexusOperationIn) =>
+  send<NexusOperationOut>("POST", "/nexus/operations", body);
+export const fetchNexusOperations = (gatewayId?: string, status?: NexusOperationStatus, limit = 100) => {
+  const params = new URLSearchParams();
+  if (gatewayId) params.set("gateway_id", gatewayId);
+  if (status) params.set("status", status);
+  params.set("limit", String(limit));
+  return get<NexusOperationOut[]>(`/nexus/operations?${params.toString()}`);
+};
+
+/** Respuestas individuales de una operación de destino múltiple
+ * (broadcast/group, ADR 0027 §11) — vacío para destinos dirigidos. */
+export interface NexusOperationResponseOut {
+  id: number;
+  from_node_id: string;
+  received_at: string | null;
+  response_text: string;
+  response_kind: "structured" | "raw" | "unsupported";
+  response_data: Record<string, unknown> | null;
+}
+export const fetchNexusOperationResponses = (opId: number) =>
+  get<NexusOperationResponseOut[]>(`/nexus/operations/${opId}/responses`);
+
+// ── Catálogo (ADR 0027 §12): explorador de comandos, no texto libre ────────
+
+export interface NexusCatalogEntryOut {
+  name: string;
+  category: string;
+  aliases: string[];
+  mutation: "never" | "always" | "with_args";
+  destructive: boolean;
+  busy_seconds: number;
+  broadcast_forbidden: boolean;
+}
+export const fetchNexusCatalog = () => get<NexusCatalogEntryOut[]>("/nexus/catalog");

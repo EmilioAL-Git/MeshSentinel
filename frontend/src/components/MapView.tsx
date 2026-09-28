@@ -5,6 +5,8 @@ import { MapContainer, Marker, TileLayer, Tooltip, useMap, useMapEvents } from "
 import MarkerClusterGroup from "react-leaflet-cluster";
 import { activeGatewayCount, type GatewayOut, type NodeSummaryOut } from "../api/client";
 import { classifyNode } from "./fleet/classify";
+import { nexusCatMarkup } from "./nexus/NexusCatIcon";
+import { useNexusMode } from "./nexus/useNexusMode";
 import { useUrlList, useUrlNumber, useUrlParam } from "../hooks/useUrlState";
 import { LayerToggle, DEFAULT_MAP_LAYERS, type MapColorMode, type MapLayerState } from "./map/LayerToggle";
 import { LinksLayer } from "./map/LinksLayer";
@@ -93,8 +95,9 @@ function nodeIcon(
   hasAlert: boolean,
   colorMode: MapColorMode = "status",
   snr: number | null = null,
+  isNexus = false,
 ): L.DivIcon {
-  const key = `${online}-${isGateway}-${gatewayCount}-${selected}-${focused}-${hasAlert}-${colorMode}-${snr}`;
+  const key = `${online}-${isGateway}-${gatewayCount}-${selected}-${focused}-${hasAlert}-${colorMode}-${snr}-${isNexus}`;
   let icon = iconCache.get(key);
   if (!icon) {
     const color = colorFor(colorMode, online, isGateway, gatewayCount, snr);
@@ -108,6 +111,12 @@ function nodeIcon(
           `border-radius:8px;font-size:9px;line-height:12px;min-width:12px;text-align:center;` +
           `padding:0 2px;border:1px solid var(--bg)">${gatewayCount}</div>`
         : "";
+    // Insignia JenTastic-Nexus: mismo gato que Flota/Inspector, abajo a la
+    // izquierda para no chocar con el badge de redundancia (arriba/derecha).
+    const nexusBadge = isNexus
+      ? `<div style="position:absolute;bottom:-5px;left:-5px;background:var(--chassis);` +
+        `border-radius:3px;border:1px solid var(--bg);line-height:0;padding:1px">${nexusCatMarkup(10)}</div>`
+      : "";
     // Selección = anillo simple; Focus = anillo doble (§7.3). Ambos --accent.
     const ring = focused
       ? `<div style="position:absolute;inset:-6px;border:2px solid var(--accent);border-radius:50%"></div>` +
@@ -119,7 +128,7 @@ function nodeIcon(
     const halo = hasAlert ? `<div class="noc-alert-halo"></div>` : "";
     icon = L.divIcon({
       className: "",
-      html: `<div style="position:relative">${halo}${ring}<div style="${shape}background:${color};border:2px solid var(--bg);box-shadow:0 0 4px rgba(0,0,0,.6)"></div>${badge}</div>`,
+      html: `<div style="position:relative">${halo}${ring}<div style="${shape}background:${color};border:2px solid var(--bg);box-shadow:0 0 4px rgba(0,0,0,.6)"></div>${badge}${nexusBadge}</div>`,
       iconSize: [18, 18],
       iconAnchor: [9, 9],
     });
@@ -146,14 +155,16 @@ interface NodeMarkerProps {
 const NodeMarker = memo(
   function NodeMarker({ summary, isGateway, isSelected, isFocused, hasAlert, dimmed, colorMode, onShowDetail }: NodeMarkerProps) {
     const { node, last_position: pos, last_device_telemetry: tel } = summary;
+    const nexusModeOn = useNexusMode();
     if (!pos) return null;
     const activeLinks = summary.gateway_links.filter((l) => l.active);
     const battery =
       tel?.battery_level != null ? (tel.battery_level > 100 ? "⚡ ext." : `${tel.battery_level}%`) : null;
+    const isNexus = nexusModeOn && node.is_nexus;
     return (
       <Marker
         position={[pos.latitude, pos.longitude]}
-        icon={nodeIcon(node.online, isGateway, activeLinks.length, isSelected, isFocused, hasAlert, colorMode, node.snr)}
+        icon={nodeIcon(node.online, isGateway, activeLinks.length, isSelected, isFocused, hasAlert, colorMode, node.snr, isNexus)}
         opacity={dimmed ? 0.45 : 1}
         eventHandlers={{ click: () => onShowDetail(node.node_id) }}
       >
@@ -181,6 +192,7 @@ const NodeMarker = memo(
     prev.summary.node.snr === next.summary.node.snr &&
     prev.summary.node.last_seen_at === next.summary.node.last_seen_at &&
     prev.summary.node.is_favorite === next.summary.node.is_favorite &&
+    prev.summary.node.is_nexus === next.summary.node.is_nexus &&
     prev.summary.last_position?.latitude === next.summary.last_position?.latitude &&
     prev.summary.last_position?.longitude === next.summary.last_position?.longitude &&
     prev.summary.last_device_telemetry?.battery_level ===

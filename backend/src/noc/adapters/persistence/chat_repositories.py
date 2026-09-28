@@ -47,14 +47,22 @@ class SqlChatRepository:
         node_id: str | None = None,
         gateway_id: str | None = None,
         q: str | None = None,
+        since: Any | None = None,
     ) -> list[ChatMessage]:
         """Más recientes primero (mismo orden que el Registro), antes de
-        antes de `before_id` — scroll infinito hacia atrás."""
+        antes de `before_id` — scroll infinito hacia atrás.
+
+        `since` (datetime): usado por el escaneo Nexus (ADR 0027) para acotar
+        a los mensajes recibidos durante la ventana de escucha, sin depender
+        de `channel_index` (el backend no sabe qué índice auto-detectó el
+        gateway para el canal Nexus/JenT)."""
         stmt = select(ChatMessageModel).order_by(ChatMessageModel.id.desc()).limit(limit)
         if before_id is not None:
             stmt = stmt.where(ChatMessageModel.id < before_id)
         if channel_index is not None:
             stmt = stmt.where(ChatMessageModel.channel_index == channel_index)
+        if since is not None:
+            stmt = stmt.where(ChatMessageModel.received_at >= since)
         if dm_only:
             stmt = stmt.where(ChatMessageModel.to_node_id.is_not(None))
         elif broadcast_only:

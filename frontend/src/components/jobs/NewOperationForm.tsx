@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   createOperation,
   displayName,
@@ -14,6 +14,8 @@ import { t } from "../../tokens";
 import { GatewaySelect } from "../shell/GatewaySelect";
 import { NodeSelect } from "../NodeSelect";
 import { toast } from "../shell/Toast";
+import { NEXUS_SUPERSEDED_OPERATION_TYPES } from "../nexus/nativeOverlap";
+import { useNexusMode } from "../nexus/useNexusMode";
 
 // Creación de una operación individual (M1.1/M1.3), portada de la antigua
 // vista Operaciones al Centro de Trabajos. Los GETs se encolan directos;
@@ -59,6 +61,28 @@ export function NewOperationForm({
   const [confirming, setConfirming] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [gatewaySelection, setGatewaySelection] = useState<GatewaySelectionIn>(GATEWAY_SELECTION_PREFERRED);
+
+  // Modo Nexus (ADR 0027, decisión explícita del usuario): con el nodo
+  // elegido marcado como Nexus, las operaciones nativas que Nexus cubre al
+  // 100% (nativeOverlap.ts) desaparecen del selector — nunca a medias,
+  // nunca las que Nexus solo cubre parcialmente (config.set y similares).
+  const nexusModeOn = useNexusMode();
+  const selectedNodeIsNexus = summaries.find((s) => s.node.node_id === nodeId)?.node.is_nexus ?? false;
+  const hideNativeOverlap = nexusModeOn && selectedNodeIsNexus;
+  const visibleCapabilities = useMemo(
+    () =>
+      hideNativeOverlap
+        ? (capabilities.data ?? []).filter((c) => !NEXUS_SUPERSEDED_OPERATION_TYPES.has(c.operation_type))
+        : (capabilities.data ?? []),
+    [capabilities.data, hideNativeOverlap],
+  );
+  useEffect(() => {
+    if (hideNativeOverlap && NEXUS_SUPERSEDED_OPERATION_TYPES.has(opType)) {
+      resetOp("metadata.get");
+    }
+    // resetOp es estable entre renders (no depende de estado externo salvo setters).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hideNativeOverlap, opType]);
 
   const spec = useMemo(
     () => (capabilities.data ?? []).find((c) => c.operation_type === opType),
@@ -125,12 +149,17 @@ export function NewOperationForm({
           showOnlineStatus
         />
         <select style={input} value={opType} onChange={(e) => resetOp(e.target.value)}>
-          {(capabilities.data ?? []).map((c) => (
+          {visibleCapabilities.map((c) => (
             <option key={c.operation_type} value={c.operation_type}>
               {c.kind === "set" ? "✏️ " : ""}{c.operation_type} — {c.description}
             </option>
           ))}
         </select>
+        {hideNativeOverlap && (
+          <span style={{ color: t.textFaint, fontSize: 10.5 }} title="Renombrar y fijar posición se hacen desde la pestaña JenTastic-Nexus de este nodo (NAME/OWNER, SETCONFIG FIXED/LOC)">
+            (nodo Nexus: usa su pestaña para renombrar/fijar posición)
+          </span>
+        )}
         {sections.length > 0 && (
           <select style={input} value={section} onChange={(e) => setSection(e.target.value)}>
             <option value="">— sección —</option>

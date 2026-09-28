@@ -127,7 +127,7 @@ class SqlNodeRepository:
         return _node_entity(model) if model else None
 
     async def set_flag(self, node_id: str, flag: str, value: bool) -> Node | None:
-        assert flag in ("is_favorite", "is_ignored")
+        assert flag in ("is_favorite", "is_ignored", "is_nexus")
         model = await self._session.get(NodeModel, node_id)
         if model is None:
             return None

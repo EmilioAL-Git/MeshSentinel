@@ -446,7 +446,50 @@ class MeshtasticStreamTransport(Transport):
         return {"previous": previous, "requested": params, "verified": verified, "verify": verify}
 
     async def send_command(self, command: dict[str, Any]) -> None:
-        logger.warning("%s.command_rejected type=%s (not supported)", self.name, command.get("command_type"))
+        command_type = command.get("command_type")
+        if command_type == "command.send_text":
+            await self._send_text(command.get("payload") or {})
+            return
+        logger.warning("%s.command_rejected type=%s (not supported)", self.name, command_type)
+
+    async def _send_text(self, payload: dict[str, Any]) -> None:
+        """`command.send_text` (ADR 0027): control JenTastic-Nexus por texto.
+
+        Detección automática del canal por nombre ("Nexus"/"JenT",
+        insensible a mayúsculas) — nunca por índice fijo, decisión del
+        diseño. Sin ese canal configurado en el nodo local, se rechaza en
+        vez de mandar por el canal principal (nunca "casi acertar").
+        """
+        text = payload.get("text")
+        if not text:
+            logger.warning("%s.send_text_rejected (texto vacío)", self.name)
+            return
+        if self.status != "connected" or self._iface is None:
+            logger.warning("%s.send_text_rejected (no conectado)", self.name)
+            return
+        channel_index = await asyncio.to_thread(self._find_nexus_channel)
+        if channel_index is None:
+            logger.warning(
+                "%s.send_text_rejected (sin canal 'Nexus'/'JenT' configurado en el nodo local)",
+                self.name,
+            )
+            return
+        try:
+            await asyncio.to_thread(self._iface.sendText, text, channelIndex=channel_index)
+            logger.info("%s.send_text ch=%d len=%d", self.name, channel_index, len(text))
+        except Exception:
+            logger.exception("%s.send_text_failed", self.name)
+
+    _NEXUS_CHANNEL_NAMES = ("nexus", "jent")
+
+    def _find_nexus_channel(self) -> int | None:
+        channels = getattr(self._iface.localNode, "channels", None) or []
+        for ch in channels:
+            if ch.role == 0:  # DISABLED
+                continue
+            if (ch.settings.name or "").strip().lower() in self._NEXUS_CHANNEL_NAMES:
+                return int(ch.index)
+        return None
 
     async def close(self) -> None:
         self._closed.set()

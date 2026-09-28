@@ -12,3 +12,4 @@ dist/
 .DS_Store
 tsconfig.tsbuildinfo
 /CLAUDE.md
+tools/captures/

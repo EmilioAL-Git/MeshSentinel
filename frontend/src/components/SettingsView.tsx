@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchSettings, patchSetting, resetSetting, type SettingOut } from "../api/client";
+import { NexusPanel } from "./nexus/NexusPanel";
 import { toast } from "./shell/Toast";
 import { t } from "../tokens";
 
@@ -51,6 +52,7 @@ export function SettingsView() {
           </div>
         ))
       )}
+      <NexusPanel />
     </div>
   );
 }

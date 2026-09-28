@@ -17,6 +17,7 @@ from noc.adapters.api.routers import (
     dashboard,
     gateways,
     health,
+    nexus as nexus_router,
     nodes,
     organization,
     settings as settings_router,
@@ -42,6 +43,8 @@ from noc.application.auth.service import AuthService
 from noc.application.dashboard import DashboardService
 from noc.application.envelopes import make_event_envelope
 from noc.application.gateways.service import GatewayService
+from noc.application.nexus_gateway import NexusGateway
+from noc.application.nexus_operations import NexusOperationService
 from noc.application.ingest import IngestService
 from noc.application.settings_registry import apply_overrides
 from noc.config import get_settings
@@ -73,6 +76,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # reutiliza el mismo stream de comandos que el pipeline de administración
     app.state.gateways = GatewayService(app.state.db.session_factory, command_queue)
     app.state.event_bus.subscribe(app.state.gateways.handle_event)
+    # JenTastic-Nexus (ADR 0027): reutiliza el mismo stream de comandos; sin
+    # listener propio en el bus (relee chat_messages tras la ventana, no
+    # correlación en vivo — ver docstring de application/nexus_gateway.py)
+    app.state.nexus_gateway = NexusGateway(app.state.db.session_factory, command_queue)
 
     ingest = IngestService(
         app.state.db.session_factory,
@@ -108,6 +115,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.event_bus.subscribe(admin_service.handle_event)
     admin_service.start()
 
+    # Cola de operaciones JenTastic-Nexus (ADR 0027 §4): scheduler propio
+    # (espaciado de pacing.py, no "1 en vuelo"), el gateway nunca reporta
+    # resultado — la correlación se hace escuchando message.received.
+    nexus_ops = NexusOperationService(app.state.db.session_factory, command_queue)
+    app.state.nexus_operations = nexus_ops
+    app.state.event_bus.subscribe(nexus_ops.handle_event)
+    nexus_ops.start()
+
     await app.state.event_bus.start()
 
     # Motor de alertas (ADR 0012): listeners = notificador + WebSocket
@@ -127,6 +142,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await admin_service.stop()
+        await nexus_ops.stop()
         await alert_loop.stop()
         await app.state.event_bus.stop()
         activity.attach_store(None)
@@ -212,6 +228,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, prefix=settings.api_v1_prefix)
     app.include_router(topology.router, prefix=settings.api_v1_prefix)
     app.include_router(settings_router.router, prefix=settings.api_v1_prefix)
+    app.include_router(nexus_router.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app
 

@@ -35,6 +35,9 @@ import { trackOperations } from "../../opTracker";
 import { useActiveGroup } from "../../context/GroupContext";
 import { CATEGORY_DEFS, NODE_TYPE_OVERRIDE_OPTIONS, classifyNode } from "../fleet/classify";
 import { Signal } from "../fleet/instruments";
+import { NexusCatIcon } from "../nexus/NexusCatIcon";
+import { NodeNexusPanel } from "../nexus/NodeNexusPanel";
+import { useNexusMode } from "../nexus/useNexusMode";
 import {
   OP_STATUS_COLOR,
   OP_STATUS_LABEL,
@@ -66,6 +69,7 @@ const TABS = [
   "gateways",
   "config",
   "operations",
+  "nexus",
   "alerts",
   "history",
   "general",
@@ -78,6 +82,7 @@ const TAB_LABEL: Record<TabId, string> = {
   gateways: "Pasarelas",
   config: "Configuración",
   operations: "Operaciones",
+  nexus: "JenTastic-Nexus",
   alerts: "Alertas",
   history: "Histórico",
   general: "Organización",
@@ -386,6 +391,17 @@ export function Inspector({
   const [groupInput, setGroupInput] = useState("");
 
   const n = node.data;
+  const nexusModeOn = useNexusMode();
+  // Punto 7 del encargo (ADR 0027 §4/§7): pestaña "JenTastic-Nexus" separada
+  // de "Operaciones" (pipeline nativo AdminMessage/PKC, ADR 0013) — solo
+  // visible con el flag global ON y este nodo marcado, nunca uno sin el
+  // otro (mismo criterio que la insignia del gato). Si el nodo deja de
+  // cumplir esa condición mientras la pestaña estaba activa (se desmarca,
+  // se apaga el flag) cae a "Actividad" en vez de quedarse en una pestaña
+  // fantasma.
+  const showNexusTab = nexusModeOn && (n?.is_nexus ?? false);
+  const visibleTabs = showNexusTab ? TABS : TABS.filter((id) => id !== "nexus");
+  const effectiveTab: TabId = (visibleTabs as readonly TabId[]).includes(tab) ? tab : "log";
   const lastTel = telemetry.data?.[0];
   const deviceLatest = deviceHistory.data?.[0];
   const envLatest = envHistory.data?.[0];
@@ -463,6 +479,11 @@ export function Inspector({
       title={
         <>
           <span style={{ color: n?.online ? t.ok : t.textFaint, marginRight: 6 }}>●</span>
+          {nexusModeOn && n?.is_nexus && (
+            <span style={{ marginRight: 5 }}>
+              <NexusCatIcon size={16} />
+            </span>
+          )}
           {n?.short_name ?? nodeId}
           {n?.long_name && <span style={{ color: t.textDim, fontWeight: 400, marginLeft: 6 }}>{n.long_name}</span>}
         </>
@@ -518,163 +539,45 @@ export function Inspector({
         </>
       }
     >
-      {/* Cabecera: identidad + vitales grandes de un vistazo (≈20-25% de la ventana) */}
-      <div style={{ background: t.surface, borderBottom: `1px solid ${t.border}`, padding: "0.65rem 0.85rem", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "0.7rem" }}>
-          <div
-            title={categoryDef?.label ?? "Sin clasificar"}
-            style={{
-              width: 42,
-              height: 42,
-              flexShrink: 0,
-              borderRadius: 8,
-              background: t.surface2,
-              border: `1px solid ${t.border}`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 19,
-            }}
-          >
-            {categoryDef?.icon ?? "❓"}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ color: n?.online ? t.ok : t.textFaint, fontSize: 10 }}>{n?.online ? "●" : "○"}</span>
-              <span style={{ fontSize: 18, fontWeight: 700, color: t.text }}>{n?.short_name ?? nodeId}</span>
-              {n?.long_name && <span style={{ fontSize: 12.5, color: t.textDim, fontWeight: 400 }}>{n.long_name}</span>}
-              <span
-                onClick={() => copy(nodeId, "node_id")}
-                title="Copiar node_id"
-                style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint, cursor: "pointer" }}
+      {/* Cuerpo en dos columnas: caja grande de pestañas+comandos a la
+          izquierda, panel de detalles/info fijo a la derecha (pedido
+          explícito del usuario — antes todo apilado verticalmente). */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
+        {/* Columna izquierda: pestañas + contenido (comandos) */}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${t.border}` }}>
+          {/* Tira de pestañas */}
+          <div style={{ display: "flex", overflowX: "auto", borderBottom: `1px solid ${t.border}`, background: t.surface, flexShrink: 0 }}>
+            {visibleTabs.map((id) => (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: `2px solid ${effectiveTab === id ? t.accent : "transparent"}`,
+                  color: effectiveTab === id ? t.text : t.textDim,
+                  fontSize: 11.5,
+                  padding: "0.5rem 0.65rem",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                }}
               >
-                {nodeId} ⧉
-              </span>
-            </div>
-            <div style={{ color: t.textFaint, fontSize: 11, marginTop: 2 }}>
-              {categoryDef?.label ?? "Sin clasificar"} · {n?.hw_model ?? "—"} · fw {n?.firmware_version ?? "—"}
-              {n?.role ? ` · ${n.role}` : ""}
-            </div>
-            {(groupNames.length > 0 || (summary?.tags?.length ?? 0) > 0) && (
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
-                {groupNames.map((name) => (
-                  <span key={name} className="chip" style={{ borderColor: t.accent, color: t.accent }}>
-                    {name}
-                  </span>
-                ))}
-                {(summary?.tags ?? []).map((tg) => (
-                  <span key={tg.id} className="chip" style={{ borderColor: tg.color ?? t.border, color: tg.color ?? t.textDim }}>
-                    {tg.name}
-                  </span>
-                ))}
-              </div>
-            )}
+                {TAB_LABEL[id]}
+                {id === "operations" && badge(pendingOps.length)}
+                {id === "alerts" && badge(nodeActiveAlerts.length, nodeActiveAlerts.some((a) => a.severity === "CRITICAL") ? t.crit : t.warn)}
+                {id === "gateways" && badge(activeLinks.length, t.textDim)}
+              </button>
+            ))}
           </div>
-        </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))", gap: "0.55rem", marginTop: 10 }}>
-          <div>
-            <div style={microlabel}>BATERÍA</div>
-            {battery == null ? (
-              <div style={{ fontFamily: t.fontMono, fontSize: 18, color: t.textFaint }}>—</div>
-            ) : battery > 100 ? (
-              <div style={{ fontFamily: t.fontMono, fontSize: 18, color: t.ok }}>⚡ ext.</div>
-            ) : (
-              <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
-                <span style={{ fontFamily: t.fontMono, fontSize: 18, color: batteryColor ?? t.text }}>{battery}%</span>
-                <span className="track" style={{ width: 60 }}>
-                  <span className="fill" style={{ width: `${battery}%`, background: batteryColor ?? t.ok }} />
-                </span>
-              </div>
-            )}
-          </div>
-          <Vital label="SNR / RSSI" value={`${n?.snr ?? "—"} dB · ${n?.rssi ?? "—"} dBm`} />
-          <Vital label="SALTOS" value={n?.hops_away ?? "—"} />
-          <Vital label="VISTO" value={relativeTime(n?.last_seen_at)} />
-          <Vital label="PASARELA" value={primaryGatewayName ?? "—"} />
-        </div>
+          {/* Cuerpo: contenido de la pestaña activa */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem" }}>
+            {node.isError && <p style={{ color: t.crit }}>Error cargando {nodeId}</p>}
 
-        <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
-          <button style={actionBtn} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Encola metadata.get (solo lectura)">
-            ⚙ Pedir metadata
-          </button>
-          <button style={actionBtn} disabled={refreshConfig.isPending} onClick={() => refreshConfig.mutate()} title="Encola la lectura de todas las secciones de configuración (solo lectura)">
-            ⟳ Leer configuración
-          </button>
-        </div>
-        {n?.is_ignored && (
-          <div style={{ ...chipStyle(t.textDim), display: "inline-block", marginTop: 8, fontSize: 10.5 }}>
-            nodo ignorado — fuera de agregados y alertas
-          </div>
-        )}
-        {outsideActiveGroup && (
-          <div style={{ ...chipStyle(t.warn), display: "inline-block", marginTop: 8, marginLeft: n?.is_ignored ? 6 : 0, fontSize: 10.5 }}>
-            ⤫ nodo fuera del grupo activo ({activeGroup!.name})
-          </div>
-        )}
-      </div>
+        {effectiveTab === "log" && <NodeLog nodeId={nodeId} />}
 
-      {/* Fila de KPIs: valores grandes, cero tablas */}
-      <div className="kpis">
-        <div className="kpi">
-          <div className="v" style={{ color: batteryColor ?? t.text }}>
-            {batteryText}
-          </div>
-          <div className="k">🔋 Batería</div>
-        </div>
-        <div className="kpi">
-          <div className="v">{uptimeText}</div>
-          <div className="k">⏱ Uptime</div>
-        </div>
-        <div className="kpi">
-          <div className="v">{activeLinks.length}</div>
-          <div className="k">🛰 Pasarelas</div>
-        </div>
-        <div className="kpi">
-          <div className="v" style={{ color: nodeActiveAlerts.some((a) => a.severity === "CRITICAL") ? t.crit : nodeActiveAlerts.length > 0 ? t.warn : t.text }}>
-            {nodeActiveAlerts.length}
-          </div>
-          <div className="k">⚠ Alertas</div>
-        </div>
-        <div className="kpi">
-          <div className="v" style={{ color: pendingOps.length > 0 ? t.accent : t.text }}>{pendingOps.length}</div>
-          <div className="k">⚙ Operaciones</div>
-        </div>
-      </div>
-
-      {/* Tira de pestañas */}
-      <div style={{ display: "flex", overflowX: "auto", borderBottom: `1px solid ${t.border}`, background: t.surface, flexShrink: 0 }}>
-        {TABS.map((id) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            style={{
-              background: "transparent",
-              border: "none",
-              borderBottom: `2px solid ${tab === id ? t.accent : "transparent"}`,
-              color: tab === id ? t.text : t.textDim,
-              fontSize: 11.5,
-              padding: "0.5rem 0.65rem",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            {TAB_LABEL[id]}
-            {id === "operations" && badge(pendingOps.length)}
-            {id === "alerts" && badge(nodeActiveAlerts.length, nodeActiveAlerts.some((a) => a.severity === "CRITICAL") ? t.crit : t.warn)}
-            {id === "gateways" && badge(activeLinks.length, t.textDim)}
-          </button>
-        ))}
-      </div>
-
-      {/* Cuerpo: contenido de la pestaña activa */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem" }}>
-        {node.isError && <p style={{ color: t.crit }}>Error cargando {nodeId}</p>}
-
-        {tab === "log" && <NodeLog nodeId={nodeId} />}
-
-        {tab === "telemetry" && (
+        {effectiveTab === "telemetry" && (
           <>
             {!deviceLatest && !envLatest && <div className="empty">Sin telemetría registrada.</div>}
             {(deviceLatest || envLatest) && (
@@ -713,7 +616,7 @@ export function Inspector({
           </>
         )}
 
-        {tab === "position" && (
+        {effectiveTab === "position" && (
           <>
             {!lastPos && <div className="empty">Sin posiciones registradas (sin GPS o aún sin difundir).</div>}
             {lastPos && (
@@ -753,7 +656,7 @@ export function Inspector({
           </>
         )}
 
-        {tab === "gateways" && (
+        {effectiveTab === "gateways" && (
           <>
             {links.length === 0 && <div className="empty">Ninguna recepción directa registrada todavía.</div>}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -800,7 +703,7 @@ export function Inspector({
           </>
         )}
 
-        {tab === "config" && (
+        {effectiveTab === "config" && (
           <>
             {configState.isLoading && <div style={{ color: t.textFaint, fontSize: 12 }}>Cargando…</div>}
             {configState.data && (
@@ -841,7 +744,7 @@ export function Inspector({
           </>
         )}
 
-        {tab === "operations" && (
+        {effectiveTab === "operations" && (
           <>
             {nodeOps.length === 0 && <div className="empty">Sin operaciones recientes.</div>}
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -887,7 +790,11 @@ export function Inspector({
           </>
         )}
 
-        {tab === "alerts" && (
+        {effectiveTab === "nexus" && n?.short_name && (
+          <NodeNexusPanel nodeId={nodeId} shortName={n.short_name} defaultGatewayId={primaryGatewayId} />
+        )}
+
+        {effectiveTab === "alerts" && (
           <>
             {nodeAlerts.length === 0 && <div className="empty">Sin alertas para este nodo.</div>}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -924,7 +831,7 @@ export function Inspector({
           </>
         )}
 
-        {tab === "history" && (
+        {effectiveTab === "history" && (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.6rem 1rem" }}>
               <Section label="BATERÍA">
@@ -947,7 +854,7 @@ export function Inspector({
           </>
         )}
 
-        {tab === "general" && (
+        {effectiveTab === "general" && (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0 1rem" }}>
               <div>
@@ -1048,6 +955,140 @@ export function Inspector({
             </Section>
           </>
         )}
+          </div>
+        </div>
+
+        {/* Columna derecha: detalles / info del nodo, fija */}
+        <div
+          style={{
+            width: 300,
+            flexShrink: 0,
+            overflowY: "auto",
+            background: t.surface,
+            padding: "0.65rem 0.85rem",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "0.7rem" }}>
+            <div
+              title={categoryDef?.label ?? "Sin clasificar"}
+              style={{
+                width: 42,
+                height: 42,
+                flexShrink: 0,
+                borderRadius: 8,
+                background: t.surface2,
+                border: `1px solid ${t.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 19,
+              }}
+            >
+              {categoryDef?.icon ?? "❓"}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ color: n?.online ? t.ok : t.textFaint, fontSize: 10 }}>{n?.online ? "●" : "○"}</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: t.text }}>{n?.short_name ?? nodeId}</span>
+              </div>
+              {n?.long_name && <div style={{ fontSize: 12.5, color: t.textDim, fontWeight: 400, marginTop: 2 }}>{n.long_name}</div>}
+              <div
+                onClick={() => copy(nodeId, "node_id")}
+                title="Copiar node_id"
+                style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint, cursor: "pointer", marginTop: 2 }}
+              >
+                {nodeId} ⧉
+              </div>
+              <div style={{ color: t.textFaint, fontSize: 11, marginTop: 4 }}>
+                {categoryDef?.label ?? "Sin clasificar"} · {n?.hw_model ?? "—"} · fw {n?.firmware_version ?? "—"}
+                {n?.role ? ` · ${n.role}` : ""}
+              </div>
+              {(groupNames.length > 0 || (summary?.tags?.length ?? 0) > 0) && (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                  {groupNames.map((name) => (
+                    <span key={name} className="chip" style={{ borderColor: t.accent, color: t.accent }}>
+                      {name}
+                    </span>
+                  ))}
+                  {(summary?.tags ?? []).map((tg) => (
+                    <span key={tg.id} className="chip" style={{ borderColor: tg.color ?? t.border, color: tg.color ?? t.textDim }}>
+                      {tg.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.55rem", marginTop: 12 }}>
+            <div>
+              <div style={microlabel}>BATERÍA</div>
+              {battery == null ? (
+                <div style={{ fontFamily: t.fontMono, fontSize: 16, color: t.textFaint }}>—</div>
+              ) : battery > 100 ? (
+                <div style={{ fontFamily: t.fontMono, fontSize: 16, color: t.ok }}>⚡ ext.</div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: t.fontMono, fontSize: 16, color: batteryColor ?? t.text }}>{battery}%</span>
+                  <span className="track" style={{ width: 44 }}>
+                    <span className="fill" style={{ width: `${battery}%`, background: batteryColor ?? t.ok }} />
+                  </span>
+                </div>
+              )}
+            </div>
+            <Vital label="SNR / RSSI" value={`${n?.snr ?? "—"} dB · ${n?.rssi ?? "—"} dBm`} />
+            <Vital label="SALTOS" value={n?.hops_away ?? "—"} />
+            <Vital label="VISTO" value={relativeTime(n?.last_seen_at)} />
+            <Vital label="PASARELA" value={primaryGatewayName ?? "—"} />
+          </div>
+
+          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
+            <button style={actionBtn} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Encola metadata.get (solo lectura)">
+              ⚙ Pedir metadata
+            </button>
+            <button style={actionBtn} disabled={refreshConfig.isPending} onClick={() => refreshConfig.mutate()} title="Encola la lectura de todas las secciones de configuración (solo lectura)">
+              ⟳ Leer configuración
+            </button>
+          </div>
+          {n?.is_ignored && (
+            <div style={{ ...chipStyle(t.textDim), display: "inline-block", marginTop: 8, fontSize: 10.5 }}>
+              nodo ignorado — fuera de agregados y alertas
+            </div>
+          )}
+          {outsideActiveGroup && (
+            <div style={{ ...chipStyle(t.warn), display: "inline-block", marginTop: 8, marginLeft: n?.is_ignored ? 6 : 0, fontSize: 10.5 }}>
+              ⤫ nodo fuera del grupo activo ({activeGroup!.name})
+            </div>
+          )}
+
+          {/* KPIs: valores grandes, cero tablas */}
+          <div className="kpis" style={{ marginTop: 12, gridTemplateColumns: "1fr 1fr" }}>
+            <div className="kpi">
+              <div className="v" style={{ color: batteryColor ?? t.text }}>
+                {batteryText}
+              </div>
+              <div className="k">🔋 Batería</div>
+            </div>
+            <div className="kpi">
+              <div className="v">{uptimeText}</div>
+              <div className="k">⏱ Uptime</div>
+            </div>
+            <div className="kpi">
+              <div className="v">{activeLinks.length}</div>
+              <div className="k">🛰 Pasarelas</div>
+            </div>
+            <div className="kpi">
+              <div className="v" style={{ color: nodeActiveAlerts.some((a) => a.severity === "CRITICAL") ? t.crit : nodeActiveAlerts.length > 0 ? t.warn : t.text }}>
+                {nodeActiveAlerts.length}
+              </div>
+              <div className="k">⚠ Alertas</div>
+            </div>
+            <div className="kpi">
+              <div className="v" style={{ color: pendingOps.length > 0 ? t.accent : t.text }}>{pendingOps.length}</div>
+              <div className="k">⚙ Operaciones</div>
+            </div>
+          </div>
+        </div>
       </div>
     </FloatingWindow>
   );

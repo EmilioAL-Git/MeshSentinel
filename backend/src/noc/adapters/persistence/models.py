@@ -70,6 +70,8 @@ class NodeModel(Base):
     # Metadatos del NOC (M1.2) — nunca provienen de la malla ni la modifican
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     is_ignored: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Marcado manual JenTastic-Nexus (ADR 0027 §8) — mismo criterio.
+    is_nexus: Mapped[bool] = mapped_column(Boolean, default=False)
     # Selección inteligente de gateway (Nivel 2): sin FK, mismo criterio que
     # gateway_id de esta misma tabla (puede referenciar una pasarela sin fila propia aún).
     preferred_gateway_id: Mapped[str | None] = mapped_column(String(64))
@@ -503,3 +505,53 @@ class SystemSettingModel(Base):
     value: Mapped[Any] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class NexusOperationModel(Base):
+    """Cola persistente de operaciones JenTastic-Nexus (ADR 0027 §4) —
+    distinta de `admin_operations`: el gateway nunca reporta un resultado,
+    toda la correlación es del lado del backend (ver
+    `application/nexus_operations.py`)."""
+
+    __tablename__ = "nexus_operations"
+    __table_args__ = (
+        Index("ix_nexus_ops_status_created", "status", "created_at"),
+        Index("ix_nexus_ops_gateway_status", "gateway_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    gateway_id: Mapped[str] = mapped_column(String(64))
+    target_kind: Mapped[str] = mapped_column(String(16))
+    target_value: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    command_name: Mapped[str] = mapped_column(String(32))
+    args: Mapped[list[str]] = mapped_column(JSON, default=list)
+    text: Mapped[str] = mapped_column(String(256))
+    destructive: Mapped[bool] = mapped_column(Boolean, default=False)
+    requires_save: Mapped[bool] = mapped_column(Boolean, default=False)
+    busy_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    response_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class NexusOperationResponseModel(Base):
+    """Respuestas individuales a una operación de destino múltiple
+    (broadcast/group) — una fila por nodo que responde, append-only. Las
+    operaciones de destino único (local/node/mac) siguen usando solo los
+    campos `response_*` de `NexusOperationModel`, nunca esta tabla."""
+
+    __tablename__ = "nexus_operation_responses"
+    __table_args__ = (Index("ix_nexus_op_responses_operation", "operation_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    operation_id: Mapped[int] = mapped_column(Integer, ForeignKey("nexus_operations.id"))
+    from_node_id: Mapped[str] = mapped_column(String(16))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    response_text: Mapped[str] = mapped_column(Text)
+    response_kind: Mapped[str] = mapped_column(String(16))
+    response_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

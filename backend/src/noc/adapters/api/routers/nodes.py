@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.deps import RequireAuthDep, SessionDep
 from noc.adapters.api.schemas import (
     NeighborOut,
     NodeGatewayLinkOut,
@@ -89,6 +89,20 @@ async def set_favorite(node_id: str, body: FlagIn, session: SessionDep) -> NodeO
 @router.put("/{node_id}/ignored", response_model=NodeOut)
 async def set_ignored(node_id: str, body: FlagIn, session: SessionDep) -> NodeOut:
     node = await SqlNodeRepository(session).set_flag(node_id, "is_ignored", body.value)
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    await session.commit()
+    return NodeOut.from_entity(node, get_settings().node_offline_after_seconds)
+
+
+@router.put("/{node_id}/nexus", response_model=NodeOut)
+async def set_nexus(
+    node_id: str, body: FlagIn, session: SessionDep, current_user: RequireAuthDep
+) -> NodeOut:
+    """Marcado manual de nodo JenTastic-Nexus (ADR 0027 §8) — enteramente
+    manual, el operador confirma cada nodo (aceptando una sugerencia de
+    `POST /nexus/scan` o marcándolo directamente); nunca se activa solo."""
+    node = await SqlNodeRepository(session).set_flag(node_id, "is_nexus", body.value)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
     await session.commit()

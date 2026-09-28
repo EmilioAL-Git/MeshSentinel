@@ -182,7 +182,42 @@ class SimulatedTransport(Transport):
             )
 
     async def send_command(self, command: dict[str, Any]) -> None:
+        if command.get("command_type") == "command.send_text":
+            await self._simulate_send_text((command.get("payload") or {}).get("text") or "")
+            return
         logger.info("Simulated execution of %s -> %s", command.get("command_type"), command.get("target_node_id"))
+
+    # ── Simulación de JenTastic-Nexus (ADR 0027): solo lo mínimo para poder
+    # probar el flujo de detección (botón "Buscar nodos JT") sin hardware.
+    # No modela el catálogo de comandos real, solo responde a `/nexus[...]
+    # INFO` desde un par de nodos simulados marcados como "corren Nexus",
+    # fieles al formato real (captura de campo, ADR 0027 §0.0/§0.2).
+
+    def _nexus_capable_nodes(self) -> list[SimNode]:
+        # Nunca el nodo local (self._nodes[0]): en la malla real observada
+        # el propio emisor no se contesta a sí mismo en un INFO dirigido.
+        return [n for n in self._nodes[1:3] if n is not self._nodes[0]]
+
+    async def _simulate_send_text(self, text: str) -> None:
+        if " INFO" not in f" {text.strip()}":
+            return  # solo se simula INFO — es lo único que necesita la detección
+        for node in self._nexus_capable_nodes():
+            await asyncio.sleep(node.rng.uniform(0.5, 2.5))  # jitter de difusión, §4 del manual
+            await self._emit(
+                "message.received",
+                {
+                    "from_node_id": node.node_id,
+                    "to_node_id": None,
+                    "channel_index": 7,
+                    "text": (
+                        f"JT INFO:\n{node.node_id} [{node.short_name}]\n"
+                        f"Ver: 2.8.005.simulado\nRole: {node.role}\nMAC: 00:00:00:00:00:00"
+                    ),
+                    "snr": round(node.rng.uniform(4, 16), 2),
+                    "rssi": node.rng.randint(-20, -4),
+                    "hops_away": 0,
+                },
+            )
 
     # ── Administración simulada (M1.1): permite validar el pipeline completo
     # sin hardware, con latencias y timeouts deterministas por seed (ADR 0007).

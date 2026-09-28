@@ -24,6 +24,11 @@ class Node:
     # Metadatos del NOC (M1.2): solo BD propia, nunca tocan la malla
     is_favorite: bool = False
     is_ignored: bool = False
+    # Marcado manual de nodo JenTastic-Nexus (ADR 0027 §8): enteramente
+    # manual, nunca autodetectado ni escrito por eventos de la malla — solo
+    # por PUT /nodes/{id}/nexus, tras que el operador acepte una sugerencia
+    # de GET /nexus/scan (o lo marque a mano sin haber escaneado).
+    is_nexus: bool = False
     # Selección inteligente de gateway (Nivel 2): preferencia del operador
     # para las operaciones remotas de ESTE nodo — nunca escrita por eventos
     # de la malla, solo por PUT /nodes/{id}/preferred-gateway.
