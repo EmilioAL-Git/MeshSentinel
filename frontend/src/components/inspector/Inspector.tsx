@@ -466,11 +466,13 @@ export function Inspector({
     ) : null;
 
   // Apertura por defecto (solo antes de que exista una posición/tamaño
-  // persistidos, ver `FloatingWindow`/`usePersistedState`): centrada, 80 %
-  // del viewport — una vez el usuario arrastra o redimensiona, esa
-  // preferencia manda en las siguientes aperturas.
-  const defaultW = Math.round(window.innerWidth * 0.8);
-  const defaultH = Math.round(window.innerHeight * 0.8);
+  // persistidos, ver `FloatingWindow`/`usePersistedState`): 92 % del
+  // viewport (antes 80 % — pedido del usuario: "más grande para que quepa
+  // casi toda la información, pero sin ocupar toda la pantalla"), una vez
+  // el usuario arrastra o redimensiona, esa preferencia manda en las
+  // siguientes aperturas.
+  const defaultW = Math.round(window.innerWidth * 0.92);
+  const defaultH = Math.round(window.innerHeight * 0.92);
 
   return (
     <FloatingWindow
@@ -490,7 +492,7 @@ export function Inspector({
       }
       defaultPos={{ x: Math.round((window.innerWidth - defaultW) / 2), y: Math.round((window.innerHeight - defaultH) / 2) }}
       defaultSize={{ w: defaultW, h: defaultH }}
-      minWidth={420}
+      minWidth={640}
       minHeight={420}
       onClose={onClose}
       headerActions={
@@ -545,22 +547,34 @@ export function Inspector({
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
         {/* Columna izquierda: pestañas + contenido (comandos) */}
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${t.border}` }}>
-          {/* Tira de pestañas */}
-          <div style={{ display: "flex", overflowX: "auto", borderBottom: `1px solid ${t.border}`, background: t.surface, flexShrink: 0 }}>
+          {/* Tira de pestañas: botones claros en varias líneas si no caben
+              en una sola (antes una fila con scroll horizontal, difícil de
+              descubrir — pedido explícito del usuario). */}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              borderBottom: `1px solid ${t.border}`,
+              background: t.surface,
+              padding: "0.5rem 0.6rem",
+              flexShrink: 0,
+            }}
+          >
             {visibleTabs.map((id) => (
               <button
                 key={id}
                 onClick={() => setTab(id)}
                 style={{
-                  background: "transparent",
-                  border: "none",
-                  borderBottom: `2px solid ${effectiveTab === id ? t.accent : "transparent"}`,
+                  background: effectiveTab === id ? t.accentTint : t.surface2,
+                  border: `1px solid ${effectiveTab === id ? t.accent : t.borderSubtle}`,
                   color: effectiveTab === id ? t.text : t.textDim,
-                  fontSize: 11.5,
-                  padding: "0.5rem 0.65rem",
+                  fontSize: 12,
+                  fontWeight: effectiveTab === id ? 650 : 500,
+                  borderRadius: 5,
+                  padding: "0.4rem 0.75rem",
                   cursor: "pointer",
                   whiteSpace: "nowrap",
-                  flexShrink: 0,
                 }}
               >
                 {TAB_LABEL[id]}
@@ -961,11 +975,11 @@ export function Inspector({
         {/* Columna derecha: detalles / info del nodo, fija */}
         <div
           style={{
-            width: 300,
+            width: 340,
             flexShrink: 0,
             overflowY: "auto",
             background: t.surface,
-            padding: "0.65rem 0.85rem",
+            padding: "0.75rem 0.9rem",
           }}
         >
           <div style={{ display: "flex", alignItems: "flex-start", gap: "0.7rem" }}>
@@ -1020,15 +1034,15 @@ export function Inspector({
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.55rem", marginTop: 12 }}>
-            <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.7rem 0.6rem", marginTop: 14 }}>
+            <div style={{ minWidth: 0 }}>
               <div style={microlabel}>BATERÍA</div>
               {battery == null ? (
                 <div style={{ fontFamily: t.fontMono, fontSize: 16, color: t.textFaint }}>—</div>
               ) : battery > 100 ? (
                 <div style={{ fontFamily: t.fontMono, fontSize: 16, color: t.ok }}>⚡ ext.</div>
               ) : (
-                <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
                   <span style={{ fontFamily: t.fontMono, fontSize: 16, color: batteryColor ?? t.text }}>{battery}%</span>
                   <span className="track" style={{ width: 44 }}>
                     <span className="fill" style={{ width: `${battery}%`, background: batteryColor ?? t.ok }} />
@@ -1036,17 +1050,17 @@ export function Inspector({
                 </div>
               )}
             </div>
-            <Vital label="SNR / RSSI" value={`${n?.snr ?? "—"} dB · ${n?.rssi ?? "—"} dBm`} />
             <Vital label="SALTOS" value={n?.hops_away ?? "—"} />
+            <Vital label="SNR / RSSI" value={`${n?.snr ?? "—"} dB · ${n?.rssi ?? "—"} dBm`} />
             <Vital label="VISTO" value={relativeTime(n?.last_seen_at)} />
             <Vital label="PASARELA" value={primaryGatewayName ?? "—"} />
           </div>
 
-          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
-            <button style={actionBtn} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Encola metadata.get (solo lectura)">
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
+            <button style={{ ...actionBtn, width: "100%" }} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Encola metadata.get (solo lectura)">
               ⚙ Pedir metadata
             </button>
-            <button style={actionBtn} disabled={refreshConfig.isPending} onClick={() => refreshConfig.mutate()} title="Encola la lectura de todas las secciones de configuración (solo lectura)">
+            <button style={{ ...actionBtn, width: "100%" }} disabled={refreshConfig.isPending} onClick={() => refreshConfig.mutate()} title="Encola la lectura de todas las secciones de configuración (solo lectura)">
               ⟳ Leer configuración
             </button>
           </div>

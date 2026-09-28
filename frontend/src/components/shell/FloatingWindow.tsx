@@ -196,12 +196,15 @@ export function FloatingWindow({
 
   // Velo de fondo (solo visual, NUNCA modal): la ventana sigue sin bloquear
   // el mapa/resto de la UI — `pointer-events: none` deja pasar todos los
-  // clics/drags al contenido de detrás. Solo sube el contraste del panel.
+  // clics/drags al contenido de detrás. Más oscuro + difuminado (pedido del
+  // usuario) para que la ventana se distinga claramente del fondo.
   const backdropStyle: CSSProperties = {
     position: "fixed",
     inset: 0,
     zIndex: zIndex - 1,
-    background: "rgba(0, 0, 0, 0.4)",
+    background: "rgba(0, 0, 0, 0.6)",
+    backdropFilter: "blur(3px)",
+    WebkitBackdropFilter: "blur(3px)",
     pointerEvents: "none",
   };
 
