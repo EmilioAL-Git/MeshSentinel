@@ -33,6 +33,7 @@ class SettingOut(BaseModel):
     default_value: float
     value: float
     overridden: bool
+    choices: list[tuple[str, float]] | None
 
 
 class SettingPatchIn(BaseModel):
@@ -52,6 +53,7 @@ def _out(spec: Any, default_value: float, value: float, overridden: bool) -> Set
         default_value=default_value,
         value=value,
         overridden=overridden,
+        choices=list(spec.choices) if spec.choices is not None else None,
     )
 
 

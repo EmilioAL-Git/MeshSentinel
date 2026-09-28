@@ -11,6 +11,10 @@ function fmt(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
 }
 
+function choiceLabel(setting: SettingOut, value: number): string {
+  return setting.choices?.find(([, v]) => v === value)?.[0] ?? `${fmt(value)}${setting.unit ? ` ${setting.unit}` : ""}`;
+}
+
 /**
  * Panel "Ajustes": umbrales operacionales editables sin redeploy (backend
  * Settings + overrides en BD). Cero lógica por parámetro — el backend manda
@@ -98,15 +102,27 @@ function SettingRow({ setting, onChanged }: { setting: SettingOut; onChanged: ()
       <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
         {editing ? (
           <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-            <input
-              type="number"
-              step={setting.value_type === "int" ? 1 : "any"}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              style={{ width: 100 }}
-              autoFocus
-            />
-            {setting.unit && <span style={{ color: t.textDim }}>{setting.unit}</span>}
+            {setting.choices ? (
+              <select value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus>
+                {setting.choices.map(([label, value]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <>
+                <input
+                  type="number"
+                  step={setting.value_type === "int" ? 1 : "any"}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  style={{ width: 100 }}
+                  autoFocus
+                />
+                {setting.unit && <span style={{ color: t.textDim }}>{setting.unit}</span>}
+              </>
+            )}
             <button className="btn" onClick={save} disabled={saveMutation.isPending}>
               Guardar
             </button>
@@ -127,11 +143,10 @@ function SettingRow({ setting, onChanged }: { setting: SettingOut; onChanged: ()
               style={{ cursor: "pointer", fontFamily: t.fontMono }}
               title="Editar"
             >
-              {fmt(setting.value)}
-              {setting.unit ? ` ${setting.unit}` : ""}
+              {choiceLabel(setting, setting.value)}
             </span>
             {setting.overridden && (
-              <span className="chip" title={`Valor de fábrica: ${fmt(setting.default_value)}${setting.unit ? ` ${setting.unit}` : ""}`}>
+              <span className="chip" title={`Valor de fábrica: ${choiceLabel(setting, setting.default_value)}`}>
                 personalizado
               </span>
             )}

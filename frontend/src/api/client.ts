@@ -1137,6 +1137,7 @@ export interface SettingOut {
   default_value: number;
   value: number;
   overridden: boolean;
+  choices: [string, number][] | null;
 }
 
 export const fetchSettings = () => get<SettingOut[]>("/settings");

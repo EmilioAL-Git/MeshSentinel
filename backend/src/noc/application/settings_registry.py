@@ -24,6 +24,9 @@ class SettingSpec:
     unit: str | None = None
     min_value: float | None = None
     description: str = ""
+    # Presets (etiqueta, valor en la unidad nativa del campo) para renderizar un
+    # desplegable en vez de un número libre. None = número libre (por defecto).
+    choices: tuple[tuple[str, float], ...] | None = None
 
 
 CATEGORY_LABELS: dict[str, str] = {
@@ -38,6 +41,16 @@ SETTINGS_REGISTRY: list[SettingSpec] = [
         "node_offline_after_seconds", "network", "Nodo sin actividad → offline",
         "int", "s", 30,
         "Silencio tras el cual un nodo se considera offline en toda la aplicación.",
+        choices=(
+            ("15 min", 900),
+            ("30 min", 1800),
+            ("1 h", 3600),
+            ("2 h", 7200),
+            ("4 h", 14400),
+            ("6 h", 21600),
+            ("12 h", 43200),
+            ("24 h", 86400),
+        ),
     ),
     SettingSpec(
         "gateway_stale_after_seconds", "network", "Pasarela sin latido → caída",
