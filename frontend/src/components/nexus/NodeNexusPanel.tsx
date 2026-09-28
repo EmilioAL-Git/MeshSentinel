@@ -4,9 +4,11 @@ import {
   createNexusOperation,
   fetchGateways,
   fetchNexusOperations,
+  fetchNexusSettings,
   previewNexusOperation,
   type NexusOperationOut,
   type NexusOperationPreviewOut,
+  type NexusTargetKind,
 } from "../../api/client";
 import { toast } from "../shell/Toast";
 import { t } from "../../tokens";
@@ -43,6 +45,7 @@ const input: CSSProperties = {
  * destino.
  */
 export function NodeNexusPanel({
+  nodeId,
   shortName,
   defaultGatewayId,
 }: {
@@ -53,6 +56,14 @@ export function NodeNexusPanel({
   const queryClient = useQueryClient();
   const gatewaysQuery = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
   const gateways = (gatewaysQuery.data ?? []).filter((g) => g.status === "connected");
+  // Ajuste "direccionar por defecto" (ADR 0027 §13, id vs shortname): decide
+  // con qué -kind/-value habla ESTE panel con SU nodo — nunca cambia lo que
+  // el operador puede elegir en el formulario genérico de Ajustes, solo el
+  // valor por defecto de esta pestaña, escopada a un único nodo.
+  const settingsQuery = useQuery({ queryKey: ["nexus-settings"], queryFn: fetchNexusSettings });
+  const addressingMode = settingsQuery.data?.addressing_mode ?? "shortname";
+  const targetKind: NexusTargetKind = addressingMode === "device_id" ? "device" : "node";
+  const targetValue = addressingMode === "device_id" ? nodeId : shortName;
 
   const [gatewayId, setGatewayId] = useState(defaultGatewayId ?? "");
   const [command, setCommand] = useState("");
@@ -62,21 +73,28 @@ export function NodeNexusPanel({
 
   // Historial compartido: alimenta tanto la sección de Seguridad (último
   // SECURITY confirmado) como el listado de abajo — una sola query con
-  // polling de 3 s, en vez de duplicarla por sección.
+  // polling de 3 s, en vez de duplicarla por sección. Empareja por
+  // CUALQUIERA de los dos direccionamientos posibles (shortname/-node o
+  // node_id/-device): el operador puede haber cambiado de ajuste desde la
+  // última operación, el historial de este nodo no debe perder esas filas.
   const opsQuery = useQuery({
-    queryKey: ["nexus-operations", "node", shortName],
+    queryKey: ["nexus-operations", "node", nodeId],
     queryFn: () => fetchNexusOperations(undefined, undefined, 200),
     refetchInterval: 3000,
   });
-  const ops = (opsQuery.data ?? []).filter((op) => op.target_kind === "node" && op.target_value === shortName);
+  const ops = (opsQuery.data ?? []).filter(
+    (op) =>
+      (op.target_kind === "node" && op.target_value === shortName) ||
+      (op.target_kind === "device" && op.target_value === nodeId),
+  );
 
   const args = argsInput.trim() ? argsInput.trim().split(/\s+/) : [];
   const body = {
     gateway_id: gatewayId,
     command: command.trim().toUpperCase(),
     args,
-    target_kind: "node" as const,
-    target_value: shortName,
+    target_kind: targetKind,
+    target_value: targetValue,
   };
   const canBuild = gatewayId !== "" && command.trim() !== "";
 
@@ -110,7 +128,7 @@ export function NodeNexusPanel({
   });
 
   const needsTypedConfirm = preview?.destructive ?? false;
-  const canQueue = preview != null && (!needsTypedConfirm || confirmText.trim() === shortName);
+  const canQueue = preview != null && (!needsTypedConfirm || confirmText.trim() === targetValue);
 
   const prefill = (cmd: string, argsStr: string) => {
     setCommand(cmd);
@@ -120,19 +138,20 @@ export function NodeNexusPanel({
 
   return (
     <div>
-      <NodeNexusSecurity ops={ops} gatewayId={gatewayId} shortName={shortName} onPrefill={prefill} />
+      <NodeNexusSecurity ops={ops} gatewayId={gatewayId} targetKind={targetKind} targetValue={targetValue} onPrefill={prefill} />
       <div style={{ marginTop: 8 }}>
-        <NodeNexusProfile ops={ops} gatewayId={gatewayId} shortName={shortName} onPrefill={prefill} />
+        <NodeNexusProfile ops={ops} gatewayId={gatewayId} targetKind={targetKind} targetValue={targetValue} onPrefill={prefill} />
       </div>
       <div style={{ marginTop: 8 }}>
-        <NodeNexusFavorites ops={ops} gatewayId={gatewayId} shortName={shortName} onPrefill={prefill} />
+        <NodeNexusFavorites ops={ops} gatewayId={gatewayId} targetKind={targetKind} targetValue={targetValue} onPrefill={prefill} />
       </div>
       <div style={{ marginTop: 8 }}>
-        <NodeNexusZeroHop ops={ops} gatewayId={gatewayId} shortName={shortName} onPrefill={prefill} />
+        <NodeNexusZeroHop ops={ops} gatewayId={gatewayId} targetKind={targetKind} targetValue={targetValue} onPrefill={prefill} />
       </div>
 
       <p style={{ color: t.textFaint, fontSize: 11.5, margin: "0.8rem 0 0.6rem" }}>
-        Comandos por texto al firmware JenTastic-Nexus de este nodo (<code>-node {shortName}</code>
+        Comandos por texto al firmware JenTastic-Nexus de este nodo (
+        <code>{targetKind === "device" ? "-device" : "-node"} {targetValue}</code>
         ), siempre con previsualización antes de encolar.
       </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
@@ -175,7 +194,7 @@ export function NodeNexusPanel({
           {needsTypedConfirm && (
             <div style={{ marginTop: 6 }}>
               <div style={{ color: t.textFaint, fontSize: 10.5 }}>
-                Comando destructivo — escribe <strong style={{ fontFamily: t.fontMono }}>{shortName}</strong> para confirmar
+                Comando destructivo — escribe <strong style={{ fontFamily: t.fontMono }}>{targetValue}</strong> para confirmar
               </div>
               <input
                 style={{ ...input, display: "block", marginTop: 4, width: 160 }}
@@ -222,12 +241,14 @@ const SECURITY_BIT_LABEL: Record<string, string> = {
 function NodeNexusSecurity({
   ops,
   gatewayId,
-  shortName,
+  targetKind,
+  targetValue,
   onPrefill,
 }: {
   ops: NexusOperationOut[];
   gatewayId: string;
-  shortName: string;
+  targetKind: NexusTargetKind;
+  targetValue: string;
   onPrefill: (command: string, args: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -243,8 +264,8 @@ function NodeNexusSecurity({
         gateway_id: gatewayId,
         command: "SECURITY",
         args: [],
-        target_kind: "node" as const,
-        target_value: shortName,
+        target_kind: targetKind,
+        target_value: targetValue,
       };
       return createNexusOperation(opBody);
     },
@@ -346,12 +367,14 @@ const PROFILE_FIELDS: { configKey: string; setField: string; label: string; kind
 function NodeNexusProfile({
   ops,
   gatewayId,
-  shortName,
+  targetKind,
+  targetValue,
   onPrefill,
 }: {
   ops: NexusOperationOut[];
   gatewayId: string;
-  shortName: string;
+  targetKind: NexusTargetKind;
+  targetValue: string;
   onPrefill: (command: string, args: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -372,8 +395,8 @@ function NodeNexusProfile({
         gateway_id: gatewayId,
         command: "CONFIG",
         args: [],
-        target_kind: "node" as const,
-        target_value: shortName,
+        target_kind: targetKind,
+        target_value: targetValue,
       });
     },
     onSuccess: () => {
@@ -478,12 +501,14 @@ function NodeNexusProfile({
 function NodeNexusFavorites({
   ops,
   gatewayId,
-  shortName,
+  targetKind,
+  targetValue,
   onPrefill,
 }: {
   ops: NexusOperationOut[];
   gatewayId: string;
-  shortName: string;
+  targetKind: NexusTargetKind;
+  targetValue: string;
   onPrefill: (command: string, args: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -504,7 +529,7 @@ function NodeNexusFavorites({
     mutationFn: async (command: "FAVS" | "IGNORED") => {
       if (!gatewayId) throw new Error("Elige antes una pasarela en el formulario de abajo");
       return createNexusOperation({
-        gateway_id: gatewayId, command, args: [], target_kind: "node" as const, target_value: shortName,
+        gateway_id: gatewayId, command, args: [], target_kind: targetKind, target_value: targetValue,
       });
     },
     onSuccess: (_data, command) => {
@@ -595,12 +620,14 @@ function NodeNexusFavorites({
 function NodeNexusZeroHop({
   ops,
   gatewayId,
-  shortName,
+  targetKind,
+  targetValue,
   onPrefill,
 }: {
   ops: NexusOperationOut[];
   gatewayId: string;
-  shortName: string;
+  targetKind: NexusTargetKind;
+  targetValue: string;
   onPrefill: (command: string, args: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -615,7 +642,7 @@ function NodeNexusZeroHop({
     mutationFn: async () => {
       if (!gatewayId) throw new Error("Elige antes una pasarela en el formulario de abajo");
       return createNexusOperation({
-        gateway_id: gatewayId, command: "ZH", args: ["LIST"], target_kind: "node" as const, target_value: shortName,
+        gateway_id: gatewayId, command: "ZH", args: ["LIST"], target_kind: targetKind, target_value: targetValue,
       });
     },
     onSuccess: () => {

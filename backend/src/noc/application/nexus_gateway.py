@@ -30,6 +30,7 @@ from noc.application.envelopes import make_command_envelope
 from noc.application.nexus.addressing import Broadcast
 from noc.application.nexus.builder import build_command
 from noc.application.nexus.parsers import parse_response
+from noc.application.nexus_settings import merge_settings
 
 logger = logging.getLogger("noc.nexus")
 
@@ -95,16 +96,23 @@ class NexusGateway:
         window_seconds: float = DEFAULT_SCAN_WINDOW_SECONDS,
     ) -> list[NexusCandidate]:
         now = datetime.now(timezone.utc)
+        async with self._session_factory() as session:
+            overrides = await SqlSystemSettingsRepository(session).list_all()
+        settings = merge_settings(overrides)
+        scan_cooldown = settings["scan_cooldown_seconds"]
+
         last = self._last_scan_at.get(gateway_id)
         if last is not None:
             elapsed = (now - last).total_seconds()
-            if elapsed < MIN_SECONDS_BETWEEN_SCANS:
-                raise NexusScanCooldownError(MIN_SECONDS_BETWEEN_SCANS - elapsed)
+            if elapsed < scan_cooldown:
+                raise NexusScanCooldownError(scan_cooldown - elapsed)
         self._last_scan_at[gateway_id] = now
 
-        command = build_command("INFO", target=Broadcast())
+        command = build_command("INFO", target=Broadcast(), prefix=settings["command_prefix"])
         envelope = make_command_envelope(
-            "command.send_text", {"text": command.text}, issued_by=issued_by
+            "command.send_text",
+            {"text": command.text, "channel_name": settings["channel_name"]},
+            issued_by=issued_by,
         )
         await self._queue.enqueue(gateway_id, envelope)
         logger.info("nexus.scan_started gateway=%s window=%ss", gateway_id, window_seconds)

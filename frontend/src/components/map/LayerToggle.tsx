@@ -16,6 +16,8 @@ export interface MapLayerState {
   showUsers: boolean;
   showFixed: boolean;
   showFavoritesOnly: boolean;
+  /** Aísla: solo nodos marcados JenTastic-Nexus (requiere el módulo activo). */
+  showNexusOnly: boolean;
   showLinks: boolean;
   /** Enlaces nodo↔nodo reales (NEIGHBORINFO_APP) — topología de malla. */
   showNeighbors: boolean;
@@ -34,6 +36,7 @@ export const DEFAULT_MAP_LAYERS: MapLayerState = {
   showUsers: true,
   showFixed: true,
   showFavoritesOnly: false,
+  showNexusOnly: false,
   showLinks: false,
   showNeighbors: false,
   showTraces: false,
@@ -55,9 +58,12 @@ const chipBtn = (active: boolean): React.CSSProperties => ({
 export function LayerToggle({
   layers,
   onChange,
+  showNexusToggle = false,
 }: {
   layers: MapLayerState;
   onChange: (next: MapLayerState) => void;
+  /** Módulo JenTastic-Nexus activo (ADR 0027) — si no, ni se ofrece el filtro. */
+  showNexusToggle?: boolean;
 }) {
   const set = <K extends keyof MapLayerState>(key: K, value: MapLayerState[K]) =>
     onChange({ ...layers, [key]: value });
@@ -84,6 +90,15 @@ export function LayerToggle({
         >
           ★ Favoritos
         </button>
+        {showNexusToggle && (
+          <button
+            style={chipBtn(layers.showNexusOnly)}
+            onClick={() => set("showNexusOnly", !layers.showNexusOnly)}
+            title="Solo nodos marcados JenTastic-Nexus, oculta el resto"
+          >
+            🐱 Solo Nexus
+          </button>
+        )}
         <button style={chipBtn(layers.showLinks)} onClick={() => set("showLinks", !layers.showLinks)}>
           ╱ Enlaces
         </button>

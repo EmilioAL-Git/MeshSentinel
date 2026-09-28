@@ -109,6 +109,45 @@ async def test_send_text_rejected_when_empty():
     assert iface.sent == []
 
 
+async def test_channel_name_override_matches_only_that_name():
+    t = make_transport()
+    # Dos canales candidatos con nombres distintos de los por defecto ("Nexus"/"JenT");
+    # el ajuste `nexus.channel_name` (ADR 0027 §13) debe encontrar el que coincide
+    # exactamente, ignorando los nombres autodetectados por defecto.
+    t._iface = FakeIface(
+        [
+            FakeChannel(0, 1, FakeChannelSettings("Primary")),
+            FakeChannel(3, 2, FakeChannelSettings("Ops")),
+        ]
+    )
+    assert t._find_nexus_channel("Ops") == 3
+    assert t._find_nexus_channel("ops") == 3  # insensible a mayúsculas
+    assert t._find_nexus_channel() is None  # sin override, "Ops" no está en la lista por defecto
+
+
+async def test_send_text_uses_channel_name_from_payload():
+    t = make_transport()
+    t.status = "connected"
+    iface = FakeIface(
+        [
+            FakeChannel(0, 1, FakeChannelSettings("Primary")),
+            FakeChannel(3, 2, FakeChannelSettings("Ops")),
+        ]
+    )
+    t._iface = iface
+    await t._send_text({"text": "/nexus INFO", "channel_name": "Ops"})
+    assert iface.sent == [("/nexus INFO", 3)]
+
+
+async def test_send_text_rejected_when_channel_name_override_not_found():
+    t = make_transport()
+    t.status = "connected"
+    iface = FakeIface(channels(nexus_name="Nexus"))  # "Nexus" existe, pero no es lo pedido
+    t._iface = iface
+    await t._send_text({"text": "/nexus INFO", "channel_name": "Ops"})
+    assert iface.sent == []
+
+
 async def test_send_command_dispatches_send_text():
     t = make_transport()
     t.status = "connected"

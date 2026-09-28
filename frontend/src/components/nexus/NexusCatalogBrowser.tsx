@@ -1,6 +1,6 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchNexusCatalog, type NexusCatalogEntryOut } from "../../api/client";
+import { fetchNexusCatalog, fetchNexusSettings, type NexusCatalogEntryOut } from "../../api/client";
 import { t } from "../../tokens";
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -65,9 +65,16 @@ export function NexusCatalogBrowser({ onSelect }: { onSelect: (name: string) => 
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const catalog = useQuery({ queryKey: ["nexus-catalog"], queryFn: fetchNexusCatalog, enabled: open });
+  // Ajustes (ADR 0027 §13): hidden_commands filtra el explorador (nunca el
+  // catálogo real del backend, solo lo que se OFRECE aquí — el comando
+  // sigue siendo válido si se escribe a mano) y catalog_collapsed_default
+  // decide si las categorías empiezan plegadas o abiertas.
+  const settings = useQuery({ queryKey: ["nexus-settings"], queryFn: fetchNexusSettings, enabled: open });
+  const hidden = useMemo(() => new Set(settings.data?.hidden_commands ?? []), [settings.data]);
+  const collapsedDefault = settings.data?.catalog_collapsed_default ?? false;
 
   const grouped = useMemo(() => {
-    const entries = catalog.data ?? [];
+    const entries = (catalog.data ?? []).filter((e) => !hidden.has(e.name));
     const q = filter.trim().toUpperCase();
     const filtered = q
       ? entries.filter((e) => e.name.includes(q) || e.aliases.some((a) => a.includes(q)))
@@ -79,12 +86,14 @@ export function NexusCatalogBrowser({ onSelect }: { onSelect: (name: string) => 
       byCategory.set(entry.category, list);
     }
     return CATEGORY_ORDER.filter((c) => byCategory.has(c)).map((c) => [c, byCategory.get(c)!] as const);
-  }, [catalog.data, filter]);
+  }, [catalog.data, filter, hidden]);
 
   return (
     <div>
       <button style={btn} onClick={() => setOpen((v) => !v)}>
-        {open ? "Cerrar catálogo ▴" : `Explorar catálogo (${catalog.data?.length ?? "…"}) ▾`}
+        {open
+          ? "Cerrar catálogo ▴"
+          : `Explorar catálogo (${catalog.data ? catalog.data.length - hidden.size : "…"}) ▾`}
       </button>
       {open && (
         <div
@@ -120,7 +129,7 @@ export function NexusCatalogBrowser({ onSelect }: { onSelect: (name: string) => 
             <div style={{ color: t.textFaint, fontSize: 11.5 }}>Sin coincidencias.</div>
           )}
           {grouped.map(([category, entries]) => (
-            <details key={category} open={grouped.length <= 3 || filter.trim() !== ""}>
+            <details key={category} open={!collapsedDefault ? grouped.length <= 3 || filter.trim() !== "" : filter.trim() !== ""}>
               <summary style={{ cursor: "pointer", fontSize: 11, color: t.textDim, padding: "0.15rem 0" }}>
                 {CATEGORY_LABEL[category] ?? category} <span style={{ color: t.textFaint }}>({entries.length})</span>
               </summary>

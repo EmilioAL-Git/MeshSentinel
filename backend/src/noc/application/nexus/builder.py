@@ -5,17 +5,20 @@ consecuencias en el texto (truncado de `ZH ADD/DEL`, §1.3) y rechaza lo que el
 firmware bloquearía igualmente (NAME/OWNER/REVERT en difusión, §2.2) para que
 el error aparezca en la UI y no como silencio en la malla.
 
-**`-device !id` deshabilitado** (decisión del usuario, 2026-09-28): en dos
-tandas de pruebas de campo contra el T1000 real (20 comandos `-device`
-seguidos, 0 respuestas) frente a `-node`/difusión (funcionaron siempre),
-`-device` no dio ninguna respuesta salvo una vez justo después de una
-interacción manual del usuario. Explicación razonada por el usuario: desde
-firmware 2.8, el `node_id` se regenera a partir de la clave pública y puede
-cambiar — depender de él para direccionar es frágil por diseño, no un fallo
-puntual. Todo direccionamiento a un nodo concreto usa `-node <shortname>`
-(`ShortName`), estable frente a eso. `Device` se conserva en `addressing.py`
-como primitiva del protocolo (sigue siendo real y documentada), pero
-`build_command` la rechaza explícitamente.
+**`-device !id`**: deshabilitado por DEFECTO (decisión del usuario,
+2026-09-28) tras dos tandas de pruebas de campo contra el T1000 real (20
+comandos `-device` seguidos, 0 respuestas) frente a `-node`/difusión
+(funcionaron siempre) — el `node_id` se regenera desde firmware 2.8 a
+partir de la clave pública y puede cambiar al reflashear, así que es
+frágil por diseño, no un fallo puntual. Reincorporado como OPCIÓN
+consciente (2026-09-29, pedido explícito del usuario, que confirmó conocer
+la causa: "eso falló porque al actualizar mi nodo se cambió el id") — el
+propio `build_command` ya NO lo rechaza (es un target válido del protocolo,
+`addressing.Device`); la decisión de si usarlo vive en la capa de ajustes
+(`application/nexus_settings.py`, clave `addressing_mode`), que solo
+controla qué opción viene PRESELECCIONADA en la UI — el operador siempre
+puede elegir la otra a mano. `-node <shortname>` (`ShortName`) sigue siendo
+la opción por defecto y la única sin este riesgo conocido.
 """
 
 from dataclasses import dataclass
@@ -24,7 +27,6 @@ from noc.application.nexus import catalog
 from noc.application.nexus.addressing import (
     DEFAULT_PREFIX,
     Broadcast,
-    Device,
     Target,
     is_multi_node,
     render_prefix,
@@ -97,11 +99,6 @@ def build_command(
     if spec is None:
         raise NexusCommandError(f"comando no soportado: {command!r}")
     target = target if target is not None else Broadcast()
-    if isinstance(target, Device):
-        raise NexusCommandError(
-            "-device está deshabilitado (no fiable en campo, node_id inestable "
-            "desde firmware 2.8): usa ShortName (-node) para dirigir a un nodo"
-        )
     if spec.broadcast_forbidden and is_multi_node(target):
         raise NexusCommandError(
             f"{spec.name} está bloqueado en difusión por el firmware: elige un nodo concreto"

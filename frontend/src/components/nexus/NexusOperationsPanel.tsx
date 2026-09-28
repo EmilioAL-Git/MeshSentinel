@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createNexusOperation,
   fetchGateways,
   fetchNexusOperationResponses,
   fetchNexusOperations,
+  fetchNexusSettings,
   previewNexusOperation,
   type NexusOperationOut,
   type NexusOperationPreviewOut,
@@ -37,6 +38,10 @@ const TARGET_KINDS: { value: NexusTargetKind; label: string; needsValue: boolean
   },
   { value: "local", label: "Local (la propia pasarela)", needsValue: false },
   { value: "node", label: "Nodo (-node, nombre corto)", needsValue: true },
+  {
+    value: "device", label: "Nodo (-device, node_id)", needsValue: true,
+    hint: "⚠ el node_id puede cambiar al reflashear (firmware 2.8+) — si el nodo no responde, prueba con su nombre corto.",
+  },
   { value: "mac", label: "MAC (-mac, 6 hex)", needsValue: true },
   {
     value: "group", label: "Grupo Nexus (-group)", needsValue: true,
@@ -54,6 +59,8 @@ export function NexusOperationsPanel() {
   const queryClient = useQueryClient();
   const gatewaysQuery = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
   const gateways = (gatewaysQuery.data ?? []).filter((g) => g.status === "connected");
+  const settingsQuery = useQuery({ queryKey: ["nexus-settings"], queryFn: fetchNexusSettings });
+  const settings = settingsQuery.data;
 
   const [gatewayId, setGatewayId] = useState("");
   const [targetKind, setTargetKind] = useState<NexusTargetKind>("broadcast");
@@ -62,6 +69,15 @@ export function NexusOperationsPanel() {
   const [argsInput, setArgsInput] = useState("");
   const [preview, setPreview] = useState<NexusOperationPreviewOut | null>(null);
   const [confirmText, setConfirmText] = useState("");
+  const [appliedDefaults, setAppliedDefaults] = useState(false);
+
+  // Ajustes (ADR 0027 §13): destino/pasarela por defecto — solo se aplican
+  // UNA vez, al cargar, y nunca pisan lo que el operador ya haya tocado.
+  if (settings && !appliedDefaults) {
+    setAppliedDefaults(true);
+    if (settings.default_target_kind !== "broadcast") setTargetKind(settings.default_target_kind);
+    if (settings.default_gateway_id) setGatewayId(settings.default_gateway_id);
+  }
 
   const kindDef = TARGET_KINDS.find((k) => k.value === targetKind)!;
   const args = argsInput.trim() ? argsInput.trim().split(/\s+/) : [];
@@ -168,8 +184,39 @@ export function NexusOperationsPanel() {
           Previsualizar
         </button>
       </div>
-      <div style={{ marginTop: 6 }}>
+      <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
         <NexusCatalogBrowser onSelect={(name) => { setCommand(name); setPreview(null); }} />
+        {settings && settings.pinned_nodes.length > 0 && kindDef.needsValue && targetKind === "node" && (
+          <>
+            <span style={{ color: t.textFaint, fontSize: 10.5 }}>fijados:</span>
+            {settings.pinned_nodes.map((n) => (
+              <button
+                key={n.short_name}
+                className="chip"
+                style={{ cursor: "pointer" }}
+                onClick={() => { setTargetValue(n.short_name); setPreview(null); }}
+              >
+                {n.label}
+              </button>
+            ))}
+          </>
+        )}
+        {settings && settings.templates.length > 0 && (
+          <>
+            <span style={{ color: t.textFaint, fontSize: 10.5 }}>plantillas:</span>
+            {settings.templates.map((tpl) => (
+              <button
+                key={tpl.label + tpl.command}
+                className="chip"
+                style={{ cursor: "pointer" }}
+                title={`${tpl.command} ${tpl.args}`}
+                onClick={() => { setCommand(tpl.command); setArgsInput(tpl.args); setPreview(null); }}
+              >
+                {tpl.label}
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
       {preview && (
@@ -211,6 +258,8 @@ export function NexusOperationsPanel() {
   );
 }
 
+const FANOUT_KINDS_FOR_NOTIFY = new Set(["broadcast", "group"]);
+
 function OperationsHistory({ gatewayId }: { gatewayId: string }) {
   const query = useQuery({
     queryKey: ["nexus-operations", gatewayId],
@@ -218,6 +267,28 @@ function OperationsHistory({ gatewayId }: { gatewayId: string }) {
     refetchInterval: 3000,
   });
   const ops = query.data ?? [];
+  const settingsQuery = useQuery({ queryKey: ["nexus-settings"], queryFn: fetchNexusSettings });
+
+  // Ajuste "avisar cuando termine una difusión" (ADR 0027 §13): sin evento
+  // WS dedicado para operaciones Nexus (ADR 0027 §4, el gateway nunca
+  // reporta resultado) — se detecta por comparación entre polls, un toast
+  // por operación, nunca repetido.
+  const notifiedRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    if (!settingsQuery.data?.notify_on_broadcast_complete) return;
+    for (const op of ops) {
+      if (!FANOUT_KINDS_FOR_NOTIFY.has(op.target_kind)) continue;
+      if (op.status !== "confirmed" && op.status !== "no_response") continue;
+      if (notifiedRef.current.has(op.id)) continue;
+      notifiedRef.current.add(op.id);
+      toast(
+        op.status === "confirmed"
+          ? `Difusión «${op.text}» terminada: respondieron nodos`
+          : `Difusión «${op.text}» terminada: sin respuestas`,
+        { kind: op.status === "confirmed" ? "ok" : "error" },
+      );
+    }
+  }, [ops, settingsQuery.data?.notify_on_broadcast_complete]);
 
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12, fontSize: 12 }}>

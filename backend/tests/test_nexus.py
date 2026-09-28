@@ -76,19 +76,18 @@ def test_addressing_suffixes(target, expected: str) -> None:
     assert build_command("STATS", target=target).text == expected
 
 
-def test_device_prefix_still_renders_as_a_protocol_primitive() -> None:
-    # addressing.py conserva Device como primitiva del protocolo (real y
-    # documentada) aunque build_command la rechace por política — ver
-    # test_device_addressing_disabled_in_builder.
+def test_device_prefix_renders_as_a_protocol_primitive() -> None:
     assert render_prefix(Device("0x21de52ee")) == "/nexus-device !21de52ee"
 
 
-def test_device_addressing_disabled_in_builder() -> None:
-    # Decisión del usuario (2026-09-28): -device no dio respuesta en 20
-    # pruebas de campo consecutivas; -node sí. El node_id además puede
-    # regenerarse en cualquier momento desde firmware 2.8. Deshabilitado.
-    with pytest.raises(NexusCommandError):
-        build_command("STATS", target=Device(NODE))
+def test_device_addressing_allowed_in_builder() -> None:
+    # -device reincorporado como opción consciente (ADR 0027 §13,
+    # 2026-09-29): el usuario confirmó conocer la causa del fallo de campo
+    # original (node_id regenerado tras reflashear) y quiere poder elegirlo
+    # de todos modos — build_command ya no lo rechaza; la preselección
+    # segura por defecto vive en el ajuste `addressing_mode`, no aquí.
+    cmd = build_command("STATS", target=Device(NODE))
+    assert cmd.text == f"/nexus-device {NODE} STATS"
 
 
 def test_invalid_mac_and_names() -> None:
@@ -483,6 +482,14 @@ def test_parse_version_with_marker() -> None:
     assert parsed.data == {"version": "2.8.005.b42309e", "marker": "🔴"}
 
 
+def test_parse_version_accepts_nexus_alias_header() -> None:
+    # Firmware viejo (2.7.265, captura real 2026-09-28): cabecera "Nexus"
+    # en vez de "JT" — mismo contenido, nomenclatura distinta.
+    parsed = parse_response("VERSION", "Nexus VERSION: 2.7.265.30ee5fd")
+    assert parsed.kind == "structured"
+    assert parsed.data == {"version": "2.7.265.30ee5fd"}
+
+
 def test_parse_info() -> None:
     text = "JT INFO:\n!af000018 [N019]\nVer: 2.7.268.dd79d33\nRole: MUTE\nMAC: 00:11:22:33:44:55"
     parsed = parse_response("INFO", text)
@@ -513,6 +520,22 @@ def test_parse_info_with_leading_marker() -> None:
         "ver": "2.8.005.f76ca88",
         "role": "MUTE",
         "mac": "00:11:22:33:44:55",
+    }
+
+
+def test_parse_info_accepts_nexus_alias_header() -> None:
+    # Captura real (2026-09-28): un nodo en firmware 2.7.265 respondió con
+    # "Nexus INFO:" en vez de "JT INFO:" — antes de este fix caía a "raw" y
+    # ese nodo no era detectable como candidato en /nexus/scan.
+    text = "Nexus INFO:\n!4133cd33 [🐂]\nVer: 2.7.265.30ee5fd\nRole: CLIENT\nMAC: d1:6b:41:33:cd:33"
+    parsed = parse_response("INFO", text)
+    assert parsed.kind == "structured"
+    assert parsed.data == {
+        "node_id": "!4133cd33",
+        "short_name": "🐂",
+        "ver": "2.7.265.30ee5fd",
+        "role": "CLIENT",
+        "mac": "d1:6b:41:33:cd:33",
     }
 
 

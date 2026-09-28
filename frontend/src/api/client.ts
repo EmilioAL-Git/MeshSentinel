@@ -1201,7 +1201,7 @@ export const scanForNexusNodes = (gatewayId: string, windowSeconds = 30) =>
 // el vocabulario del pipeline de administración (modelo distinto: el
 // gateway nunca reporta resultado, la correlación es del backend).
 
-export type NexusTargetKind = "broadcast" | "local" | "node" | "mac" | "group";
+export type NexusTargetKind = "broadcast" | "local" | "node" | "device" | "mac" | "group";
 export type NexusOperationStatus = "pending" | "sent" | "confirmed" | "no_response";
 
 export interface NexusOperationIn {
@@ -1277,3 +1277,37 @@ export interface NexusCatalogEntryOut {
   broadcast_forbidden: boolean;
 }
 export const fetchNexusCatalog = () => get<NexusCatalogEntryOut[]>("/nexus/catalog");
+
+// ── Ajustes del módulo (ADR 0027 §13) ───────────────────────────────────────
+
+export type NexusAddressingMode = "shortname" | "device_id";
+
+export interface NexusPinnedNode {
+  short_name: string;
+  label: string;
+}
+
+export interface NexusTemplate {
+  label: string;
+  command: string;
+  args: string;
+}
+
+export interface NexusSettingsOut {
+  addressing_mode: NexusAddressingMode;
+  command_prefix: string;
+  channel_name: string | null;
+  response_window_seconds: number;
+  scan_cooldown_seconds: number;
+  default_target_kind: NexusTargetKind;
+  default_gateway_id: string | null;
+  catalog_collapsed_default: boolean;
+  notify_on_broadcast_complete: boolean;
+  hidden_commands: string[];
+  pinned_nodes: NexusPinnedNode[];
+  templates: NexusTemplate[];
+}
+
+export const fetchNexusSettings = () => get<NexusSettingsOut>("/nexus/settings");
+export const patchNexusSettings = (changes: Partial<NexusSettingsOut>) =>
+  send<NexusSettingsOut>("PATCH", "/nexus/settings", changes);

@@ -1,15 +1,17 @@
 # ADR 0027 — Control de nodos JenTastic-Nexus por comandos de texto
 
-- Estado: Aceptado (2026-09-29) — §1-§12 implementados: núcleo puro,
+- Estado: Aceptado (2026-09-29) — §1-§13 implementados: núcleo puro,
   transporte, cola de operaciones (con UI en Ajustes → JenTastic-Nexus y en
   pestaña propia del Inspector), interruptor global, detección de nodos
   JT, perfil de nodo, autorización SECURITY/ALLOW_DM, gato en el Mapa,
   TODOS los formatos de la lista original con parser real confirmado por
   captura, difusión con respuestas individuales por nodo, catálogo
-  explorable por categorías, y ocultación de la administración nativa que
-  Nexus cubre al 100%. Pendiente real: solo el presupuesto de tiempo de
-  aire compartido con ADR 0013 (§4), dejado tal cual por decisión
-  explícita del usuario.
+  explorable por categorías, ocultación de la administración nativa que
+  Nexus cubre al 100%, y ajustes configurables del módulo (incluido
+  `-device` reincorporado como opción consciente, ya no bloqueado por
+  defecto). Pendiente real: solo el presupuesto de tiempo de aire
+  compartido con ADR 0013 (§4), dejado tal cual por decisión explícita
+  del usuario.
 - Complementa: ADR 0013 (pipeline de operaciones remotas), ADR 0006 (contrato
   de eventos versionado), ADR 0002 (solo el gateway importa `meshtastic`)
 - Diseño asociado: `docs/design/nexus-control.md`
@@ -328,6 +330,77 @@ Dos piezas más del mismo encargo del usuario:
   disponibles, nunca se oculta una operación que Nexus solo cubre a
   medias. Un aviso visible explica por qué desaparecieron esas dos
   opciones y dónde encontrarlas.
+
+### 13. Ajustes del módulo, `-device` reincorporado como opción (2026-09-29)
+
+Pedido explícito del usuario: "en los ajustes, al pinchar en activar
+Nexus, quiero ajustes debajo" — con dos ejemplos concretos: elegir cómo
+dirigirse a un nodo (id o nombre corto) y el comando/prefijo a usar. El
+resto de ideas del brainstorm ("todo lo demás adelante") también entraron.
+
+- **`-device` reincorporado** (`builder.py`): la prohibición dura que
+  levantaba `NexusCommandError` (§0.2, decisión de 2026-09-28 tras 20
+  pruebas de campo sin respuesta) se retira — el usuario confirmó conocer
+  la causa exacta ("eso falló porque al actualizar mi nodo se cambió el
+  id") y quiere la opción de todos modos. La política de "cuál es el
+  seguro por defecto" se mueve por completo a la capa de ajustes: el
+  núcleo puro ya no impone nada, solo modela el protocolo (`Device` ya
+  era una primitiva real de `addressing.py`, ahora simplemente utilizable
+  desde `target_from()`). `addressing_mode` (`shortname`|`device_id`)
+  controla ÚNICAMENTE qué opción viene preseleccionada — en el formulario
+  de Ajustes y en la pestaña Nexus de cada nodo (Inspector) — el operador
+  siempre puede elegir la otra a mano, con un aviso visible del riesgo
+  conocido cuando usa `device_id`.
+- **`application/nexus_settings.py`** (nuevo, sin migración — reutiliza
+  `system_settings` con claves `nexus.*`, mismo patrón que
+  `nexus_mode_enabled`): registro de 11 ajustes heterogéneos (texto,
+  número, booleano, listas) con su propia validación — deliberadamente
+  SEPARADO de `settings_registry.py` (umbrales numéricos atados a
+  `noc.config.Settings`, un modelo distinto). `GET/PATCH /nexus/settings`
+  (PATCH admin-only, parche parcial, falla entero si una clave no vale —
+  nunca a medias).
+- **Ajustes con efecto real, leídos en vivo** (sin caché, coste marginal
+  por ser una fila indexada por PK, mismo criterio que
+  `is_mode_enabled()`): `command_prefix` (`build_command`, tanto en
+  operaciones como en el `/nexus INFO` de detección),
+  `response_window_seconds` (ventana del vigilante de sin-respuesta Y del
+  `ResponseCorrelator` de cada pasarela — esta última solo aplica a
+  pasarelas que empiecen a despachar DESPUÉS del cambio, el estado en
+  memoria ya activo no se retroactúa), `scan_cooldown_seconds` (cadencia
+  del botón "Buscar nodos JT").
+- **Ajustes de preferencia de UI** (sin efecto en el protocolo):
+  `default_target_kind`/`default_gateway_id` (formulario de Ajustes →
+  Operaciones), `catalog_collapsed_default` y `hidden_commands` (el
+  explorador de catálogo, checklist de los 186 comandos — nunca oculta el
+  comando del catálogo real del backend, solo de lo que se OFRECE en el
+  explorador), `pinned_nodes` (atajos de nodo con etiqueta) y `templates`
+  (comando+argumentos guardados) como chips de un clic en el formulario
+  de Ajustes, y `notify_on_broadcast_complete` (toast cuando una difusión
+  termina de recibir respuestas — detectado por comparación entre polls
+  del historial, sin evento WS dedicado, ADR 0027 §4/§11 no tiene uno).
+
+547 tests backend+gateway (10 nuevos: `test_nexus_settings.py` + 2 en
+`test_nexus_operations.py`, incluido el flip de
+`test_create_rejects_device_targeting` →
+`test_create_accepts_device_targeting`), ruff/tsc/build limpios.
+
+- **`channel_name`** (mismo registro de `nexus_settings.py`): por defecto
+  `None` mantiene la autodetección de `meshtastic_stream.py` por nombre
+  ("Nexus"/"JenT", insensible a mayúsculas); con un nombre fijado, el
+  backend lo manda en `payload.channel_name` de `command.send_text` y el
+  gateway busca EXACTAMENTE ese canal — nunca por índice fijo, mismo
+  criterio de diseño — rechazando el envío si no existe en vez de usar el
+  canal principal. Control nuevo en Ajustes → JenTastic-Nexus ("Canal de
+  salida de comandos").
+- **Alias de cabecera `Nexus <X>:` = `JT <X>:`** (`parsers.py`,
+  `_first_line` y el regex de `parse_version`): el usuario capturó tres
+  respuestas reales a `/nexus INFO` de nodos con firmware distinto en la
+  misma malla — 2.7.268 y 2.8.005 responden `JT INFO:`, pero 2.7.265
+  respondió `Nexus INFO:` (mismo contenido, cabecera de nomenclatura
+  vieja). Sin este alias esa respuesta caía a `kind="raw"` y el nodo no
+  se detectaba como candidato en `/nexus/scan`. Generalizado a todos los
+  comandos que pasan por `_first_line` (no solo INFO), por decisión
+  explícita del usuario ante la duda.
 
 ## Consecuencias
 

@@ -9,6 +9,8 @@ import {
   type NexusCandidateOut,
 } from "../../api/client";
 import { NexusOperationsPanel } from "./NexusOperationsPanel";
+import { NexusSettingsPanel } from "./NexusSettingsPanel";
+import { NexusCatIcon } from "./NexusCatIcon";
 import { toast } from "../shell/Toast";
 import { t } from "../../tokens";
 
@@ -42,7 +44,10 @@ export function NexusPanel() {
 
   return (
     <div>
-      <h2>JenTastic-Nexus</h2>
+      <h2 style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <NexusCatIcon size={16} />
+        JenTastic-Nexus
+      </h2>
       <p style={{ color: t.textDim, fontSize: 12.5, maxWidth: 640, marginTop: 4 }}>
         Control de nodos con firmware JenTastic-Nexus por comandos de texto (ADR 0027). Con el
         modo desactivado, esta funcionalidad no existe en el resto de la aplicación: ni pestañas,
@@ -55,9 +60,11 @@ export function NexusPanel() {
           disabled={modeQuery.isLoading || toggleMode.isPending}
           onChange={(e) => toggleMode.mutate(e.target.checked)}
         />
+        <NexusCatIcon size={14} />
         <span>Modo Nexus/JenTastic activado</span>
       </label>
 
+      {enabled && <NexusSettingsPanel />}
       {enabled && <NexusDetection />}
       {enabled && <NexusOperationsPanel />}
     </div>

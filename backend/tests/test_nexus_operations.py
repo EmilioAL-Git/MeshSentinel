@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.nexus.builder import NexusCommandError
 from noc.application.nexus_operations import (
     DEFAULT_RESPONSE_WINDOW_SECONDS,
@@ -62,6 +63,17 @@ async def test_create_node_target_builds_nexus_node_prefix(session_factory):
     assert op.text == "/nexus-node N018 INFO"
 
 
+async def test_create_uses_configured_command_prefix(session_factory):
+    # Ajuste `command_prefix` (ADR 0027 §13) — leído en vivo, sin reiniciar
+    # el proceso (mismo criterio que el resto de ajustes de este módulo).
+    async with session_factory() as session:
+        await SqlSystemSettingsRepository(session).upsert("nexus.command_prefix", "/jt", "operador")
+        await session.commit()
+    service = NexusOperationService(session_factory, FakeQueue())
+    op = await service.create(GW, "INFO", [], "node", "N018", "operador")
+    assert op.text == "/jt-node N018 INFO"
+
+
 async def test_create_destructive_flagged(session_factory):
     service = NexusOperationService(session_factory, FakeQueue())
     op = await service.create(GW, "REBOOT", [], "node", "N018", "operador")
@@ -74,11 +86,20 @@ async def test_create_rejects_unknown_command(session_factory):
         await service.create(GW, "NOSUCHCOMMAND", [], "broadcast", None, "operador")
 
 
-async def test_create_rejects_device_targeting(session_factory):
-    """-device deshabilitado (ADR 0027 §0.2): ni siquiera existe como target_kind válido."""
+async def test_create_accepts_device_targeting(session_factory):
+    """-device reincorporado como opción consciente (ADR 0027 §13,
+    2026-09-29) — ya no está bloqueado a nivel de target_kind; sigue
+    siendo el ajuste `addressing_mode` quien decide la preselección de
+    la UI, no algo que el backend imponga."""
+    service = NexusOperationService(session_factory, FakeQueue())
+    op = await service.create(GW, "STATS", [], "device", "!e53626b0", "operador")
+    assert op.text == "/nexus-device !e53626b0 STATS"
+
+
+async def test_create_device_target_requires_value(session_factory):
     service = NexusOperationService(session_factory, FakeQueue())
     with pytest.raises(NexusTargetError):
-        await service.create(GW, "STATS", [], "device", "!e53626b0", "operador")
+        await service.create(GW, "STATS", [], "device", None, "operador")
 
 
 async def test_create_node_target_requires_value(session_factory):

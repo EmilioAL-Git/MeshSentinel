@@ -14,11 +14,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep
+from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SessionDep
+from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.nexus.builder import NexusCommandError
 from noc.application.nexus.catalog import COMMANDS, CommandSpec
 from noc.application.nexus_gateway import NexusGateway, NexusScanCooldownError
 from noc.application.nexus_operations import NexusOperationService, NexusTargetError
+from noc.application.nexus_settings import NexusSettingError, merge_settings, validate_changes
 from noc.domain.nexus.entities import NexusOperation, NexusOperationResponse
 
 router = APIRouter(prefix="/nexus", tags=["nexus"])
@@ -98,6 +100,51 @@ async def set_mode(body: ModePatchIn, request: Request, current_user: RequireAdm
     actor = current_user.username if current_user else None
     await _service(request).set_mode_enabled(body.enabled, actor)
     return ModeOut(enabled=body.enabled)
+
+
+class SettingsOut(BaseModel):
+    addressing_mode: str
+    command_prefix: str
+    channel_name: str | None
+    response_window_seconds: float
+    scan_cooldown_seconds: float
+    default_target_kind: str
+    default_gateway_id: str | None
+    catalog_collapsed_default: bool
+    notify_on_broadcast_complete: bool
+    hidden_commands: list[str]
+    pinned_nodes: list[dict[str, str]]
+    templates: list[dict[str, str]]
+
+
+@router.get("/settings", response_model=SettingsOut)
+async def get_nexus_settings(request: Request, session: SessionDep, current_user: RequireAuthDep) -> SettingsOut:
+    """Ajustes del módulo (ADR 0027 §13) — bajo la pestaña JenTastic-Nexus
+    de Ajustes. Solo lectura para cualquier autenticado; PATCH admin-only,
+    mismo criterio que /mode."""
+    if not await _service(request).is_mode_enabled():
+        raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    overrides = await SqlSystemSettingsRepository(session).list_all()
+    return SettingsOut(**merge_settings(overrides))
+
+
+@router.patch("/settings", response_model=SettingsOut)
+async def patch_nexus_settings(
+    changes: dict[str, Any], request: Request, session: SessionDep, admin: RequireAdminDep
+) -> SettingsOut:
+    if not await _service(request).is_mode_enabled():
+        raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    actor = admin.username if admin else None
+    try:
+        validated = validate_changes(changes)
+    except NexusSettingError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    repo = SqlSystemSettingsRepository(session)
+    for full_key, value in validated.items():
+        await repo.upsert(full_key, value, actor)
+    await session.commit()
+    overrides = await repo.list_all()
+    return SettingsOut(**merge_settings(overrides))
 
 
 @router.post("/scan", response_model=ScanOut)

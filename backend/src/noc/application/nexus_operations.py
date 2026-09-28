@@ -22,7 +22,7 @@ pipeline de administración, que es un modelo distinto.
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -32,13 +32,15 @@ from noc.adapters.persistence.nexus_repositories import (
     SqlNexusOperationRepository,
     SqlNexusOperationResponseRepository,
 )
+from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.envelopes import make_command_envelope
-from noc.application.nexus.addressing import Broadcast, Group, Local, Mac, ShortName, Target
+from noc.application.nexus.addressing import Broadcast, Device, Group, Local, Mac, ShortName, Target
 from noc.application.nexus.builder import NexusCommand, build_command
 from noc.application.nexus.correlation import ResponseCorrelator
 from noc.application.nexus.pacing import CommandPacer
 from noc.application.nexus.parsers import parse_response
 from noc.application.nexus.reassembly import AssembledResponse, IncomingText, ResponseAssembler
+from noc.application.nexus_settings import merge_settings
 from noc.domain.nexus.entities import NexusOperation, NexusOperationResponse
 
 # Destinos de MÚLTIPLES nodos (ADR 0027 §11): una operación así puede
@@ -59,7 +61,10 @@ class NexusTargetError(ValueError):
 
 def target_from(kind: str, value: str | None) -> Target:
     """Único punto de traducción kind/value (API, BD) → `Target` (núcleo
-    puro). `-device` deliberadamente ausente (ADR 0027 §0.2: deshabilitado)."""
+    puro). `-device` reincorporado como opción consciente (ADR 0027 §13,
+    2026-09-29) — el ajuste `addressing_mode` solo controla la
+    preselección en la UI, no bloquea nada aquí: quien manda `kind="device"`
+    sabe lo que hace."""
     if kind == "broadcast":
         return Broadcast()
     if kind == "local":
@@ -68,6 +73,10 @@ def target_from(kind: str, value: str | None) -> Target:
         if not value:
             raise NexusTargetError("falta el nombre corto del nodo (-node)")
         return ShortName(value)
+    if kind == "device":
+        if not value:
+            raise NexusTargetError("falta el node_id (-device)")
+        return Device(value)
     if kind == "mac":
         if not value:
             raise NexusTargetError("falta la MAC (-mac)")
@@ -95,29 +104,44 @@ class NexusOperationService:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         command_queue: RedisCommandQueue,
-        response_window_seconds: float = DEFAULT_RESPONSE_WINDOW_SECONDS,
     ) -> None:
         self._session_factory = session_factory
         self._queue = command_queue
-        self._response_window = response_window_seconds
         self._states: dict[str, _GatewayState] = {}
         self._task: asyncio.Task[None] | None = None
 
-    def _state(self, gateway_id: str) -> _GatewayState:
+    def _state(self, gateway_id: str, response_window_seconds: float = DEFAULT_RESPONSE_WINDOW_SECONDS) -> _GatewayState:
+        """Nace con la ventana de correlación (`ResponseCorrelator.window`)
+        vigente en ESE momento — un cambio de ajuste posterior no la
+        retroactúa en pasarelas ya activas (mismo criterio que el resto del
+        estado en memoria de este módulo, efímero por proceso), solo aplica
+        a la siguiente pasarela que empiece a despachar."""
         state = self._states.get(gateway_id)
         if state is None:
-            state = self._states[gateway_id] = _GatewayState()
+            state = self._states[gateway_id] = _GatewayState(
+                correlator=ResponseCorrelator(window=timedelta(seconds=response_window_seconds))
+            )
         return state
 
     # ── Creación (el router la usa también solo para validar/previsualizar) ──
 
-    def build(
+    async def _load_settings(self) -> dict[str, Any]:
+        """Ajustes del módulo (ADR 0027 §13) — leídos de `system_settings` en
+        cada llamada, nunca cacheados: es una fila indexada por PK, coste
+        marginal, y así un cambio de ajuste se aplica sin reiniciar el
+        proceso (mismo criterio que `NexusGateway.is_mode_enabled`)."""
+        async with self._session_factory() as session:
+            overrides = await SqlSystemSettingsRepository(session).list_all()
+        return merge_settings(overrides)
+
+    async def build(
         self, command_name: str, args: list[str], target_kind: str, target_value: str | None
     ) -> NexusCommand:
         """Construye con el núcleo puro sin persistir — `NexusCommandError`/
         `NexusTargetError` si el comando o el destino no son válidos."""
+        settings = await self._load_settings()
         target = target_from(target_kind, target_value)
-        return build_command(command_name, tuple(args), target=target)
+        return build_command(command_name, tuple(args), target=target, prefix=settings["command_prefix"])
 
     async def create(
         self,
@@ -128,7 +152,7 @@ class NexusOperationService:
         target_value: str | None,
         created_by: str | None,
     ) -> NexusOperation:
-        cmd = self.build(command_name, args, target_kind, target_value)
+        cmd = await self.build(command_name, args, target_kind, target_value)
         op = NexusOperation(
             gateway_id=gateway_id,
             target_kind=target_kind,
@@ -196,17 +220,20 @@ class NexusOperationService:
         await self._dispatch(now)
 
     async def _dispatch(self, now: datetime) -> None:
+        settings = await self._load_settings()
         async with self._session_factory() as session, session.begin():
             repo = SqlNexusOperationRepository(session)
             for op in await repo.list_pending():
                 assert op.id is not None
-                state = self._state(op.gateway_id)
+                state = self._state(op.gateway_id, settings["response_window_seconds"])
                 target = target_from(op.target_kind, op.target_value)
                 cmd = build_command(op.command_name, tuple(op.args), target=target)
                 if state.pacer.next_allowed_at(cmd, now) > now:
                     continue  # su turno de espaciado aún no ha llegado
                 envelope = make_command_envelope(
-                    "command.send_text", {"text": op.text}, issued_by=op.created_by or "system"
+                    "command.send_text",
+                    {"text": op.text, "channel_name": settings["channel_name"]},
+                    issued_by=op.created_by or "system",
                 )
                 await self._queue.enqueue(op.gateway_id, envelope)
                 state.pacer.record_sent(cmd, now)
@@ -215,10 +242,11 @@ class NexusOperationService:
                 logger.info("nexus.op sent id=%s gateway=%s text=%r", op.id, op.gateway_id, op.text)
 
     async def _expire_stuck(self, now: datetime) -> None:
+        settings = await self._load_settings()
         async with self._session_factory() as session, session.begin():
             repo = SqlNexusOperationRepository(session)
             responses_repo = SqlNexusOperationResponseRepository(session)
-            for op in await repo.list_expired_sent(now, self._response_window):
+            for op in await repo.list_expired_sent(now, settings["response_window_seconds"]):
                 assert op.id is not None
                 if op.target_kind in FANOUT_TARGET_KINDS:
                     # Difusión/grupo: la ventana ya se agotó, se cierra con

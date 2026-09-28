@@ -113,9 +113,9 @@ function nodeIcon(
         : "";
     // Insignia JenTastic-Nexus: mismo gato que Flota/Inspector, abajo a la
     // izquierda para no chocar con el badge de redundancia (arriba/derecha).
+    // nexusCatMarkup ya trae su propio chip circular, sin envoltorio extra.
     const nexusBadge = isNexus
-      ? `<div style="position:absolute;bottom:-5px;left:-5px;background:var(--chassis);` +
-        `border-radius:3px;border:1px solid var(--bg);line-height:0;padding:1px">${nexusCatMarkup(10)}</div>`
+      ? `<div style="position:absolute;bottom:-6px;left:-6px;line-height:0">${nexusCatMarkup(9)}</div>`
       : "";
     // Selección = anillo simple; Focus = anillo doble (§7.3). Ambos --accent.
     const ring = focused
@@ -281,6 +281,7 @@ const LAYER_CODES: { code: string; key: keyof Omit<MapLayerState, "colorMode"> }
   { code: "users", key: "showUsers" },
   { code: "fixed", key: "showFixed" },
   { code: "favorites", key: "showFavoritesOnly" },
+  { code: "nexus", key: "showNexusOnly" },
   { code: "links", key: "showLinks" },
   { code: "neighbors", key: "showNeighbors" },
   { code: "traces", key: "showTraces" },
@@ -345,6 +346,7 @@ export function MapView({
 }: Props) {
   const withPosition = useMemo(() => summaries.filter((s) => s.last_position), [summaries]);
   const withoutPosition = summaries.length - withPosition.length;
+  const nexusModeOn = useNexusMode();
 
   // Capas y modo de color ↔ URL (`map.layers`, `map.color` — ADR 0026):
   // sustituye el `usePersistedState("noc.map.layers", …)` anterior, que
@@ -393,6 +395,11 @@ export function MapView({
   // reutilizando `classifyNode` (mismo criterio que Flota). "Favoritos" es
   // aditivo: añade favoritos aunque su categoría esté apagada, nunca oculta.
   const visibleByLayer = useMemo(() => {
+    // "Solo Nexus" aísla: a diferencia de Favoritos (aditivo), aquí se
+    // busca UN subconjunto concreto, no se añade a las categorías activas.
+    if (layers.showNexusOnly) {
+      return withPosition.filter((s) => nexusModeOn && s.node.is_nexus);
+    }
     return withPosition.filter((s) => {
       if (layers.showFavoritesOnly && s.node.is_favorite) return true;
       const cat = classifyNode(s, gatewayNodeIds);
@@ -474,7 +481,7 @@ export function MapView({
           {withoutPosition > 0 && ` · ${withoutPosition} sin posición`}
         </div>
         <div style={{ ...overlayStyle, top: 10, right: 10, padding: "0.4rem" }}>
-          <LayerToggle layers={layers} onChange={setLayers} />
+          <LayerToggle layers={layers} onChange={setLayers} showNexusToggle={nexusModeOn} />
         </div>
         <div style={{ ...overlayStyle, bottom: 10, left: 10 }}>
           <Legend />

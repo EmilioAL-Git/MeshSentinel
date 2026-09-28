@@ -455,10 +455,12 @@ class MeshtasticStreamTransport(Transport):
     async def _send_text(self, payload: dict[str, Any]) -> None:
         """`command.send_text` (ADR 0027): control JenTastic-Nexus por texto.
 
-        Detección automática del canal por nombre ("Nexus"/"JenT",
-        insensible a mayúsculas) — nunca por índice fijo, decisión del
-        diseño. Sin ese canal configurado en el nodo local, se rechaza en
-        vez de mandar por el canal principal (nunca "casi acertar").
+        Detección del canal por nombre — nunca por índice fijo, decisión de
+        diseño. Por defecto busca "Nexus"/"JenT" (insensible a mayúsculas);
+        `payload["channel_name"]` (ajuste `nexus.channel_name`, ADR 0027
+        §13) permite fijar un nombre exacto distinto sin tocar el gateway.
+        Sin ese canal configurado en el nodo local, se rechaza en vez de
+        mandar por el canal principal (nunca "casi acertar").
         """
         text = payload.get("text")
         if not text:
@@ -467,11 +469,12 @@ class MeshtasticStreamTransport(Transport):
         if self.status != "connected" or self._iface is None:
             logger.warning("%s.send_text_rejected (no conectado)", self.name)
             return
-        channel_index = await asyncio.to_thread(self._find_nexus_channel)
+        channel_name = payload.get("channel_name")
+        channel_index = await asyncio.to_thread(self._find_nexus_channel, channel_name)
         if channel_index is None:
             logger.warning(
-                "%s.send_text_rejected (sin canal 'Nexus'/'JenT' configurado en el nodo local)",
-                self.name,
+                "%s.send_text_rejected (sin canal %r configurado en el nodo local)",
+                self.name, channel_name or "/".join(self._NEXUS_CHANNEL_NAMES),
             )
             return
         try:
@@ -482,12 +485,13 @@ class MeshtasticStreamTransport(Transport):
 
     _NEXUS_CHANNEL_NAMES = ("nexus", "jent")
 
-    def _find_nexus_channel(self) -> int | None:
+    def _find_nexus_channel(self, channel_name: str | None = None) -> int | None:
+        names = (channel_name.strip().lower(),) if channel_name else self._NEXUS_CHANNEL_NAMES
         channels = getattr(self._iface.localNode, "channels", None) or []
         for ch in channels:
             if ch.role == 0:  # DISABLED
                 continue
-            if (ch.settings.name or "").strip().lower() in self._NEXUS_CHANNEL_NAMES:
+            if (ch.settings.name or "").strip().lower() in names:
                 return int(ch.index)
         return None
 

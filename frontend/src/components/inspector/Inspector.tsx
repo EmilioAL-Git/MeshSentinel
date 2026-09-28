@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { useUrlString } from "../../hooks/useUrlState";
 import {
@@ -46,6 +46,7 @@ import {
   fmtSeconds,
   opTypeLabel,
 } from "../jobs/status";
+import { displayValue } from "../ConfigEditor";
 import { FloatingWindow } from "../shell/FloatingWindow";
 import { PreferredGatewaySelect } from "../shell/GatewaySelect";
 import { toast } from "../shell/Toast";
@@ -751,32 +752,65 @@ export function Inspector({
                   <div className="empty">Sin secciones leídas todavía — usa «Leer configuración» arriba.</div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {configState.data.sections.map((s) => (
-                    <div
-                      key={s.section}
-                      style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        gap: "0.45rem",
-                        padding: "0.3rem 0.55rem",
-                        fontSize: 12,
-                        background: t.surface2,
-                        border: `1px solid ${t.borderSubtle}`,
-                        borderRadius: 5,
-                      }}
-                    >
-                      <span style={{ fontFamily: t.fontMono }}>{s.section}</span>
-                      <span style={{ color: t.textFaint, fontSize: 11 }}>{s.kind}</span>
-                      <span style={{ color: t.textDim, fontFamily: t.fontMono, fontSize: 11, marginLeft: "auto" }}>
-                        {relativeTime(s.last_read_at)}
-                      </span>
-                    </div>
-                  ))}
+                  {configState.data.sections.map((s) => {
+                    const fields = Object.entries(s.values);
+                    return (
+                      <div
+                        key={s.section}
+                        style={{
+                          padding: "0.3rem 0.55rem",
+                          fontSize: 12,
+                          background: t.surface2,
+                          border: `1px solid ${t.borderSubtle}`,
+                          borderRadius: 5,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "baseline", gap: "0.45rem" }}>
+                          <span style={{ fontFamily: t.fontMono }}>{s.section}</span>
+                          <span style={{ color: t.textFaint, fontSize: 11 }}>{s.kind}</span>
+                          <span style={{ color: t.textDim, fontFamily: t.fontMono, fontSize: 11, marginLeft: "auto" }}>
+                            {relativeTime(s.last_read_at)}
+                          </span>
+                        </div>
+                        {fields.length === 0 && (
+                          <div style={{ color: t.textFaint, fontSize: 11, marginTop: 3 }}>Sin campos.</div>
+                        )}
+                        {fields.length > 0 && (
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "auto 1fr",
+                              columnGap: "0.5rem",
+                              rowGap: 2,
+                              marginTop: 5,
+                              paddingTop: 5,
+                              borderTop: `1px solid ${t.borderSubtle}`,
+                            }}
+                          >
+                            {fields.map(([k, v]) => (
+                              <Fragment key={k}>
+                                <span style={{ color: t.textFaint, fontFamily: t.fontMono, fontSize: 11 }}>{k}</span>
+                                <span style={{ fontFamily: t.fontMono, fontSize: 11, wordBreak: "break-all" }}>
+                                  {displayValue(v)}
+                                </span>
+                              </Fragment>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </>
             )}
             <div style={{ paddingTop: 10 }}>
-              <button style={{ ...actionBtn, width: "100%" }} onClick={() => onGoTo("config")}>
+              <button
+                style={{ ...actionBtn, width: "100%" }}
+                onClick={() => {
+                  onGoTo("config");
+                  onClose();
+                }}
+              >
                 ✎ Abrir editor completo →
               </button>
             </div>
@@ -822,7 +856,13 @@ export function Inspector({
               ))}
             </div>
             <div style={{ paddingTop: 8 }}>
-              <button style={actionBtn} onClick={() => onGoTo("jobs")}>
+              <button
+                style={actionBtn}
+                onClick={() => {
+                  onGoTo("jobs");
+                  onClose();
+                }}
+              >
                 Ver todas en Trabajos →
               </button>
             </div>

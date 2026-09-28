@@ -80,7 +80,7 @@ async def test_scan_sends_broadcast_info_by_the_nexus_channel_auto_detected_by_g
     assert envelope["command_type"] == "command.send_text"
     assert envelope["payload"]["text"] == "/nexus INFO"  # construido con el catálogo puro
     assert envelope["issued_by"] == "operador"
-    assert "channel_name" not in envelope["payload"]  # el gateway detecta el canal, no el backend
+    assert envelope["payload"]["channel_name"] is None  # sin ajuste -> el gateway autodetecta
 
 
 async def test_scan_returns_structured_candidates_from_chat_messages(session_factory):

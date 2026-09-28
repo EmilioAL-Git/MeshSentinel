@@ -131,17 +131,26 @@ def _first_line(text: str, header: str) -> tuple[str | None, str]:
     por el usuario: semáforo de si la firma del comando era válida, visto en
     VERSION e INFO tanto en difusión como dirigidos). Se separa sin asumir
     qué valores concretos existen, para no perder la cabecera al validarla.
+
+    Firmware viejo (2.7.265, confirmado por captura real del usuario) usa
+    "Nexus <HEADER>" en vez de "JT <HEADER>" — mismo contenido, cabecera
+    distinta; se acepta como alias en TODOS los comandos que pasan por aquí,
+    no solo INFO (única evidencia directa, pero se asume nomenclatura vieja
+    del firmware, no un caso especial de un comando).
     """
+    headers = (header,)
+    if header.startswith("JT "):
+        headers = (header, "Nexus " + header[len("JT "):])
     lines = text.splitlines()
     if not lines:
         raise ValueError(f"no empieza por {header!r}")
     first = lines[0].strip()
     marker: str | None = None
-    if not first.startswith(header):
+    if not first.startswith(headers):
         token, _, rest = first.partition(" ")
-        if rest.startswith(header):
+        if rest.startswith(headers):
             marker, first = token, rest
-    if not first.startswith(header):
+    if not first.startswith(headers):
         raise ValueError(f"no empieza por {header!r}")
     return marker, "\n".join(lines[1:])
 
@@ -158,7 +167,7 @@ def _maybe_int(value: str) -> int | str:
 # difusión propia: "🔴 JT VERSION: 2.8.005.b42309e" (significado del 🔴 sin
 # confirmar — se conserva tal cual, sin interpretarlo).
 
-_VERSION_RE = re.compile(r"^(?:(?P<marker>\S+)\s+)?JT VERSION:\s*(?P<version>\S+)\s*$")
+_VERSION_RE = re.compile(r"^(?:(?P<marker>\S+)\s+)?(?:JT|Nexus) VERSION:\s*(?P<version>\S+)\s*$")
 
 
 def parse_version(text: str) -> dict[str, Any]:
