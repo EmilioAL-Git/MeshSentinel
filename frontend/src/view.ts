@@ -12,6 +12,7 @@ export type View =
   | "profiles"
   | "activity"
   | "gateways"
+  | "stats"
   | "users"
   | "login-log"
   | "settings";
@@ -31,6 +32,7 @@ export const VIEWS: { id: View; label: string; icon: string }[] = [
   { id: "config", label: "Config", icon: "⚙" },
   { id: "activity", label: "Registro", icon: "▤" },
   { id: "gateways", label: "Enlaces", icon: "⛭" },
+  { id: "stats", label: "Top", icon: "✦" },
   // Autenticación: "Usuarios" solo visible si eres admin O si el sistema aún
   // está en modo abierto (así siempre hay una forma de crear el primer
   // usuario); "Accesos" solo tiene sentido estando autenticado.

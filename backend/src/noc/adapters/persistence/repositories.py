@@ -282,6 +282,24 @@ class SqlTelemetryRepository:
         )
         return int(result or 0)
 
+    async def latest_per_node(self, kind: str) -> list[Telemetry]:
+        """Último registro de un `kind` por nodo (paralelo a
+        `SqlNodeRepository._latest_per_node`, para estadísticas que necesitan
+        environment/power y no solo `last_device_telemetry` = kind "device")."""
+        rn = (
+            func.row_number()
+            .over(
+                partition_by=TelemetryModel.node_id,
+                order_by=(TelemetryModel.received_at.desc(), TelemetryModel.id.desc()),
+            )
+            .label("rn")
+        )
+        subq = select(TelemetryModel, rn).where(TelemetryModel.kind == kind).subquery()
+        latest = select(subq).where(subq.c.rn == 1).subquery()
+        alias = aliased(TelemetryModel, latest)
+        rows = (await self._session.scalars(select(alias))).all()
+        return [_to_entity(r, Telemetry) for r in rows]
+
 
 class SqlNeighborRepository:
     """Enlaces nodo<->nodo reales (NEIGHBORINFO_APP), append-only.

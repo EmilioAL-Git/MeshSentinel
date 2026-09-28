@@ -49,6 +49,13 @@ export const hex = {
   warn: "#d9a03c",
   crit: "#e5484d",
   accent: "#4c8dff",
+  catBlue: "#3987e5",
+  catGreen: "#008300",
+  catOrange: "#d95926",
+  catViolet: "#9085e9",
+  catAqua: "#199e70",
+  catYellow: "#c98500",
+  catMagenta: "#d55181",
 } as const;
 
 /**

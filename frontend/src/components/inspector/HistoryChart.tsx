@@ -1,6 +1,6 @@
 import * as echarts from "echarts";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { t } from "../../tokens";
+import { hex, t } from "../../tokens";
 
 /**
  * Mini-gráfica histórica del Inspector (Fase C.2, v0.9): wrapper mínimo
@@ -18,6 +18,11 @@ import { t } from "../../tokens";
  * no cambiaron. Un ref callback solo se invoca en el montaje/desmontaje
  * REAL del nodo DOM, no en la simulación de StrictMode, así que el ciclo
  * de vida de la instancia de ECharts queda atado 1:1 al `<div>`.
+ *
+ * `color` SIEMPRE debe ser un hex de `tokens.hex`, nunca un `var(--…)` de
+ * `tokens.t`: ECharts dibuja en canvas, que no resuelve custom properties
+ * CSS — un `strokeStyle`/`fillStyle` inválido cae en negro por defecto, y
+ * con el chasis oscuro del proyecto eso se lee como "gráfica vacía".
  */
 
 export interface HistoryPoint {
@@ -28,7 +33,7 @@ export interface HistoryPoint {
 export function HistoryChart({
   points,
   unit,
-  color = t.accent,
+  color = hex.accent,
   height = 90,
 }: {
   points: HistoryPoint[];

@@ -21,6 +21,7 @@ from noc.adapters.api.routers import (
     nodes,
     organization,
     settings as settings_router,
+    stats as stats_router,
     system,
     topology,
 )
@@ -47,6 +48,7 @@ from noc.application.nexus_gateway import NexusGateway
 from noc.application.nexus_operations import NexusOperationService
 from noc.application.ingest import IngestService
 from noc.application.settings_registry import apply_overrides
+from noc.application.stats import StatsService
 from noc.config import get_settings
 
 logger = logging.getLogger("noc")
@@ -66,6 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         overrides = await SqlSystemSettingsRepository(_settings_session).list_all()
     apply_overrides(settings, overrides)
     app.state.dashboard = DashboardService(app.state.db.session_factory, settings)
+    app.state.stats = StatsService(app.state.db.session_factory, settings)
     app.state.event_bus = RedisEventBus(settings.redis_url, settings.events_channel)
     # Autenticación: cookie de sesión opaca + rate limit de login sobre Redis
     # (misma infraestructura que el resto del backend, sin dependencia nueva).
@@ -217,6 +220,7 @@ def create_app() -> FastAPI:
     app.include_router(gateways.router, prefix=settings.api_v1_prefix)
     app.include_router(system.router, prefix=settings.api_v1_prefix)
     app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
+    app.include_router(stats_router.router, prefix=settings.api_v1_prefix)
     app.include_router(alerts.router, prefix=settings.api_v1_prefix)
     app.include_router(admin_operations.router, prefix=settings.api_v1_prefix)
     app.include_router(admin_remote_flags.router, prefix=settings.api_v1_prefix)

@@ -30,7 +30,7 @@ import {
   type OperationOut,
 } from "../../api/client";
 import { relativeTime } from "../../time";
-import { alertSeverityColor, chipStyle, t } from "../../tokens";
+import { alertSeverityColor, chipStyle, hex, t } from "../../tokens";
 import { trackOperations } from "../../opTracker";
 import { useActiveGroup } from "../../context/GroupContext";
 import { CATEGORY_DEFS, NODE_TYPE_OVERRIDE_OPTIONS, classifyNode } from "../fleet/classify";
@@ -51,6 +51,7 @@ import { PreferredGatewaySelect } from "../shell/GatewaySelect";
 import { toast } from "../shell/Toast";
 import { HistoryChart, type HistoryPoint } from "./HistoryChart";
 import { NodeLog } from "./NodeLog";
+import { computeNodeStats24h, TRAFFIC_LEVEL_LABEL } from "./nodeStats24h";
 import { RemoteFlags } from "./RemoteFlags";
 
 /**
@@ -84,7 +85,7 @@ const TAB_LABEL: Record<TabId, string> = {
   operations: "Operaciones",
   nexus: "JenTastic-Nexus",
   alerts: "Alertas",
-  history: "Histórico",
+  history: "Estadísticas",
   general: "Organización",
 };
 
@@ -296,6 +297,25 @@ export function Inspector({
     queryFn: () => fetchNodePositions(nodeId, 30),
     refetchInterval: 30_000,
   });
+  // Resumen 24h: ventana propia (limit alto, no los 60/30 puntos de los
+  // gráficos de arriba, pensados para "tendencia visible" no "cobertura
+  // completa de la ventana") — se calcula en cliente, mismo criterio que
+  // groupStats.ts/highlights.ts, nada nuevo en el backend.
+  const deviceStats24h = useQuery({
+    queryKey: ["telemetry-24h", nodeId, "device"],
+    queryFn: () => fetchNodeTelemetry(nodeId, 500, "device"),
+    refetchInterval: 60_000,
+  });
+  const envStats24h = useQuery({
+    queryKey: ["telemetry-24h", nodeId, "environment"],
+    queryFn: () => fetchNodeTelemetry(nodeId, 500, "environment"),
+    refetchInterval: 60_000,
+  });
+  const positionStats24h = useQuery({
+    queryKey: ["positions-24h", nodeId],
+    queryFn: () => fetchNodePositions(nodeId, 500),
+    refetchInterval: 60_000,
+  });
   const gatewayLinks = useQuery({
     queryKey: ["node-gateways", nodeId],
     queryFn: () => fetchNodeGateways(nodeId),
@@ -452,7 +472,12 @@ export function Inspector({
   const batteryHistory = toPoints(deviceHistory.data, (r) => r.battery_level);
   const voltageHistory = toPoints(deviceHistory.data, (r) => r.voltage);
   const channelUtilHistory = toPoints(deviceHistory.data, (r) => r.channel_utilization);
+  const airTxHistory = toPoints(deviceHistory.data, (r) => r.air_util_tx);
   const temperatureHistory = toPoints(envHistory.data, (r) => r.temperature_c);
+  const stats24h = useMemo(
+    () => computeNodeStats24h(deviceStats24h.data ?? [], envStats24h.data ?? [], positionStats24h.data ?? []),
+    [deviceStats24h.data, envStats24h.data, positionStats24h.data],
+  );
 
   const battery = lastTel?.battery_level;
   const batteryText = battery == null ? "—" : battery > 100 ? "⚡ ext." : `${battery} %`;
@@ -847,22 +872,114 @@ export function Inspector({
 
         {effectiveTab === "history" && (
           <>
+            <Section label="RESUMEN 24 H">
+              {stats24h.deviceSamples === 0 && stats24h.envSamples === 0 && stats24h.positionSamples === 0 ? (
+                <div style={{ color: t.textFaint, fontSize: 11.5 }}>Sin muestras en las últimas 24 h.</div>
+              ) : (
+                <>
+                  {stats24h.trafficLevel != null && (
+                    <div style={{ marginBottom: 8 }}>
+                      <span
+                        style={{
+                          ...chipStyle(
+                            stats24h.trafficLevel === "alto"
+                              ? t.crit
+                              : stats24h.trafficLevel === "moderado"
+                                ? t.warn
+                                : t.ok,
+                          ),
+                          fontSize: 11.5,
+                          padding: "0.2rem 0.6rem",
+                        }}
+                        title="Clasificado por el air_util_tx medio de la ventana (>30 % alto, >10 % moderado, resto bajo)"
+                      >
+                        {stats24h.trafficLevel === "alto" ? "🔴" : stats24h.trafficLevel === "moderado" ? "🟡" : "🟢"}{" "}
+                        {TRAFFIC_LEVEL_LABEL[stats24h.trafficLevel]} · TX medio {stats24h.avgAirUtilTx} %
+                      </span>
+                    </div>
+                  )}
+                  <div style={cardGrid}>
+                    {stats24h.currentUptimeSeconds != null && (
+                      <MetricCard icon="⏱" label="UPTIME ACTUAL" value={fmtSeconds(stats24h.currentUptimeSeconds)} />
+                    )}
+                    <MetricCard
+                      icon="🔁"
+                      label="REINICIOS 24H"
+                      value={stats24h.reboots}
+                      color={stats24h.reboots > 0 ? t.warn : undefined}
+                    />
+                    {stats24h.avgAirUtilTx != null && (
+                      <MetricCard icon="📡" label="AIR TX MEDIO" value={`${stats24h.avgAirUtilTx} %`} />
+                    )}
+                    {stats24h.maxAirUtilTx != null && (
+                      <MetricCard icon="📡" label="AIR TX PICO" value={`${stats24h.maxAirUtilTx} %`} />
+                    )}
+                    {stats24h.avgChannelUtil != null && (
+                      <MetricCard icon="📶" label="CANAL MEDIO" value={`${stats24h.avgChannelUtil} %`} />
+                    )}
+                    {stats24h.maxChannelUtil != null && (
+                      <MetricCard icon="📶" label="CANAL PICO" value={`${stats24h.maxChannelUtil} %`} />
+                    )}
+                    {stats24h.minBattery != null && stats24h.maxBattery != null && (
+                      <MetricCard icon="🔋" label="BATERÍA MIN/MAX" value={`${stats24h.minBattery}–${stats24h.maxBattery} %`} />
+                    )}
+                    {stats24h.batteryDeltaPercent != null && (
+                      <MetricCard
+                        icon={stats24h.batteryDeltaPercent >= 0 ? "🔌" : "🪫"}
+                        label="CAMBIO BATERÍA"
+                        value={`${stats24h.batteryDeltaPercent > 0 ? "+" : ""}${stats24h.batteryDeltaPercent} %`}
+                        color={stats24h.batteryDeltaPercent < 0 ? t.warn : t.ok}
+                      />
+                    )}
+                    {stats24h.minTemperatureC != null && stats24h.maxTemperatureC != null && (
+                      <MetricCard icon="🌡" label="TEMP. MIN/MAX" value={`${stats24h.minTemperatureC}–${stats24h.maxTemperatureC} °C`} />
+                    )}
+                    {stats24h.minHumidity != null && stats24h.maxHumidity != null && (
+                      <MetricCard icon="💧" label="HUMEDAD MIN/MAX" value={`${stats24h.minHumidity}–${stats24h.maxHumidity} %`} />
+                    )}
+                    {stats24h.minPressureHpa != null && stats24h.maxPressureHpa != null && (
+                      <MetricCard icon="🧭" label="PRESIÓN MIN/MAX" value={`${stats24h.minPressureHpa}–${stats24h.maxPressureHpa} hPa`} />
+                    )}
+                    {stats24h.distanceKm != null && (
+                      <MetricCard icon="🧭" label="DISTANCIA RECORRIDA" value={`${stats24h.distanceKm} km`} />
+                    )}
+                    {stats24h.maxSpeedKmh != null && (
+                      <MetricCard icon="🚀" label="VELOCIDAD MÁXIMA" value={`${stats24h.maxSpeedKmh} km/h`} />
+                    )}
+                    <MetricCard
+                      icon="📨"
+                      label="MUESTRAS 24H"
+                      value={stats24h.deviceSamples + stats24h.envSamples + stats24h.positionSamples}
+                      title="Telemetría de dispositivo + entorno + posiciones recibidas en la ventana"
+                    />
+                  </div>
+                  <div style={{ color: t.textFaint, fontSize: 11, marginTop: 6 }}>
+                    Distancia/velocidad son aproximadas (ruido de GPS incluido, no un dato de precisión). Reinicios
+                    se infieren de caídas en `uptime_seconds`, mismo criterio que la narrativa del diario operativo.
+                  </div>
+                </>
+              )}
+            </Section>
+
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.6rem 1rem" }}>
               <Section label="BATERÍA">
-                <HistoryChart points={batteryHistory} unit="%" color={t.ok} />
+                <HistoryChart points={batteryHistory} unit="%" color={hex.catGreen} />
               </Section>
               <Section label="VOLTAJE">
-                <HistoryChart points={voltageHistory} unit="V" color={t.accent} />
+                <HistoryChart points={voltageHistory} unit="V" color={hex.catBlue} />
               </Section>
               <Section label="USO DE CANAL">
-                <HistoryChart points={channelUtilHistory} unit="%" color={t.warn} />
+                <HistoryChart points={channelUtilHistory} unit="%" color={hex.catViolet} />
+              </Section>
+              <Section label="USO TX (AIR TIME)">
+                <HistoryChart points={airTxHistory} unit="%" color={hex.catAqua} />
               </Section>
               <Section label="TEMPERATURA">
-                <HistoryChart points={temperatureHistory} unit="°C" color={t.crit} />
+                <HistoryChart points={temperatureHistory} unit="°C" color={hex.catOrange} />
               </Section>
             </div>
             <div style={{ color: t.textFaint, fontSize: 11, marginTop: 6 }}>
-              SNR/RSSI y reinicios no tienen serie histórica hoy — solo se persiste el último valor
+              SNR/RSSI no tienen serie histórica hoy — solo se persiste el último valor
               (ver docs/design/motor-de-reglas-y-topologia.md).
             </div>
           </>

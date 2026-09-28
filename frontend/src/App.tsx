@@ -36,6 +36,7 @@ import { JobsView } from "./components/jobs/JobsView";
 import { OpsCenter } from "./components/opscenter/OpsCenter";
 import { LoginLogView } from "./components/LoginLogView";
 import { ProfilesView } from "./components/ProfilesView";
+import { StatsView } from "./components/stats/StatsView";
 import { UsersView } from "./components/UsersView";
 import { SettingsView } from "./components/SettingsView";
 import { CommandPalette } from "./components/shell/CommandPalette";
@@ -703,6 +704,8 @@ export default function App() {
           )}
 
           {view === "gateways" && <GatewaysView />}
+
+          {view === "stats" && <StatsView onOpenNode={setSelected} />}
 
           {view === "alerts" && <AlertsView onOpenNode={setSelected} />}
 

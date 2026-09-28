@@ -47,6 +47,9 @@ class Settings(BaseSettings):
         default=-15, validation_alias=AliasChoices("SNR_DEGRADED_THRESHOLD", "NOC_SNR_DEGRADED_THRESHOLD")
     )
     dashboard_cache_seconds: float = 5.0
+    # Estadísticas curiosas de la malla ("Estadísticas"): panel de baja
+    # frecuencia de refresco, caché algo más generosa que el Dashboard.
+    stats_cache_seconds: float = 15.0
 
     # Cadencia del motor de alertas (Fase 3C, ADR 0012)
     alert_eval_interval_seconds: float = 30.0

@@ -393,6 +393,30 @@ export interface DashboardSummaryOut {
 
 export const fetchDashboardSummary = () => get<DashboardSummaryOut>("/dashboard/summary");
 
+// ── Estadísticas curiosas de la malla ────────────────────────────────────────
+
+export interface StatRecordOut {
+  key: string;
+  label: string;
+  icon: string;
+  unit: string | null;
+  node_id: string;
+  short_name: string | null;
+  long_name: string | null;
+  value: number;
+}
+
+export interface StatsSummaryOut {
+  generated_at: string;
+  nodes_total: number;
+  nodes_online: number;
+  network_age_days: number | null;
+  events_last_24h: number;
+  records: StatRecordOut[];
+}
+
+export const fetchStatsSummary = () => get<StatsSummaryOut>("/stats/summary");
+
 export type Severity = "INFO" | "WARNING" | "CRITICAL";
 
 export interface AlertOut {
