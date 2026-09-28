@@ -492,7 +492,7 @@ export function Inspector({
       }
       defaultPos={{ x: Math.round((window.innerWidth - defaultW) / 2), y: Math.round((window.innerHeight - defaultH) / 2) }}
       defaultSize={{ w: defaultW, h: defaultH }}
-      minWidth={640}
+      minWidth={720}
       minHeight={420}
       onClose={onClose}
       headerActions={
@@ -1075,8 +1075,11 @@ export function Inspector({
             </div>
           )}
 
-          {/* KPIs: valores grandes, cero tablas */}
-          <div className="kpis" style={{ marginTop: 12, gridTemplateColumns: "1fr 1fr" }}>
+          {/* KPIs: valores grandes, cero tablas. La clase `.kpis` es
+              `display:flex` (pensada para una fila ancha) — en esta
+              columna estrecha 5 ítems en fila cortaban el texto; se
+              fuerza grid de 2 columnas aquí. */}
+          <div className="kpis" style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr" }}>
             <div className="kpi">
               <div className="v" style={{ color: batteryColor ?? t.text }}>
                 {batteryText}
