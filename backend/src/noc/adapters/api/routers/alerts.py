@@ -185,6 +185,16 @@ async def list_alerts(
     return [AlertOut.from_entity(a) for a in alerts]
 
 
+@router.get("/alerts/active", response_model=list[AlertOut])
+async def list_active_alerts(session: SessionDep) -> list[AlertOut]:
+    """Alertas activas (firing+acknowledged) SIN límite — mismo criterio que
+    `/alerts/counts`: bug 2026-09-29, `GET /alerts?limit=n` ordena por
+    `fired_at` entre TODOS los estados y puede dejar fuera alertas activas
+    antiguas si hay ≥n resueltas más recientes (flapping)."""
+    alerts = await SqlAlertRepository(session).list_active()
+    return [AlertOut.from_entity(a) for a in alerts]
+
+
 @router.post("/alerts/{alert_id}/ack", response_model=AlertOut)
 async def acknowledge_alert(alert_id: int, session: SessionDep, body: AckIn | None = None) -> AlertOut:
     async with session.begin():

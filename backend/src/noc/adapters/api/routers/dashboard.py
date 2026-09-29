@@ -17,6 +17,7 @@ class ThresholdsOut(BaseModel):
     offline_percent_critical: float
     snr_degraded_db: float
     node_offline_after_seconds: int
+    node_offline_alert_enabled: bool
 
     @classmethod
     def from_entity(cls, t: Thresholds) -> "ThresholdsOut":

@@ -353,6 +353,7 @@ export interface ThresholdsOut {
   offline_percent_critical: number;
   snr_degraded_db: number;
   node_offline_after_seconds: number;
+  node_offline_alert_enabled: boolean;
 }
 
 export type CriticalReason = "low_battery" | "inactive" | "degraded_snr";
@@ -498,6 +499,12 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const fetchAlerts = (status?: string, limit = 100) =>
   get<AlertOut[]>(`/alerts?limit=${limit}${status ? `&status=${status}` : ""}`);
+/** Todas las alertas activas (firing+acknowledged) sin límite — mismo criterio
+ * que fetchAlertCounts: una alerta activa antigua nunca debe caer fuera de
+ * una ventana truncada. `fetchAlerts(undefined, n)` NO sirve para esto: ordena
+ * por fired_at entre todos los estados, así que alertas resueltas recientes
+ * (flapping) pueden desplazar a las activas antiguas fuera del límite. */
+export const fetchActiveAlerts = () => get<AlertOut[]>("/alerts/active");
 export const ackAlert = (id: number) => send<AlertOut>("POST", `/alerts/${id}/ack`);
 export const resolveAlert = (id: number) => send<AlertOut>("POST", `/alerts/${id}/resolve`);
 

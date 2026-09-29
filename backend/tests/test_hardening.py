@@ -4,8 +4,9 @@ preview/create de lotes.
 - activity_log: el MISMO envelope del WS se persiste (writer en background,
   cola acotada, poda por tamaño) y se recupera más reciente primero.
 - counts: los contadores del HUD/StatusBar/insignias salen de agregados SQL,
-  con la misma semántica de grupo que la UI (no-nodo siempre dentro,
-  CRITICAL fuera del grupo también cuenta).
+  con la misma semántica de grupo que la UI (no-nodo siempre dentro; alertas
+  de nodos fuera del grupo NO cuentan, sin excepción de severidad —
+  decisión del usuario 2026-09-29, revierte v0.7 §2.1).
 - preview de lotes: misma resolución de gateways que la ejecución — un nodo
   cuya única pasarela está eliminada se bloquea YA en la simulación.
 """
@@ -225,8 +226,8 @@ async def test_alert_counts_global(session_factory):
 
 
 async def test_alert_counts_group_scoped_matches_ui_semantics(session_factory):
-    """Misma regla que scopeAlertsToGroup: no-nodo dentro, CRITICAL de fuera
-    también cuenta; una WARNING de un nodo fuera del grupo NO contaría."""
+    """Misma regla que scopeAlertsToGroup: no-nodo dentro; CUALQUIER alerta de
+    un nodo fuera del grupo queda excluida, incluida una CRITICAL."""
     group_id = await _seed_alerts(session_factory)
     now = datetime.now(timezone.utc)
     async with session_factory() as session, session.begin():
@@ -241,7 +242,9 @@ async def test_alert_counts_group_scoped_matches_ui_semantics(session_factory):
         counts = await SqlAlertRepository(session).active_counts(group_id)
         global_counts = await SqlAlertRepository(session).active_counts()
     assert global_counts["active"] == 4
-    assert counts == {"active": 3, "firing": 2, "acknowledged": 1, "critical_active": 1}
+    # Dentro del grupo: solo a1 (WARNING, acknowledged) + la de pasarela
+    # (firing) — la CRITICAL de !00000002 queda fuera, igual que la WARNING.
+    assert counts == {"active": 2, "firing": 1, "acknowledged": 1, "critical_active": 0}
 
 
 async def test_operation_counts_global_and_group(session_factory):

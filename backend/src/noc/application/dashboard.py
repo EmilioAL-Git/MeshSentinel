@@ -14,6 +14,7 @@ from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from noc.adapters.persistence.alert_repositories import SqlAlertRuleRepository
 from noc.adapters.persistence.repositories import (
     SqlGatewayRepository,
     SqlNodeRepository,
@@ -60,6 +61,12 @@ class Thresholds:
     offline_percent_critical: float
     snr_degraded_db: float
     node_offline_after_seconds: int
+    # Decisión del usuario 2026-09-29: si NINGUNA regla de alerta node_offline
+    # está habilitada, el Centro deja de marcar nodos como "inactive" en
+    # critical_nodes/ATENCIÓN — antes eran dos vigilantes independientes del
+    # mismo síntoma (este umbral vs. la tabla de alertas) y desactivar la
+    # regla en la pestaña Alertas no tenía ningún efecto aquí.
+    node_offline_alert_enabled: bool = True
 
 
 @dataclass(slots=True)
@@ -145,6 +152,8 @@ class DashboardService:
                 await SqlTelemetryRepository(session).count_since(hour_ago)
                 + await SqlPositionRepository(session).count_since(hour_ago)
             )
+            enabled_rules = await SqlAlertRuleRepository(session).list_enabled()
+        node_offline_alert_enabled = any(r.rule_type == "node_offline" for r in enabled_rules)
 
         # Los nodos ignorados no cuentan para los agregados del NOC (M1.2);
         # su telemetría sigue persistiéndose con normalidad
@@ -224,7 +233,7 @@ class DashboardService:
                 round(sum(temperature_values) / len(temperature_values), 1) if temperature_values else None
             ),
             avg_pressure_hpa=round(sum(pressure_values) / len(pressure_values), 1) if pressure_values else None,
-            critical_nodes=self._critical_nodes(summaries, now),
+            critical_nodes=self._critical_nodes(summaries, now, node_offline_alert_enabled),
             gateways=gateways,
             thresholds=Thresholds(
                 low_battery_percent=s.low_battery_threshold,
@@ -233,10 +242,13 @@ class DashboardService:
                 offline_percent_critical=s.offline_percent_critical,
                 snr_degraded_db=s.snr_degraded_threshold,
                 node_offline_after_seconds=s.node_offline_after_seconds,
+                node_offline_alert_enabled=node_offline_alert_enabled,
             ),
         )
 
-    def _critical_nodes(self, summaries: list[NodeSummary], now: datetime) -> list[CriticalNode]:
+    def _critical_nodes(
+        self, summaries: list[NodeSummary], now: datetime, node_offline_alert_enabled: bool
+    ) -> list[CriticalNode]:
         s = self._settings
         result: list[CriticalNode] = []
         for x in summaries:
@@ -245,7 +257,7 @@ class DashboardService:
             battery = tel.battery_level if tel else None
             if battery is not None and battery < s.low_battery_threshold:
                 reasons.append("low_battery")
-            if node.last_seen_at is not None:
+            if node_offline_alert_enabled and node.last_seen_at is not None:
                 inactive_s = (now - ensure_utc(node.last_seen_at)).total_seconds()
                 if inactive_s > s.offline_minutes_warning * 60:
                     reasons.append("inactive")

@@ -12,6 +12,7 @@ import {
   duplicateProvider,
   fetchAlertRules,
   fetchAlerts,
+  fetchActiveAlerts,
   fetchChannels,
   fetchGroups,
   fetchNodes,
@@ -61,14 +62,28 @@ const RULE_FIELD_META: Record<
   {
     label: string;
     threshold?: { label: string; step?: number; default: number };
-    duration?: { label: string; toUi: (s: number) => number; fromUi: (v: number) => number; default: number };
+    duration?: {
+      label: string;
+      toUi: (s: number) => number;
+      fromUi: (v: number) => number;
+      default: number;
+      step?: number;
+      min?: number;
+    };
   }
 > = {
   low_battery: { label: "Batería baja", threshold: { label: "% batería", default: 20 } },
   snr_degraded: { label: "SNR degradado", threshold: { label: "SNR (dB)", step: 0.5, default: 0 } },
   node_offline: {
     label: "Nodo sin actividad",
-    duration: { label: "Minutos sin actividad", toUi: (s) => Math.round(s / 60), fromUi: (m) => m * 60, default: 15 },
+    duration: {
+      label: "Horas sin actividad",
+      toUi: (s) => Math.round((s / 3600) * 100) / 100,
+      fromUi: (h) => Math.round(h * 3600),
+      default: 0.25,
+      step: 0.25,
+      min: 0.25,
+    },
   },
   gateway_disconnected: {
     label: "Pasarela desconectada",
@@ -215,7 +230,14 @@ function RuleEditor({
       {meta?.duration && (
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <span className="microlabel" style={{ minWidth: 70 }}>{meta.duration.label}</span>
-          <input className="input" type="number" min={1} value={durationUi} onChange={(e) => setDurationUi(Number(e.target.value))} />
+          <input
+            className="input"
+            type="number"
+            min={meta.duration.min ?? 1}
+            step={meta.duration.step ?? 1}
+            value={durationUi}
+            onChange={(e) => setDurationUi(Number(e.target.value))}
+          />
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -404,7 +426,14 @@ function NewRuleForm({
       {meta.duration && (
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <span className="microlabel" style={{ minWidth: 70 }}>{meta.duration.label}</span>
-          <input className="input" type="number" min={1} value={durationUi} onChange={(e) => setDurationUi(Number(e.target.value))} />
+          <input
+            className="input"
+            type="number"
+            min={meta.duration.min ?? 1}
+            step={meta.duration.step ?? 1}
+            value={durationUi}
+            onChange={(e) => setDurationUi(Number(e.target.value))}
+          />
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -734,7 +763,21 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
     queryClient.invalidateQueries({ queryKey: ["channels"] });
   };
 
-  const alerts = useQuery({ queryKey: ["alerts"], queryFn: () => fetchAlerts(undefined, 100), refetchInterval: 30_000 });
+  // Activas SIN límite (bug 2026-09-29: `fetchAlerts(undefined, n)` ordena por
+  // fired_at entre TODOS los estados — alertas resueltas recientes podían
+  // desplazar fuera de la ventana a activas antiguas, dejando la pestaña
+  // vacía pese a que /alerts/counts sí las contaba). Resueltas aparte, con
+  // su propio límite (solo para el historial reciente de esta vista).
+  const activeAlerts = useQuery({
+    queryKey: ["alerts", "active"],
+    queryFn: fetchActiveAlerts,
+    refetchInterval: 30_000,
+  });
+  const resolvedAlertsQuery = useQuery({
+    queryKey: ["alerts", "resolved"],
+    queryFn: () => fetchAlerts("resolved", 30),
+    refetchInterval: 30_000,
+  });
   const rules = useQuery({ queryKey: ["alert-rules"], queryFn: fetchAlertRules });
   // Nombre del grupo para el chip de ámbito de las reglas por grupo (§1.3)
   const groups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
@@ -806,8 +849,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   });
   const removeChannelGroup = useMutation({ mutationFn: deleteChannel, onSettled: invalidate });
 
-  const all = alerts.data ?? [];
-  const allActive = all.filter((a) => a.status !== "resolved");
+  const allActive = activeAlerts.data ?? [];
 
   // Grupo activo: mismo criterio compartido con StatusPanel (GroupContext) —
   // nunca se duplica aquí.
@@ -818,8 +860,8 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
   const isOutOfGroupCritical = (a: AlertOut) => outOfGroupCritical.has(a.id);
   const firing = active.filter((a) => a.status === "firing");
   const resolved = useMemo(
-    () => scopeAlertsToGroup(all, groupNodeIds).inScope.filter((a) => a.status === "resolved").slice(0, 30),
-    [all, groupNodeIds],
+    () => scopeAlertsToGroup(resolvedAlertsQuery.data ?? [], groupNodeIds).inScope.slice(0, 30),
+    [resolvedAlertsQuery.data, groupNodeIds],
   );
   const critCount = active.filter((a) => a.severity === "CRITICAL").length;
 
@@ -858,8 +900,8 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
               <span className="panel-count">{active.length} alertas</span>
             </div>
             <div className="panel-body flush">
-              {alerts.isLoading && <div className="empty">Cargando…</div>}
-              {!alerts.isLoading && active.length === 0 && (
+              {activeAlerts.isLoading && <div className="empty">Cargando…</div>}
+              {!activeAlerts.isLoading && active.length === 0 && (
                 <div className="empty">Sin alertas activas — red dentro de los umbrales.</div>
               )}
               {active.map((a) => (

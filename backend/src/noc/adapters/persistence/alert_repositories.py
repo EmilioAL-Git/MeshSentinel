@@ -156,8 +156,16 @@ class SqlAlertRepository:
         return [_alert_entity(r) for r in rows]
 
     async def list_active(self) -> list[Alert]:
+        """Sin `limit` a propósito (mismo criterio que `active_counts`): una
+        alerta activa con `fired_at` antiguo (llevando tiempo disparada) nunca
+        debe caer fuera de una ventana truncada — bug real detectado 2026-09-29,
+        el contador de `/alerts/counts` mostraba 21 mientras `list_alerts()`
+        con `ORDER BY fired_at DESC LIMIT n` las dejaba fuera si había ≥n
+        alertas resueltas más recientes (flapping)."""
         rows = await self._session.scalars(
-            select(AlertModel).where(AlertModel.status.in_(ACTIVE_STATUSES))
+            select(AlertModel)
+            .where(AlertModel.status.in_(ACTIVE_STATUSES))
+            .order_by(AlertModel.fired_at.desc())
         )
         return [_alert_entity(r) for r in rows]
 
@@ -167,8 +175,9 @@ class SqlAlertRepository:
 
         Con `group_id`, replica EXACTAMENTE la semántica del escopado de la
         UI (`scopeAlertsToGroup`): alertas de sujeto no-nodo siempre dentro;
-        las CRITICAL de nodos fuera del grupo también cuentan (nunca se
-        ocultan, principio v0.7 §2.1)."""
+        las de nodos fuera del grupo NO cuentan, sin excepción de severidad
+        (decisión del usuario 2026-09-29, revierte el principio v0.7 §2.1
+        "una CRITICAL nunca se oculta" — un grupo filtra de verdad)."""
         stmt = (
             select(AlertModel.status, AlertModel.severity, func.count())
             .where(AlertModel.status.in_(ACTIVE_STATUSES))
@@ -181,7 +190,6 @@ class SqlAlertRepository:
             stmt = stmt.where(
                 or_(
                     AlertModel.subject_type != "node",
-                    AlertModel.severity == "CRITICAL",
                     AlertModel.subject_id.in_(members),
                 )
             )

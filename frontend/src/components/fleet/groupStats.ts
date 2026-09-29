@@ -100,7 +100,7 @@ export function computeGroupAttention(summaries: NodeSummaryOut[], thresholds: T
     const reasons: CriticalReason[] = [];
     const battery = tel?.battery_level ?? null;
     if (battery != null && battery < thresholds.low_battery_percent) reasons.push("low_battery");
-    if (node.last_seen_at != null) {
+    if (thresholds.node_offline_alert_enabled && node.last_seen_at != null) {
       const inactiveS = (Date.now() - new Date(node.last_seen_at).getTime()) / 1000;
       if (inactiveS > thresholds.offline_minutes_warning * 60) reasons.push("inactive");
     }

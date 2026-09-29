@@ -81,31 +81,24 @@ export function useGroupNodeIds(summaries: NodeSummaryOut[]): Set<string> | null
 }
 
 /**
- * Alertas dentro/fuera del grupo activo — mismo criterio en toda la app
- * (Alertas, StatusPanel del Centro): una alerta de nodo pertenece al grupo
- * si su nodo es miembro; las de pasarela/sistema nunca se le pueden
- * atribuir a uno, así que siempre cuentan como "dentro". Las CRITICAL de
- * fuera del grupo se devuelven también en `inScope` (nunca se ocultan,
- * v0.7 §2.1) pero marcadas aparte en `outOfGroupCritical` para que cada
- * vista las distinga visualmente sin recalcular el criterio.
+ * Alertas dentro del grupo activo — mismo criterio en toda la app (Alertas,
+ * StatusPanel del Centro): una alerta de nodo pertenece al grupo si su nodo
+ * es miembro; las de pasarela/sistema nunca se le pueden atribuir a uno, así
+ * que siempre cuentan como "dentro". Decisión del usuario 2026-09-29
+ * (revierte el principio v0.7 §2.1 "una CRITICAL nunca se oculta"): las
+ * CRITICAL de fuera del grupo activo ahora se ocultan igual que cualquier
+ * otra — un grupo filtra de verdad, sin excepción de severidad.
+ * `outOfGroupCritical` se mantiene en la firma (siempre vacío) para no tocar
+ * a cada llamador — las vistas que lo consultaban simplemente dejan de
+ * pintar el chip correspondiente.
  */
 export function scopeAlertsToGroup(
   alerts: AlertOut[],
   groupNodeIds: Set<string> | null,
 ): { inScope: AlertOut[]; outOfGroupCritical: Set<number> } {
   if (groupNodeIds == null) return { inScope: alerts, outOfGroupCritical: new Set() };
-  const inScope: AlertOut[] = [];
-  const outOfGroupCritical = new Set<number>();
-  for (const a of alerts) {
-    const belongs = a.subject_type !== "node" || groupNodeIds.has(a.subject_id);
-    if (belongs) {
-      inScope.push(a);
-    } else if (a.severity === "CRITICAL") {
-      inScope.push(a);
-      outOfGroupCritical.add(a.id);
-    }
-  }
-  return { inScope, outOfGroupCritical };
+  const inScope = alerts.filter((a) => a.subject_type !== "node" || groupNodeIds.has(a.subject_id));
+  return { inScope, outOfGroupCritical: new Set() };
 }
 
 /**

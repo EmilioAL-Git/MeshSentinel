@@ -3,9 +3,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from noc.adapters.persistence.alert_repositories import SqlAlertRuleRepository
 from noc.application.dashboard import DashboardService, compute_status
 from noc.application.ingest import IngestService
 from noc.config import Settings
+from noc.domain.alerts.entities import AlertRule
 
 # ── Reglas de estado (función pura) ─────────────────────────────────────────
 
@@ -80,6 +82,13 @@ def make_settings(**overrides) -> Settings:
 
 
 async def seed(session_factory) -> None:
+    # Regla node_offline habilitada (mismo estado de fábrica que produce
+    # seed.py en producción): sin esto, `_critical_nodes` nunca marcaría
+    # "inactive" (fix 2026-09-29: el Centro respeta la regla de Alertas).
+    async with session_factory() as session, session.begin():
+        await SqlAlertRuleRepository(session).create(
+            AlertRule(name="Nodo sin actividad", rule_type="node_offline", severity="WARNING")
+        )
     ingest = IngestService(session_factory)
     now = datetime.now(timezone.utc)
     await ingest.handle_event(make_event("gateway.status", {"status": "connected", "transport": "simulated"}))
@@ -135,6 +144,26 @@ async def test_critical_nodes_reasons_and_priority(session_factory):
     assert by_id["!00000003"].reasons == ["inactive"]
     # El de 2 motivos va primero
     assert s.critical_nodes[0].node_id == "!00000002"
+
+
+async def test_critical_nodes_hides_inactive_when_rule_disabled(session_factory):
+    """Fix 2026-09-29: antes eran dos vigilantes independientes del mismo
+    síntoma (este umbral vs. la tabla de alertas); ahora desactivar la regla
+    node_offline en la pestaña Alertas también silencia el aviso del Centro."""
+    await seed(session_factory)
+    async with session_factory() as session, session.begin():
+        repo = SqlAlertRuleRepository(session)
+        rules = await repo.list_all()
+        rule = next(r for r in rules if r.rule_type == "node_offline")
+        await repo.update(rule.id or 0, {"enabled": False})
+
+    service = DashboardService(session_factory, make_settings())
+    s = await service.get_summary()
+
+    assert s.thresholds is not None and s.thresholds.node_offline_alert_enabled is False
+    by_id = {c.node_id: c for c in s.critical_nodes}
+    assert "!00000003" not in by_id  # MUDO: solo tenía "inactive"
+    assert by_id["!00000002"].reasons == ["low_battery", "degraded_snr"]  # resto intacto
 
 
 async def test_summary_cache(session_factory):
