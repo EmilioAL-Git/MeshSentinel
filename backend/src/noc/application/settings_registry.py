@@ -63,9 +63,19 @@ SETTINGS_REGISTRY: list[SettingSpec] = [
         "Umbral de aviso de batería baja en el Dashboard, Flota y alertas.",
     ),
     SettingSpec(
-        "offline_minutes_warning", "network", "Minutos offline → aviso",
+        "offline_minutes_warning", "network", "Tiempo offline → aviso",
         "int", "min", 1,
         "Minutos sin actividad de un nodo que activan un aviso en la situación de red.",
+        choices=(
+            ("15 min", 15),
+            ("30 min", 30),
+            ("1 h", 60),
+            ("2 h", 120),
+            ("4 h", 240),
+            ("6 h", 360),
+            ("12 h", 720),
+            ("24 h", 1440),
+        ),
     ),
     SettingSpec(
         "offline_percent_warning", "network", "% de flota offline → aviso",

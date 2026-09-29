@@ -9,6 +9,8 @@
  * si Fase D (motor de reglas) lo formaliza, esta constante se retira.
  */
 
+import { fmtDuration } from "../../time";
+
 const CHANNEL_UTILIZATION_ELEVATED_PERCENT = 40;
 const REDUNDANCY_LOW_PERCENT = 30;
 
@@ -60,7 +62,7 @@ export function buildSituationNarrative(i: SituationInputs): string[] {
   }
   if (i.avgSecondsSinceLastSeen != null && i.avgSecondsSinceLastSeen > i.nodeOfflineAfterSeconds) {
     lines.push(
-      `El tiempo medio desde el último contacto (${Math.round(i.avgSecondsSinceLastSeen / 60)} min) supera el umbral de offline.`,
+      `El tiempo medio desde el último contacto (${fmtDuration(i.avgSecondsSinceLastSeen)}) supera el umbral de offline.`,
     );
   }
   if (i.attentionCount > 0 && lines.length === 0) {

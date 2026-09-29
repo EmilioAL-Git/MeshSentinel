@@ -36,10 +36,10 @@ interface Props {
   /** Nodos con alerta CRITICAL activa: halo pulsante permanente (nunca se atenúan). */
   alertNodeIds?: Set<string>;
   /**
-   * Grupo activo ("Grupo como contexto global"): nodos fuera de él se
-   * atenúan igual que con Focus — NUNCA se ocultan (contexto espacial de
-   * una malla compartida). Pasarelas y alertas CRITICAL nunca se atenúan
-   * por esto. `null`/`undefined` = sin grupo activo, sin atenuación.
+   * Grupo activo: con un grupo seleccionado, el mapa muestra ÚNICAMENTE sus
+   * nodos (pedido explícito del usuario — antes solo atenuaba, ahora oculta
+   * por completo lo que queda fuera). `null`/`undefined` = "toda la red",
+   * sin filtrar.
    */
   groupNodeIds?: Set<string> | null;
   /** Pulsos de una sola vez al llegar eventos (mapa vivo, v0.7.3). */
@@ -397,10 +397,13 @@ export function MapView({
   const visibleByLayer = useMemo(() => {
     // "Solo Nexus" aísla: a diferencia de Favoritos (aditivo), aquí se
     // busca UN subconjunto concreto, no se añade a las categorías activas.
+    // Grupo activo: filtra ANTES que las capas de categoría — "solo lo del
+    // grupo" pedido por el usuario, sin excepciones para pasarelas/alertas.
+    const base = groupNodeIds != null ? withPosition.filter((s) => groupNodeIds.has(s.node.node_id)) : withPosition;
     if (layers.showNexusOnly) {
-      return withPosition.filter((s) => nexusModeOn && s.node.is_nexus);
+      return base.filter((s) => nexusModeOn && s.node.is_nexus);
     }
-    return withPosition.filter((s) => {
+    return base.filter((s) => {
       if (layers.showFavoritesOnly && s.node.is_favorite) return true;
       const cat = classifyNode(s, gatewayNodeIds);
       if (cat === "gateway") return layers.showGateways;
@@ -410,7 +413,7 @@ export function MapView({
       // ver classify.ts): nunca desaparecen silenciosamente.
       return layers.showUsers;
     });
-  }, [withPosition, layers, gatewayNodeIds]);
+  }, [withPosition, layers, gatewayNodeIds, groupNodeIds, nexusModeOn]);
 
   const map = (
     <MapContainer
@@ -445,13 +448,6 @@ export function MapView({
           const isGateway = gatewayNodeIds.has(id);
           const hasAlert = alertNodeIds?.has(id) ?? false;
           const focusDim = focusId != null && id !== focusId && id !== selectedId && !hasAlert;
-          const groupDim =
-            groupNodeIds != null &&
-            !groupNodeIds.has(id) &&
-            !isGateway &&
-            !hasAlert &&
-            id !== selectedId &&
-            id !== focusId;
           return (
             <NodeMarker
               key={id}
@@ -460,7 +456,7 @@ export function MapView({
               isSelected={id === selectedId}
               isFocused={id === focusId}
               hasAlert={hasAlert}
-              dimmed={focusDim || groupDim}
+              dimmed={focusDim}
               colorMode={layers.colorMode}
               onShowDetail={onShowDetail}
             />

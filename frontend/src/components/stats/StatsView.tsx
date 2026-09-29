@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { displayName, fetchStatsRanking, fetchStatsSummary, type StatRecordOut } from "../../api/client";
 import { Modal } from "../shell/Modal";
+import { fmtDuration } from "../../time";
 
 /**
  * Estadísticas (identidad v0.8): panel de datos curiosos sobre la malla —
@@ -15,21 +16,8 @@ import { Modal } from "../shell/Modal";
  */
 
 function formatValue(r: StatRecordOut): string {
-  if (r.unit === "s") {
-    const totalMin = Math.round(r.value / 60);
-    const days = Math.floor(totalMin / 1440);
-    const hours = Math.floor((totalMin % 1440) / 60);
-    const mins = totalMin % 60;
-    if (days > 0) return `${days} d ${hours} h`;
-    if (hours > 0) return `${hours} h ${mins} min`;
-    return `${mins} min`;
-  }
-  if (r.unit === "min") {
-    if (r.value < 60) return `hace ${Math.round(r.value)} min`;
-    const hours = r.value / 60;
-    if (hours < 48) return `hace ${Math.round(hours)} h`;
-    return `hace ${Math.round(hours / 24)} d`;
-  }
+  if (r.unit === "s") return fmtDuration(r.value);
+  if (r.unit === "min") return `hace ${fmtDuration(r.value * 60)}`;
   const v = Number.isInteger(r.value) ? String(r.value) : r.value.toFixed(1);
   return r.unit ? `${v} ${r.unit}` : v;
 }

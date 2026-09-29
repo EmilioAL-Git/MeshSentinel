@@ -67,6 +67,23 @@ def _node_label(s: NodeSummary) -> str:
     return s.node.short_name or s.node.node_id
 
 
+def _fmt_duration_es(seconds: float) -> str:
+    """Segundos en compacto con las dos unidades más significativas:
+    "3 d 4 h" / "5 h 12 min" / "12 min". Evita mensajes ilegibles como
+    "1334 min" en avisos/mensajes de alerta con duraciones largas."""
+    total = max(0, round(seconds))
+    if total < 60:
+        return f"{total} s"
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins = rem // 60
+    if days > 0:
+        return f"{days} d {hours} h" if hours > 0 else f"{days} d"
+    if hours > 0:
+        return f"{hours} h {mins} min" if mins > 0 else f"{hours} h"
+    return f"{mins} min"
+
+
 def eval_low_battery(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
     threshold = rule.threshold if rule.threshold is not None else 20
     out = []
@@ -98,7 +115,7 @@ def eval_node_offline(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondi
                     rule_id=rule.id or 0,
                     subject_type="node",
                     subject_id=s.node.node_id,
-                    message=f"{_node_label(s)} sin actividad desde hace {int(silent // 60)} min",
+                    message=f"{_node_label(s)} sin actividad desde hace {_fmt_duration_es(silent)}",
                 )
             )
     return out
@@ -167,7 +184,7 @@ def eval_gateway_no_traffic(rule: AlertRule, snap: NetworkSnapshot) -> list[Aler
                     subject_id=g.gateway_id,
                     message=(
                         f"Pasarela {g.name or g.gateway_id} conectada pero sin tráfico de malla "
-                        f"desde hace {int(silent // 60)} min (posible radio bloqueada)"
+                        f"desde hace {_fmt_duration_es(silent)} (posible radio bloqueada)"
                     ),
                     correlation_key=f"gateway:{g.gateway_id}",
                 )
@@ -272,7 +289,7 @@ def eval_position_lost(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCond
                     subject_id=s.node.node_id,
                     message=(
                         f"{_node_label(s)} activo pero sin posición desde hace "
-                        f"{int(age // 60)} min"
+                        f"{_fmt_duration_es(age)}"
                     ),
                 )
             )
@@ -296,7 +313,7 @@ def eval_neighbor_link_lost(rule: AlertRule, snap: NetworkSnapshot) -> list[Aler
         if age > duration:
             neighbor = label_of.get(n.neighbor_id, n.neighbor_id)
             lost_by_node.setdefault(n.node_id, []).append(
-                f"{neighbor} (hace {int(age // 3600)} h)"
+                f"{neighbor} (hace {_fmt_duration_es(age)})"
             )
     out = []
     for node_id, lost in sorted(lost_by_node.items()):
