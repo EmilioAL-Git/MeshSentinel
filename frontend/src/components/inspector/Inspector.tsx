@@ -8,6 +8,7 @@ import {
   createGroup,
   createOperation,
   createTag,
+  deleteNode,
   fetchDashboardSummary,
   fetchGateways,
   fetchGroups,
@@ -233,6 +234,7 @@ export function Inspector({
   onGoTo,
   focusActive,
   onToggleFocus,
+  onDeleted,
 }: {
   nodeId: string;
   summary: NodeSummaryOut | undefined;
@@ -246,6 +248,8 @@ export function Inspector({
   /** Focus (§7): true si ESTE nodo es el objetivo actual. */
   focusActive: boolean;
   onToggleFocus: () => void;
+  /** Borrado real del nodo (distinto de is_ignored): App limpia selección/caché. */
+  onDeleted: () => void;
 }) {
   const queryClient = useQueryClient();
   const invalidate = () => {
@@ -382,6 +386,18 @@ export function Inspector({
   const nodeType = useMutation({
     mutationFn: (nodeType: string | null) => setNodeTypeOverride(nodeId, nodeType),
     onSettled: invalidate,
+  });
+  // Borrado real e irreversible (distinto de is_ignored, que solo lo oculta):
+  // fila del nodo + su historial propio. Botón armado en 2 pasos (sin
+  // teclear nada, pedido explícito del usuario), mismo patrón que
+  // GatewaysView/DeleteNodeModal.
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  const deleteThisNode = useMutation({
+    mutationFn: () => deleteNode(nodeId),
+    onSuccess: () => {
+      invalidate();
+      onDeleted();
+    },
   });
   const ack = useMutation({
     mutationFn: (id: number) => ackAlert(id),
@@ -1299,6 +1315,33 @@ export function Inspector({
 
             <Section label="REMOTO (NODEDB DEL NODO)">
               <RemoteFlags nodeId={nodeId} subjectOptions={subjectOptions} />
+            </Section>
+
+            <Section label="PELIGRO">
+              <p style={{ fontSize: 12, color: t.textDim, marginTop: 0 }}>
+                Borra este nodo del sistema: fila + todo su historial propio (posiciones,
+                telemetría, vecinos, etiquetas, grupos, enlaces con pasarelas). Es{" "}
+                <strong>irreversible</strong> — distinto de "ignorar", que solo lo oculta.
+              </p>
+              {deleteArmed ? (
+                <button
+                  style={{ ...actionBtn, borderColor: t.crit, color: t.crit }}
+                  disabled={deleteThisNode.isPending}
+                  onClick={() => deleteThisNode.mutate()}
+                >
+                  ¿Seguro? Confirmar borrado
+                </button>
+              ) : (
+                <button
+                  style={{ ...actionBtn, borderColor: t.crit, color: t.crit }}
+                  onClick={() => setDeleteArmed(true)}
+                >
+                  Borrar nodo
+                </button>
+              )}
+              {deleteThisNode.isError && (
+                <p style={{ color: t.crit, fontSize: 12 }}>{String(deleteThisNode.error)}</p>
+              )}
             </Section>
           </>
         )}

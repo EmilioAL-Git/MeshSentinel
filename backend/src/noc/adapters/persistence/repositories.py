@@ -9,11 +9,12 @@ from dataclasses import fields
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from noc.adapters.persistence.models import (
+    ChatMessageModel,
     GatewayModel,
     GroupMemberModel,
     NeighborModel,
@@ -138,6 +139,72 @@ class SqlNodeRepository:
     async def list_all(self) -> list[Node]:
         rows = await self._session.scalars(select(NodeModel))
         return [_node_entity(r) for r in rows]
+
+    async def _delete_owned(self, node_ids: list[str]) -> None:
+        """Cascada explícita del historial propio de ESTOS nodos (SQLite no
+        aplica ON DELETE CASCADE): mismas tablas que `delete_all`, acotadas
+        por node_id. `chat_messages.from_node_id` es FK NOT NULL sin cascada
+        — hay que borrar los mensajes que el nodo ENVIÓ antes de poder
+        borrar su fila (si no, PostgreSQL rechaza el borrado); `to_node_id`
+        no es FK y se queda huérfano, igual que alerts/admin_operations/
+        activity_log (auditoría que solo lo MENCIONA de pasada, no se toca)."""
+        await self._session.execute(
+            delete(ChatMessageModel).where(ChatMessageModel.from_node_id.in_(node_ids))
+        )
+        await self._session.execute(delete(NeighborModel).where(NeighborModel.node_id.in_(node_ids)))
+        await self._session.execute(delete(TelemetryModel).where(TelemetryModel.node_id.in_(node_ids)))
+        await self._session.execute(delete(PositionModel).where(PositionModel.node_id.in_(node_ids)))
+        await self._session.execute(
+            delete(NodeGatewayLinkModel).where(NodeGatewayLinkModel.node_id.in_(node_ids))
+        )
+        await self._session.execute(delete(GroupMemberModel).where(GroupMemberModel.node_id.in_(node_ids)))
+        await self._session.execute(delete(NodeTagModel).where(NodeTagModel.node_id.in_(node_ids)))
+
+    async def delete(self, node_id: str) -> bool:
+        """Borrado real e irreversible de UN nodo (a diferencia de
+        `is_ignored`, que solo lo oculta): fila + todo su historial propio."""
+        model = await self._session.get(NodeModel, node_id)
+        if model is None:
+            return False
+        await self._delete_owned([node_id])
+        await self._session.delete(model)
+        await self._session.flush()
+        return True
+
+    async def delete_bulk(self, node_ids: list[str]) -> int:
+        """Igual que `delete` pero para selección múltiple (Flota)."""
+        if not node_ids:
+            return 0
+        existing = list(
+            (await self._session.scalars(select(NodeModel.id).where(NodeModel.id.in_(node_ids)))).all()
+        )
+        if not existing:
+            return 0
+        await self._delete_owned(existing)
+        await self._session.execute(delete(NodeModel).where(NodeModel.id.in_(existing)))
+        await self._session.flush()
+        return len(existing)
+
+    async def delete_all(self) -> int:
+        """Borra TODA la NodeDB persistida (mantenimiento manual, no
+        automático): nodos + su historia propia (posiciones/telemetría/
+        vecinos/enlaces con pasarela/tags/membresías de grupo/mensajes de
+        chat). NO toca configuración (gateways, grupos, reglas de alerta,
+        perfiles, usuarios) — los nodos se redescubren solos con el próximo
+        tráfico de la malla. SQLite no aplica ON DELETE CASCADE: cascada
+        explícita, mismo patrón que SqlGroupRepository.delete."""
+        count = (
+            await self._session.execute(select(func.count()).select_from(NodeModel))
+        ).scalar_one()
+        await self._session.execute(delete(ChatMessageModel))
+        await self._session.execute(delete(NeighborModel))
+        await self._session.execute(delete(TelemetryModel))
+        await self._session.execute(delete(PositionModel))
+        await self._session.execute(delete(NodeGatewayLinkModel))
+        await self._session.execute(delete(GroupMemberModel))
+        await self._session.execute(delete(NodeTagModel))
+        await self._session.execute(delete(NodeModel))
+        return count
 
     async def list_for_ids(self, node_ids: list[str]) -> list[Node]:
         if not node_ids:

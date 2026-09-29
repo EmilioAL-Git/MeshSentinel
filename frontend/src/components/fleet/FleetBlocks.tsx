@@ -20,6 +20,7 @@ export function FleetBlocks({
   onSelect,
   onToggleFavorite,
   onToggleIgnored,
+  onRequestDelete,
   onCheckedChange,
   lowBatteryThreshold,
   visibleColumns,
@@ -32,6 +33,7 @@ export function FleetBlocks({
   onSelect: (id: string) => void;
   onToggleFavorite: (id: string, value: boolean) => void;
   onToggleIgnored: (id: string, value: boolean) => void;
+  onRequestDelete: (id: string) => void;
   onCheckedChange: (ids: Set<string>) => void;
   /** Umbral de batería baja (thresholds del backend, no hardcodeado). */
   lowBatteryThreshold?: number;
@@ -92,6 +94,7 @@ export function FleetBlocks({
                 onSelect={onSelect}
                 onToggleFavorite={onToggleFavorite}
                 onToggleIgnored={onToggleIgnored}
+                onRequestDelete={onRequestDelete}
                 onToggleChecked={toggleChecked}
                 visibleColumns={visibleColumns}
                 gatewayNodeIds={gatewayNodeIds}

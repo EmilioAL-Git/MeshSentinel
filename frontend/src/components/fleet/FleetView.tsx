@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
+  displayName,
   type AlertOut,
   type GatewayOut,
   type GroupOut,
@@ -12,6 +13,7 @@ import { usePersistedState } from "../../hooks/usePersistedState";
 import { AddToGroupMenu } from "./AddToGroupMenu";
 import { AssignNodeTypeMenu } from "./AssignNodeTypeMenu";
 import { ColumnPicker } from "./ColumnPicker";
+import { DeleteNodeModal } from "./DeleteNodeModal";
 import { FleetBlocks } from "./FleetBlocks";
 import { GroupBar } from "./GroupBar";
 import { computeFleetGroupMetrics } from "./groupStats";
@@ -50,6 +52,7 @@ export function FleetView({
   checkedIds,
   onCheckedChange,
   onCreateBatch,
+  onNodesDeleted,
   lowBatteryThreshold,
 }: {
   summaries: NodeSummaryOut[];
@@ -74,10 +77,13 @@ export function FleetView({
   checkedIds: Set<string>;
   onCheckedChange: (ids: Set<string>) => void;
   onCreateBatch: () => void;
+  /** Borrado real (distinto de ignorar): App limpia selección/Inspector/caché. */
+  onNodesDeleted: (ids: string[]) => void;
   /** Umbral de batería baja de la red (thresholds del backend) — nunca un
    * valor hardcodeado aquí (hardening). */
   lowBatteryThreshold: number;
 }) {
+  const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; label?: string } | null>(null);
   const set = (patch: NodeFilterParams) => onFiltersChange({ ...filters, ...patch });
   const hasFilters = Object.values(filters).some((v) => v !== undefined && v !== "" && v !== false);
   const isGrouped = activeGroup != null;
@@ -125,6 +131,11 @@ export function FleetView({
     () => summaries.length > 0 && summaries.every((s) => checkedIds.has(s.node.node_id)),
     [summaries, checkedIds],
   );
+
+  const requestDeleteOne = (id: string) => {
+    const summary = allSummaries.find((s) => s.node.node_id === id);
+    setDeleteTarget({ ids: [id], label: summary ? displayName(summary.node) : id });
+  };
 
   return (
     <div className="ws">
@@ -284,6 +295,7 @@ export function FleetView({
               onSelect={onSelect}
               onToggleFavorite={onToggleFavorite}
               onToggleIgnored={onToggleIgnored}
+              onRequestDelete={requestDeleteOne}
               onCheckedChange={onCheckedChange}
               lowBatteryThreshold={lowBatteryThreshold}
               visibleColumns={visibleColumns}
@@ -313,6 +325,7 @@ export function FleetView({
                   onSelect={onSelect}
                   onToggleFavorite={onToggleFavorite}
                   onToggleIgnored={onToggleIgnored}
+                  onRequestDelete={requestDeleteOne}
                   onToggleChecked={toggleChecked}
                   visibleColumns={visibleColumns}
                   gatewayNodeIds={gatewayNodeIds}
@@ -369,6 +382,12 @@ export function FleetView({
             </button>
             <AddToGroupMenu selectedIds={[...checkedIds]} groups={groups} allSummaries={allSummaries} />
             <AssignNodeTypeMenu selectedIds={[...checkedIds]} />
+            <button
+              className="btn danger"
+              onClick={() => setDeleteTarget({ ids: [...checkedIds] })}
+            >
+              🗑 Borrar ({checkedIds.size})
+            </button>
             <span style={{ marginLeft: "auto" }} />
             <button className="btn primary" onClick={onCreateBatch}>
               ▶ Crear lote ({checkedIds.size})
@@ -376,6 +395,21 @@ export function FleetView({
           </div>
         )}
       </div>
+
+      {deleteTarget && (
+        <DeleteNodeModal
+          nodeIds={deleteTarget.ids}
+          nodeLabel={deleteTarget.label}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={(ids) => {
+            const next = new Set(checkedIds);
+            for (const id of ids) next.delete(id);
+            onCheckedChange(next);
+            onNodesDeleted(ids);
+            setDeleteTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }

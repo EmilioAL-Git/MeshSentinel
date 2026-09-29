@@ -173,7 +173,7 @@ export function buildFleetGrid(visibleColumns: FleetColumnId[]): string {
   const middle = FLEET_COLUMNS.filter((c) => visibleColumns.includes(c.id))
     .map((c) => c.width)
     .join(" ");
-  return `20px 20px 14px minmax(140px,1.5fr) 92px ${middle} 26px`;
+  return `20px 20px 14px minmax(140px,1.5fr) 92px ${middle} 26px 22px`;
 }
 
 // Tráfico "reciente" para el pulso de la columna de presencia (hardening):
@@ -232,6 +232,7 @@ export function RosterHead({ visibleColumns }: { visibleColumns: FleetColumnId[]
         <span key={c.id}>{c.label}</span>
       ))}
       <span />
+      <span />
     </div>
   );
 }
@@ -245,6 +246,7 @@ export function FleetRow({
   onToggleFavorite,
   onToggleIgnored,
   onToggleChecked,
+  onRequestDelete,
   visibleColumns,
   gatewayNodeIds,
   lowBatteryThreshold = 20,
@@ -257,6 +259,8 @@ export function FleetRow({
   onToggleFavorite: (id: string, value: boolean) => void;
   onToggleIgnored: (id: string, value: boolean) => void;
   onToggleChecked: (id: string) => void;
+  /** Abre la confirmación de borrado real (DeleteNodeModal), en FleetView. */
+  onRequestDelete: (id: string) => void;
   visibleColumns: FleetColumnId[];
   /** Necesario para la columna "Tipo" (clasificación única, ver classify.ts). */
   gatewayNodeIds: Set<string>;
@@ -332,6 +336,16 @@ export function FleetRow({
         }}
       >
         {node.is_ignored ? "🚫" : "👁"}
+      </span>
+      <span
+        title="Borrar nodo del sistema"
+        style={{ cursor: "pointer", color: "var(--text-faint)" }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRequestDelete(node.node_id);
+        }}
+      >
+        🗑
       </span>
     </div>
   );

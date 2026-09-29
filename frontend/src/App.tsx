@@ -418,6 +418,18 @@ export default function App() {
     mutationFn: ({ id, value }: { id: string; value: boolean }) => setNodeIgnored(id, value),
     onSettled: invalidateNodeData,
   });
+  const onNodesDeleted = useCallback(
+    (ids: string[]) => {
+      invalidateNodeData();
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.delete(id);
+        return next;
+      });
+      if (selected != null && ids.includes(selected)) setSelected(null);
+    },
+    [invalidateNodeData, selected, setSelected],
+  );
 
   const gatewayNodeIds = useMemo(
     () =>
@@ -669,6 +681,7 @@ export default function App() {
               checkedIds={checkedIds}
               onCheckedChange={setCheckedIds}
               onCreateBatch={() => setWizardOpen(true)}
+              onNodesDeleted={onNodesDeleted}
               lowBatteryThreshold={dashboard.data?.thresholds.low_battery_percent ?? 20}
             />
           )}
@@ -824,6 +837,7 @@ export default function App() {
           onGoTo={(v) => setView(resolveView(v))}
           focusActive={focus?.id === selected}
           onToggleFocus={() => toggleFocus(selected)}
+          onDeleted={() => onNodesDeleted([selected])}
         />
       )}
       <ToastHost />

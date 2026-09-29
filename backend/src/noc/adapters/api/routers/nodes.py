@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from noc.adapters.api.deps import RequireAuthDep, SessionDep
+from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SessionDep
 from noc.adapters.api.schemas import (
     NeighborOut,
     NodeGatewayLinkOut,
@@ -13,6 +13,7 @@ from noc.adapters.api.schemas import (
     PreferredGatewayIn,
     TelemetryOut,
 )
+from noc.adapters.persistence.maintenance import reset_node_db
 from noc.adapters.persistence.organization_repositories import SqlTagRepository
 from noc.adapters.persistence.repositories import (
     SqlNeighborRepository,
@@ -33,6 +34,23 @@ class FlagIn(BaseModel):
 
 class NodeTagsIn(BaseModel):
     tag_ids: list[int]
+
+
+WIPE_NODES_CONFIRM = "BORRAR NODOS"
+
+
+class WipeNodesIn(BaseModel):
+    confirm: str
+
+
+class WipeNodesOut(BaseModel):
+    deleted: int
+    alerts_deleted: int
+    node_scoped_rules_deleted: int
+    admin_operations_deleted: int
+    admin_batches_deleted: int
+    nexus_operations_deleted: int
+    activity_log_deleted: int
 
 
 @router.get("", response_model=list[NodeSummaryOut])
@@ -75,6 +93,65 @@ async def list_nodes(
         NodeSummaryOut.from_entity(s, threshold, links_by_node.get(s.node.node_id))
         for s in filtered
     ]
+
+
+@router.delete("", response_model=WipeNodesOut)
+async def wipe_all_nodes(
+    body: WipeNodesIn, session: SessionDep, _admin: RequireAdminDep
+) -> WipeNodesOut:
+    """Reinicio de fábrica de la NodeDB (mantenimiento, no config): nodos +
+    su historia propia + TODO rastro histórico que dependía de ellos
+    (alertas, operaciones/lotes de administración, operaciones Nexus, diario
+    de actividad) — deja la instalación como recién salida de fábrica.
+    Gateways/grupos/tags/reglas globales-o-por-grupo/canales/perfiles/
+    usuarios/ajustes Nexus intactos (solo se borran las reglas escopadas a
+    un nodo concreto, huérfanas sin él); la malla se redescubre sola con el
+    próximo tráfico. Confirmación explícita por texto (mismo patrón que los
+    SET destructivos de M1.3): evita un borrado de un solo clic."""
+    if body.confirm != WIPE_NODES_CONFIRM:
+        raise HTTPException(status_code=422, detail=f"Escribe «{WIPE_NODES_CONFIRM}» para confirmar")
+    async with session.begin():
+        counts = await reset_node_db(session)
+    return WipeNodesOut(
+        deleted=counts.nodes,
+        alerts_deleted=counts.alerts,
+        node_scoped_rules_deleted=counts.node_scoped_rules,
+        admin_operations_deleted=counts.admin_operations,
+        admin_batches_deleted=counts.admin_batches,
+        nexus_operations_deleted=counts.nexus_operations,
+        activity_log_deleted=counts.activity_log,
+    )
+
+
+class NodeBulkDeleteIn(BaseModel):
+    node_ids: list[str]
+
+
+class NodeBulkDeleteOut(BaseModel):
+    deleted: int
+
+
+@router.delete("/bulk", response_model=NodeBulkDeleteOut)
+async def delete_nodes_bulk(
+    body: NodeBulkDeleteIn, session: SessionDep, current_user: RequireAuthDep
+) -> NodeBulkDeleteOut:
+    """Borrado real de varios nodos a la vez (selección de Flota) — distinto
+    de `DELETE /nodes` (borrado TOTAL de la NodeDB, solo admin)."""
+    deleted = await SqlNodeRepository(session).delete_bulk(body.node_ids)
+    await session.commit()
+    return NodeBulkDeleteOut(deleted=deleted)
+
+
+@router.delete("/{node_id}", status_code=204)
+async def delete_node(node_id: str, session: SessionDep, current_user: RequireAuthDep) -> None:
+    """Borrado real e irreversible de un nodo: fila + su historial propio
+    (posiciones/telemetría/vecinos/tags/grupos/enlaces con pasarela/chat
+    enviado). Distinto de `is_ignored` (M1.2), que solo lo oculta sin
+    perder datos."""
+    deleted = await SqlNodeRepository(session).delete(node_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Node not found")
+    await session.commit()
 
 
 @router.put("/{node_id}/favorite", response_model=NodeOut)

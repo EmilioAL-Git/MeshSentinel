@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchSettings, patchSetting, resetSetting, type SettingOut } from "../api/client";
+import {
+  fetchSettings,
+  patchSetting,
+  resetSetting,
+  wipeAllNodes,
+  WIPE_NODES_CONFIRM,
+  type SettingOut,
+} from "../api/client";
 import { NexusPanel } from "./nexus/NexusPanel";
 import { toast } from "./shell/Toast";
 import { t } from "../tokens";
@@ -11,8 +18,19 @@ function fmt(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
 }
 
-function choiceLabel(setting: SettingOut, value: number): string {
-  return setting.choices?.find(([, v]) => v === value)?.[0] ?? `${fmt(value)}${setting.unit ? ` ${setting.unit}` : ""}`;
+/** Factor de conversión a horas para el input "Personalizado" — solo para unidades de duración. */
+function hourFactor(setting: SettingOut): number | null {
+  if (setting.unit === "s") return 3600;
+  if (setting.unit === "min") return 60;
+  return null;
+}
+
+function valueLabel(setting: SettingOut, value: number): string {
+  const preset = setting.choices?.find(([, v]) => v === value)?.[0];
+  if (preset) return preset;
+  const factor = hourFactor(setting);
+  if (factor) return `${fmt(value / factor)} h`;
+  return `${fmt(value)}${setting.unit ? ` ${setting.unit}` : ""}`;
 }
 
 /**
@@ -56,14 +74,116 @@ export function SettingsView() {
           </div>
         ))
       )}
+      <NodeDbMaintenance />
       <NexusPanel />
     </div>
   );
 }
 
+/** Reinicio de fábrica de la NodeDB de esta instalación: borrado TOTAL de los
+ * nodos descubiertos + todo su historial derivado (alertas, operaciones/
+ * lotes de administración, operaciones Nexus, diario de actividad), sin
+ * tocar configuración (gateways, grupos/tags, reglas globales o por grupo,
+ * canales, perfiles). Confirmación por texto (mismo patrón que los SET
+ * destructivos de M1.3): evita un borrado de un solo clic. */
+function NodeDbMaintenance() {
+  const queryClient = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+
+  const invalidateAll = () => {
+    for (const key of ["nodes", "dashboard", "stats", "topology", "activity", "alerts", "alert-rules", "jobs"]) {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  };
+
+  const wipeMutation = useMutation({
+    mutationFn: wipeAllNodes,
+    onSuccess: (res) => {
+      toast(
+        `Instalación reiniciada de fábrica: ${res.deleted} nodo${res.deleted === 1 ? "" : "s"}, ` +
+          `${res.alerts_deleted} alerta${res.alerts_deleted === 1 ? "" : "s"}, ` +
+          `${res.admin_operations_deleted} operacion${res.admin_operations_deleted === 1 ? "" : "es"} y ` +
+          `${res.activity_log_deleted} entrada${res.activity_log_deleted === 1 ? "" : "s"} de diario eliminadas`,
+      );
+      setExpanded(false);
+      setConfirmText("");
+      invalidateAll();
+    },
+    onError: (err) =>
+      toast(
+        err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo reiniciar la instalación",
+        { kind: "error" },
+      ),
+  });
+
+  return (
+    <div>
+      <h2>Mantenimiento</h2>
+      <div style={{ color: t.textDim, fontSize: 12.5, maxWidth: 640, marginBottom: 10 }}>
+        Reinicia esta instalación como si fuera de fábrica: borra TODOS los nodos descubiertos (la
+        NodeDB) junto con todo lo que dependía de ellos — posiciones, telemetría, vecinos, etiquetas,
+        membresías de grupo, alertas, operaciones y lotes de administración, operaciones Nexus y el
+        diario de actividad. Gateways, grupos/etiquetas (definiciones), reglas de alerta globales o
+        por grupo, canales/integraciones y perfiles de configuración NO se tocan — la malla se
+        redescubre sola con el próximo tráfico. Útil antes de exportar/clonar esta instalación a otra
+        instancia. Acción irreversible.
+      </div>
+      {!expanded ? (
+        <button className="btn danger" onClick={() => setExpanded(true)}>
+          Reiniciar de fábrica (borrar todos los nodos)…
+        </button>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 360 }}>
+          <label style={{ fontSize: 12, color: t.textDim }}>
+            Escribe <code style={{ fontFamily: t.fontMono }}>{WIPE_NODES_CONFIRM}</code> para confirmar:
+          </label>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            autoFocus
+            style={{ fontFamily: t.fontMono }}
+          />
+          <span style={{ display: "inline-flex", gap: 6 }}>
+            <button
+              className="btn danger"
+              disabled={confirmText !== WIPE_NODES_CONFIRM || wipeMutation.isPending}
+              onClick={() => wipeMutation.mutate()}
+            >
+              Borrar definitivamente
+            </button>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setExpanded(false);
+                setConfirmText("");
+              }}
+            >
+              Cancelar
+            </button>
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CUSTOM = "__custom__";
+
 function SettingRow({ setting, onChanged }: { setting: SettingOut; onChanged: () => void }) {
+  const factor = hourFactor(setting);
   const [draft, setDraft] = useState<string>(fmt(setting.value));
+  const [hoursDraft, setHoursDraft] = useState<string>(factor ? fmt(setting.value / factor) : fmt(setting.value));
+  const [customMode, setCustomMode] = useState(false);
   const [editing, setEditing] = useState(false);
+
+  const startEdit = () => {
+    const isPreset = setting.choices?.some(([, v]) => v === setting.value) ?? true;
+    setCustomMode(!isPreset);
+    setDraft(fmt(setting.value));
+    setHoursDraft(factor ? fmt(setting.value / factor) : fmt(setting.value));
+    setEditing(true);
+  };
 
   const saveMutation = useMutation({
     mutationFn: (value: number) => patchSetting(setting.key, value),
@@ -85,7 +205,8 @@ function SettingRow({ setting, onChanged }: { setting: SettingOut; onChanged: ()
   });
 
   const save = () => {
-    const parsed = Number(draft);
+    const usingHours = customMode && factor != null;
+    const parsed = usingHours ? Number(hoursDraft) * factor! : Number(draft);
     if (Number.isNaN(parsed)) {
       toast("Valor no numérico", { kind: "error" });
       return;
@@ -102,15 +223,40 @@ function SettingRow({ setting, onChanged }: { setting: SettingOut; onChanged: ()
       <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
         {editing ? (
           <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-            {setting.choices ? (
-              <select value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus>
+            {setting.choices && (
+              <select
+                value={customMode ? CUSTOM : draft}
+                onChange={(e) => {
+                  if (e.target.value === CUSTOM) {
+                    setCustomMode(true);
+                  } else {
+                    setCustomMode(false);
+                    setDraft(e.target.value);
+                  }
+                }}
+                autoFocus={!customMode}
+              >
                 {setting.choices.map(([label, value]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>
                 ))}
+                <option value={CUSTOM}>Personalizado…</option>
               </select>
-            ) : (
+            )}
+            {(!setting.choices || customMode) && factor != null ? (
+              <>
+                <input
+                  type="number"
+                  step="any"
+                  value={hoursDraft}
+                  onChange={(e) => setHoursDraft(e.target.value)}
+                  style={{ width: 90 }}
+                  autoFocus={!setting.choices}
+                />
+                <span style={{ color: t.textDim }}>h</span>
+              </>
+            ) : !setting.choices ? (
               <>
                 <input
                   type="number"
@@ -122,14 +268,13 @@ function SettingRow({ setting, onChanged }: { setting: SettingOut; onChanged: ()
                 />
                 {setting.unit && <span style={{ color: t.textDim }}>{setting.unit}</span>}
               </>
-            )}
+            ) : null}
             <button className="btn" onClick={save} disabled={saveMutation.isPending}>
               Guardar
             </button>
             <button
               className="btn ghost"
               onClick={() => {
-                setDraft(fmt(setting.value));
                 setEditing(false);
               }}
             >
@@ -138,19 +283,15 @@ function SettingRow({ setting, onChanged }: { setting: SettingOut; onChanged: ()
           </span>
         ) : (
           <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-            <span
-              onClick={() => setEditing(true)}
-              style={{ cursor: "pointer", fontFamily: t.fontMono }}
-              title="Editar"
-            >
-              {choiceLabel(setting, setting.value)}
+            <span onClick={startEdit} style={{ cursor: "pointer", fontFamily: t.fontMono }} title="Editar">
+              {valueLabel(setting, setting.value)}
             </span>
             {setting.overridden && (
-              <span className="chip" title={`Valor de fábrica: ${choiceLabel(setting, setting.default_value)}`}>
+              <span className="chip" title={`Valor de fábrica: ${valueLabel(setting, setting.default_value)}`}>
                 personalizado
               </span>
             )}
-            <button className="btn ghost" onClick={() => setEditing(true)}>
+            <button className="btn ghost" onClick={startEdit}>
               Editar
             </button>
             {setting.overridden && (

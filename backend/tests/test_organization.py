@@ -1,10 +1,12 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from noc.adapters.persistence.chat_repositories import SqlChatRepository
 from noc.adapters.persistence.organization_repositories import SqlGroupRepository, SqlTagRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.ingest import IngestService
 from noc.application.node_filters import NodeFilters, apply_filters
+from noc.domain.chat.entities import ChatMessage
 from noc.domain.nodes.entities import Group, Tag
 
 NODES = ["!00000001", "!00000002", "!00000003"]
@@ -222,3 +224,86 @@ async def test_apply_filters(session_factory):
     assert ids(NodeFilters(battery_below=20)) == {NODES[0]}
     # Combinación
     assert ids(NodeFilters(hw_model="TBEAM", favorite=True, battery_below=20)) == {NODES[0]}
+
+
+async def test_delete_all_wipes_nodedb_but_not_config(session_factory):
+    """Borrado total de la NodeDB (mantenimiento): nodos + toda su historia
+    propia desaparecen; grupos/tags (definiciones) sobreviven vacíos."""
+    await seed(session_factory)
+    async with session_factory() as session, session.begin():
+        tags = SqlTagRepository(session)
+        solar = await tags.create(Tag(name="solar"))
+        await tags.set_node_tags(NODES[0], [solar.id])
+        groups = SqlGroupRepository(session)
+        g = await groups.create(Group(name="sierra"))
+        await groups.add_member(g.id, NODES[0])
+
+    async with session_factory() as session:
+        deleted = await SqlNodeRepository(session).delete_all()
+        await session.commit()
+    assert deleted == len(NODES)
+
+    async with session_factory() as session:
+        assert await SqlNodeRepository(session).list_all() == []
+        # Las definiciones (grupo/tag) sobreviven, ya sin miembros/asignaciones
+        assert await SqlGroupRepository(session).members(g.id) == []
+        assert [t.name for t in await SqlTagRepository(session).list_all()] == ["solar"]
+
+    # Idempotente: repetir sobre una NodeDB ya vacía no falla
+    async with session_factory() as session:
+        assert await SqlNodeRepository(session).delete_all() == 0
+        await session.commit()
+
+
+async def test_delete_single_node_removes_owned_data_but_not_others(session_factory):
+    """Borrado real de UN nodo (distinto de is_ignored, que solo lo oculta):
+    su historial propio desaparece; el resto de la flota no se toca."""
+    await seed(session_factory)
+    async with session_factory() as session, session.begin():
+        tags = SqlTagRepository(session)
+        solar = await tags.create(Tag(name="solar"))
+        await tags.set_node_tags(NODES[0], [solar.id])
+        groups = SqlGroupRepository(session)
+        g = await groups.create(Group(name="sierra"))
+        await groups.add_member(g.id, NODES[0])
+        # chat_messages.from_node_id es FK NOT NULL sin cascada: sin borrado
+        # explícito, esto rompería con FK violation en PostgreSQL.
+        await SqlChatRepository(session).add(
+            ChatMessage(
+                from_node_id=NODES[0],
+                to_node_id=None,
+                channel_index=0,
+                text="hola",
+                received_at=datetime.now(timezone.utc),
+            )
+        )
+
+    async with session_factory() as session:
+        assert await SqlNodeRepository(session).delete(NODES[0]) is True
+        await session.commit()
+
+    async with session_factory() as session:
+        remaining = {n.node_id for n in await SqlNodeRepository(session).list_all()}
+        assert remaining == {NODES[1], NODES[2]}
+        # La definición del grupo/tag sobrevive, ya sin este miembro
+        assert await SqlGroupRepository(session).members(g.id) == []
+        assert [t.name for t in await SqlTagRepository(session).list_all()] == ["solar"]
+
+    async with session_factory() as session:
+        assert await SqlNodeRepository(session).delete(NODES[0]) is False
+
+
+async def test_delete_bulk_nodes(session_factory):
+    await seed(session_factory)
+    async with session_factory() as session:
+        deleted = await SqlNodeRepository(session).delete_bulk([NODES[0], NODES[1], "!ffffffff"])
+        await session.commit()
+    assert deleted == 2
+
+    async with session_factory() as session:
+        remaining = {n.node_id for n in await SqlNodeRepository(session).list_all()}
+        assert remaining == {NODES[2]}
+
+    async with session_factory() as session:
+        assert await SqlNodeRepository(session).delete_bulk([]) == 0
+        assert await SqlNodeRepository(session).delete_bulk(["!ffffffff"]) == 0

@@ -298,6 +298,14 @@ export const setNodeNexus = (id: string, value: boolean) =>
   send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/nexus`, { value });
 export const setNodeTags = (id: string, tag_ids: number[]) =>
   send<void>("PUT", `/nodes/${encodeURIComponent(id)}/tags`, { tag_ids });
+// Borrado real e irreversible (distinto de setNodeIgnored, que solo lo
+// oculta): la fila del nodo + su historial propio desaparecen.
+export const deleteNode = (id: string) => send<void>("DELETE", `/nodes/${encodeURIComponent(id)}`);
+export interface NodeBulkDeleteOut {
+  deleted: number;
+}
+export const deleteNodesBulk = (nodeIds: string[]) =>
+  send<NodeBulkDeleteOut>("DELETE", `/nodes/bulk`, { node_ids: nodeIds });
 export const fetchTags = () => get<TagOut[]>("/tags");
 export const createTag = (name: string, color?: string) =>
   send<TagOut>("POST", "/tags", { name, color });
@@ -305,6 +313,20 @@ export const deleteTag = (id: number) => send<void>("DELETE", `/tags/${id}`);
 export const fetchGroups = () => get<GroupOut[]>("/groups");
 export const createGroup = (name: string) => send<GroupOut>("POST", "/groups", { name });
 export const deleteGroup = (id: number) => send<void>("DELETE", `/groups/${id}`);
+
+// ── Mantenimiento de la NodeDB ────────────────────────────────────────────────
+export const WIPE_NODES_CONFIRM = "BORRAR NODOS";
+export interface WipeNodesOut {
+  deleted: number;
+  alerts_deleted: number;
+  node_scoped_rules_deleted: number;
+  admin_operations_deleted: number;
+  admin_batches_deleted: number;
+  nexus_operations_deleted: number;
+  activity_log_deleted: number;
+}
+export const wipeAllNodes = () =>
+  send<WipeNodesOut>("DELETE", "/nodes", { confirm: WIPE_NODES_CONFIRM });
 
 // ── Selección inteligente de gateway ─────────────────────────────────────────
 // Único schema de selección compartido por operaciones individuales y por
