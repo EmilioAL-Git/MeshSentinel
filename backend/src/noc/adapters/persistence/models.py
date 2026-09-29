@@ -376,7 +376,7 @@ class ActivityLogModel(Base):
     # Tipo de paquete decodificado (p.ej. "TRACEROUTE_APP"), extraído de
     # payload.internal_type al insertar — permite filtrar sin deserializar
     # JSON (p.ej. reconstruir rutas de traceroute para el mapa).
-    internal_type: Mapped[str | None] = mapped_column(String(32))
+    internal_type: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 

@@ -226,7 +226,7 @@ async def preview_operation(body: OperationIn, request: Request, current_user: R
     if not await service.is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
     try:
-        cmd = _operations(request).build(body.command, body.args, body.target_kind, body.target_value)
+        cmd = await _operations(request).build(body.command, body.args, body.target_kind, body.target_value)
     except (NexusCommandError, NexusTargetError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return PreviewOut(
