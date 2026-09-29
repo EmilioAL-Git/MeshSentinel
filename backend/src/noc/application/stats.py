@@ -5,6 +5,12 @@ Sin relación con el Dashboard NOC (nada de salud/umbrales/alertas) — es un
 panel de datos curiosos para el operador. Misma filosofía ADR 0011: una sola
 pasada en memoria sobre lo que ya trae `list_summaries()`, caché TTL en
 proceso para no recalcular en cada cliente conectado.
+
+Cada récord del resumen es solo la CABEZA de un ranking completo (todos los
+nodos con ese dato, ordenados) — la UI permite desplegarlo ("nodos por
+debajo del top"), así que `_compute()` calcula y cachea ambos a la vez sobre
+el mismo `NetworkStats` en memoria; nunca se vuelve a consultar la BD para
+pedir un ranking dentro de la ventana de caché.
 """
 
 import asyncio
@@ -50,6 +56,14 @@ class StatsSummary:
     records: list[StatRecord] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class _NetworkStats:
+    summary: StatsSummary
+    # Ranking completo por clave de récord, ya ordenado (mejor primero) —
+    # el récord del resumen es siempre `rankings[key][0]`.
+    rankings: dict[str, list[StatRecord]] = field(default_factory=dict)
+
+
 def _low_battery_value(x: NodeSummary) -> int | None:
     t = x.last_device_telemetry
     if t is None or t.battery_level is None or t.battery_level >= EXTERNAL_POWER:
@@ -61,19 +75,29 @@ class StatsService:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], settings: Settings) -> None:
         self._session_factory = session_factory
         self._settings = settings
-        self._cache: StatsSummary | None = None
+        self._cache: _NetworkStats | None = None
         self._cache_at: float = 0.0
         self._lock = asyncio.Lock()
 
     async def get_summary(self) -> StatsSummary:
+        stats = await self._get_stats()
+        return stats.summary
+
+    async def get_ranking(self, key: str) -> list[StatRecord] | None:
+        """Todos los nodos con dato para `key`, ordenados (mejor primero).
+        `None` si `key` no es un récord conocido (404 en el router)."""
+        stats = await self._get_stats()
+        return stats.rankings.get(key)
+
+    async def _get_stats(self) -> _NetworkStats:
         async with self._lock:
             if self._cache and (time.monotonic() - self._cache_at) < self._settings.stats_cache_seconds:
                 return self._cache
-            summary = await self._compute()
-            self._cache, self._cache_at = summary, time.monotonic()
-            return summary
+            stats = await self._compute()
+            self._cache, self._cache_at = stats, time.monotonic()
+            return stats
 
-    async def _compute(self) -> StatsSummary:
+    async def _compute(self) -> _NetworkStats:
         s = self._settings
         now = datetime.now(timezone.utc)
         day_ago = now - timedelta(hours=24)
@@ -104,8 +128,9 @@ class StatsService:
         network_age_days = (now - ensure_utc(min(first_seens))).days if first_seens else None
 
         records: list[StatRecord] = []
+        rankings: dict[str, list[StatRecord]] = {}
 
-        def top(
+        def rank(
             key: str,
             label: str,
             icon: str,
@@ -114,54 +139,54 @@ class StatsService:
             *,
             minimum: bool = False,
         ) -> None:
-            best: tuple[NodeSummary, float | int] | None = None
+            entries: list[StatRecord] = []
             for x in summaries:
                 v = getter(x)
                 if v is None:
                     continue
-                if best is None or (v < best[1] if minimum else v > best[1]):
-                    best = (x, v)
-            if best is None:
-                return
-            x, v = best
-            records.append(
-                StatRecord(
-                    key=key,
-                    label=label,
-                    icon=icon,
-                    unit=unit,
-                    node_id=x.node.node_id,
-                    short_name=x.node.short_name,
-                    long_name=x.node.long_name,
-                    value=round(v, 1) if isinstance(v, float) else v,
+                entries.append(
+                    StatRecord(
+                        key=key,
+                        label=label,
+                        icon=icon,
+                        unit=unit,
+                        node_id=x.node.node_id,
+                        short_name=x.node.short_name,
+                        long_name=x.node.long_name,
+                        value=round(v, 1) if isinstance(v, float) else v,
+                    )
                 )
-            )
+            if not entries:
+                return
+            entries.sort(key=lambda r: r.value, reverse=not minimum)
+            rankings[key] = entries
+            records.append(entries[0])
 
-        top(
+        rank(
             "air_tx", "Más ocupado transmitiendo", "📡", "%",
             lambda x: x.last_device_telemetry.air_util_tx if x.last_device_telemetry else None,
         )
-        top(
+        rank(
             "channel_util", "Canal más saturado", "📶", "%",
             lambda x: x.last_device_telemetry.channel_utilization if x.last_device_telemetry else None,
         )
-        top(
+        rank(
             "uptime", "Más tiempo sin reiniciar", "⏱", "s",
             lambda x: x.last_device_telemetry.uptime_seconds if x.last_device_telemetry else None,
         )
-        top("low_battery", "Batería más baja", "🪫", "%", _low_battery_value, minimum=True)
-        top(
+        rank("low_battery", "Batería más baja", "🪫", "%", _low_battery_value, minimum=True)
+        rank(
             "altitude", "El más alto", "⛰", "m",
             lambda x: x.last_position.altitude_m if x.last_position else None,
         )
-        top("best_snr", "Mejor señal", "✦", "dB", lambda x: x.node.snr)
-        top("worst_snr", "Señal más débil", "〰", "dB", lambda x: x.node.snr, minimum=True)
-        top("most_hops", "El más lejano (saltos)", "⇢", "saltos", lambda x: x.node.hops_away)
-        top(
+        rank("best_snr", "Mejor señal", "✦", "dB", lambda x: x.node.snr)
+        rank("worst_snr", "Señal más débil", "〰", "dB", lambda x: x.node.snr, minimum=True)
+        rank("most_hops", "El más lejano (saltos)", "⇢", "saltos", lambda x: x.node.hops_away)
+        rank(
             "veteran", "El veterano", "🕰", "días",
             lambda x: (now - ensure_utc(x.node.first_seen_at)).days if x.node.first_seen_at else None,
         )
-        top(
+        rank(
             "rookie", "El recién llegado", "✨", "min",
             lambda x: (
                 (now - ensure_utc(x.node.first_seen_at)).total_seconds() / 60
@@ -170,12 +195,12 @@ class StatsService:
             ),
             minimum=True,
         )
-        top(
+        rank(
             "most_gateways", "Más pasarelas lo oyen", "🛰", "pasarelas",
             lambda x: len(gateways_by_node.get(x.node.node_id, ())) or None,
         )
 
-        def top_env(
+        def rank_env(
             key: str,
             label: str,
             icon: str,
@@ -188,14 +213,14 @@ class StatsService:
                 t: Telemetry | None = env_by_node.get(x.node.node_id)
                 return getattr(t, field_name) if t is not None else None
 
-            top(key, label, icon, unit, getter, minimum=minimum)
+            rank(key, label, icon, unit, getter, minimum=minimum)
 
-        top_env("hottest", "El más caliente", "🔥", "°C", "temperature_c")
-        top_env("coldest", "El más frío", "🧊", "°C", "temperature_c", minimum=True)
-        top_env("humid", "Ambiente más húmedo", "💧", "%", "relative_humidity")
-        top_env("pressure", "Presión más alta", "⏲", "hPa", "barometric_pressure_hpa")
+        rank_env("hottest", "El más caliente", "🔥", "°C", "temperature_c")
+        rank_env("coldest", "El más frío", "🧊", "°C", "temperature_c", minimum=True)
+        rank_env("humid", "Ambiente más húmedo", "💧", "%", "relative_humidity")
+        rank_env("pressure", "Presión más alta", "⏲", "hPa", "barometric_pressure_hpa")
 
-        return StatsSummary(
+        summary = StatsSummary(
             generated_at=now,
             nodes_total=nodes_total,
             nodes_online=nodes_online,
@@ -203,3 +228,4 @@ class StatsService:
             events_last_24h=events_last_24h,
             records=records,
         )
+        return _NetworkStats(summary=summary, rankings=rankings)

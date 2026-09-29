@@ -416,6 +416,9 @@ export interface StatsSummaryOut {
 }
 
 export const fetchStatsSummary = () => get<StatsSummaryOut>("/stats/summary");
+/** Ranking completo de un récord (todos los nodos con dato, mejor primero) —
+ * "nodos por debajo del top" al desplegar una tarjeta de Estadísticas. */
+export const fetchStatsRanking = (key: string) => get<StatRecordOut[]>(`/stats/ranking/${encodeURIComponent(key)}`);
 
 export type Severity = "INFO" | "WARNING" | "CRITICAL";
 

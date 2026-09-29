@@ -129,6 +129,24 @@ async def test_stats_cache(session_factory):
     assert cached is first  # dentro del TTL no se recomputa
 
 
+async def test_stats_ranking(session_factory):
+    await seed(session_factory)
+    await ignore_node(session_factory, "!00000005")
+
+    service = StatsService(session_factory, make_settings())
+    s = await service.get_summary()
+
+    ranking = await service.get_ranking("best_snr")
+    assert ranking is not None
+    assert [r.node_id for r in ranking] == ["!00000002", "!00000001", "!00000003"]
+    assert [r.value for r in ranking] == [9.0, 4.0, -20.0]
+    # La cabecera del ranking es siempre el récord del resumen para esa clave.
+    by_key = {r.key: r for r in s.records}
+    assert ranking[0] == by_key["best_snr"]
+
+    assert await service.get_ranking("no-existe") is None
+
+
 async def test_stats_empty_network(session_factory):
     service = StatsService(session_factory, make_settings())
     s = await service.get_summary()

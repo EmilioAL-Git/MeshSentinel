@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from noc.application.stats import StatRecord, StatsSummary
@@ -47,3 +47,13 @@ class StatsSummaryOut(BaseModel):
 async def stats_summary(request: Request) -> StatsSummaryOut:
     summary = await request.app.state.stats.get_summary()
     return StatsSummaryOut.from_entity(summary)
+
+
+@router.get("/ranking/{key}", response_model=list[StatRecordOut])
+async def stats_ranking(key: str, request: Request) -> list[StatRecordOut]:
+    """Todos los nodos con dato para el récord `key`, ordenados (mejor
+    primero) — "nodos por debajo del top" al desplegar una tarjeta."""
+    ranking = await request.app.state.stats.get_ranking(key)
+    if ranking is None:
+        raise HTTPException(status_code=404, detail="Récord desconocido")
+    return [StatRecordOut.from_entity(r) for r in ranking]
