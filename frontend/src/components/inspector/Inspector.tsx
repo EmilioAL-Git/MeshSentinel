@@ -39,11 +39,13 @@ import { NexusCatIcon } from "../nexus/NexusCatIcon";
 import { NodeNexusPanel } from "../nexus/NodeNexusPanel";
 import { useNexusMode } from "../nexus/useNexusMode";
 import {
+  FAILED_OP_STATUSES,
   OP_STATUS_COLOR,
   OP_STATUS_LABEL,
   RETRYABLE_OP_STATUSES as RETRYABLE,
   TERMINAL_OP_STATUSES,
   fmtSeconds,
+  fmtUptime,
   opTypeLabel,
 } from "../jobs/status";
 import { displayValue } from "../ConfigEditor";
@@ -53,6 +55,7 @@ import { toast } from "../shell/Toast";
 import { HistoryChart, type HistoryPoint } from "./HistoryChart";
 import { NodeLog } from "./NodeLog";
 import { computeNodeStats24h, TRAFFIC_LEVEL_LABEL } from "./nodeStats24h";
+import { PositionMiniMap } from "./PositionMiniMap";
 import { RemoteFlags } from "./RemoteFlags";
 
 /**
@@ -65,6 +68,7 @@ import { RemoteFlags } from "./RemoteFlags";
  */
 
 const TABS = [
+  "resumen",
   "log",
   "telemetry",
   "position",
@@ -78,6 +82,7 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number];
 const TAB_LABEL: Record<TabId, string> = {
+  resumen: "Resumen",
   log: "Actividad",
   telemetry: "Telemetría",
   position: "Posición",
@@ -257,7 +262,7 @@ export function Inspector({
   // `tab=` la sobrescriba — "cómo tengo montado el puesto" (localStorage)
   // cede ante "qué le estoy enseñando a alguien" (URL) cuando esta última
   // está presente.
-  const [storedTab, setStoredTab] = usePersistedState<TabId>("window.inspector.tab", "log");
+  const [storedTab, setStoredTab] = usePersistedState<TabId>("window.inspector.tab", "resumen");
   const [urlTab, setUrlTab] = useUrlString("tab", null, { replace: true });
   const tab: TabId = urlTab != null && (TABS as readonly string[]).includes(urlTab) ? (urlTab as TabId) : storedTab;
   const setTab = useCallback(
@@ -422,7 +427,7 @@ export function Inspector({
   // fantasma.
   const showNexusTab = nexusModeOn && (n?.is_nexus ?? false);
   const visibleTabs = showNexusTab ? TABS : TABS.filter((id) => id !== "nexus");
-  const effectiveTab: TabId = (visibleTabs as readonly TabId[]).includes(tab) ? tab : "log";
+  const effectiveTab: TabId = (visibleTabs as readonly TabId[]).includes(tab) ? tab : "resumen";
   const lastTel = telemetry.data?.[0];
   const deviceLatest = deviceHistory.data?.[0];
   const envLatest = envHistory.data?.[0];
@@ -484,7 +489,45 @@ export function Inspector({
   const batteryText = battery == null ? "—" : battery > 100 ? "⚡ ext." : `${battery} %`;
   const lowBatteryThreshold = dashboard.data?.thresholds.low_battery_percent ?? 20;
   const batteryColor = battery != null && battery <= 100 && battery < lowBatteryThreshold ? t.crit : undefined;
-  const uptimeText = deviceLatest?.uptime_seconds != null ? fmtSeconds(deviceLatest.uptime_seconds) : "—";
+  const uptimeText = deviceLatest?.uptime_seconds != null ? fmtUptime(deviceLatest.uptime_seconds) : "—";
+
+  // Resumen (pestaña por defecto, pedida explícitamente por el usuario):
+  // síntesis de "¿algo va mal?" derivada de datos YA cargados arriba, cero
+  // fetches nuevos — cada problema detectado es clicable y salta a su
+  // pestaña de detalle (mismo patrón que la cola de atención de StatusPanel,
+  // pero a escala de un único nodo).
+  const failedOps = allNodeOps.filter((o) => FAILED_OP_STATUSES.has(o.status));
+  type Problem = { icon: string; label: string; color: string; tab: TabId };
+  const problems: Problem[] = [];
+  if (n && !n.online) problems.push({ icon: "📴", label: "Nodo offline", color: t.crit, tab: "log" });
+  if (batteryColor) problems.push({ icon: "🔋", label: `Batería baja (${battery}%)`, color: t.crit, tab: "telemetry" });
+  if (activeLinks.length === 0) problems.push({ icon: "🛰", label: "Sin pasarela activa", color: t.warn, tab: "gateways" });
+  if (nodeActiveAlerts.length > 0) {
+    const hasCritical = nodeActiveAlerts.some((a) => a.severity === "CRITICAL");
+    problems.push({
+      icon: "⚠",
+      label: `${nodeActiveAlerts.length} alerta${nodeActiveAlerts.length > 1 ? "s" : ""} activa${nodeActiveAlerts.length > 1 ? "s" : ""}`,
+      color: hasCritical ? t.crit : t.warn,
+      tab: "alerts",
+    });
+  }
+  if (failedOps.length > 0) {
+    problems.push({
+      icon: "⚙",
+      label: `${failedOps.length} operación${failedOps.length > 1 ? "es" : ""} fallida${failedOps.length > 1 ? "s" : ""}`,
+      color: t.crit,
+      tab: "operations",
+    });
+  }
+  if (stats24h.reboots > 0) {
+    problems.push({
+      icon: "🔁",
+      label: `${stats24h.reboots} reinicio${stats24h.reboots > 1 ? "s" : ""} en 24 h`,
+      color: t.warn,
+      tab: "history",
+    });
+  }
+  if (n?.is_ignored) problems.push({ icon: "👁", label: "Nodo ignorado (local)", color: t.textDim, tab: "general" });
 
   const badge = (n: number, color: string = t.accent) =>
     n > 0 ? (
@@ -615,6 +658,131 @@ export function Inspector({
           <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem" }}>
             {node.isError && <p style={{ color: t.crit }}>Error cargando {nodeId}</p>}
 
+        {effectiveTab === "resumen" && (
+          <>
+            <Section label="ESTADO">
+              {problems.length === 0 ? (
+                <div
+                  style={{
+                    ...chipStyle(t.ok),
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 12.5,
+                    padding: "0.35rem 0.7rem",
+                  }}
+                >
+                  ✓ Todo normal — sin problemas detectados
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {problems.map((p, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setTab(p.tab)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        textAlign: "left",
+                        background: t.surface2,
+                        border: `1px solid ${t.borderSubtle}`,
+                        borderLeft: `3px solid ${p.color}`,
+                        borderRadius: 6,
+                        padding: "0.45rem 0.65rem",
+                        color: t.text,
+                        fontSize: 12.5,
+                        cursor: "pointer",
+                        width: "100%",
+                      }}
+                    >
+                      <span>{p.icon}</span>
+                      <span style={{ flex: 1, minWidth: 0 }}>{p.label}</span>
+                      <span style={{ color: t.textFaint, fontSize: 11 }}>ver →</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </Section>
+
+            <Section label="DATOS RÁPIDOS">
+              <div style={cardGrid}>
+                <MetricCard icon="⏱" label="UPTIME" value={uptimeText} onClick={() => setTab("telemetry")} />
+                <MetricCard icon="🔋" label="BATERÍA" value={batteryText} color={batteryColor} onClick={() => setTab("telemetry")} />
+                {stats24h.trafficLevel != null && (
+                  <MetricCard
+                    icon={stats24h.trafficLevel === "alto" ? "🔴" : stats24h.trafficLevel === "moderado" ? "🟡" : "🟢"}
+                    label="TRÁFICO 24H"
+                    value={TRAFFIC_LEVEL_LABEL[stats24h.trafficLevel]}
+                    onClick={() => setTab("history")}
+                  />
+                )}
+                <MetricCard
+                  icon="🛰"
+                  label="PASARELAS ACTIVAS"
+                  value={activeLinks.length}
+                  color={activeLinks.length === 0 ? t.warn : undefined}
+                  onClick={() => setTab("gateways")}
+                />
+                <MetricCard
+                  icon="📍"
+                  label="ÚLTIMA POSICIÓN"
+                  value={lastPos ? relativeTime(lastPos.received_at) : "—"}
+                  onClick={() => setTab("position")}
+                />
+                <MetricCard
+                  icon="📨"
+                  label="MUESTRAS 24H"
+                  value={stats24h.deviceSamples + stats24h.envSamples + stats24h.positionSamples}
+                  onClick={() => setTab("history")}
+                />
+              </div>
+            </Section>
+
+            <Section label="OPERACIONES">
+              {allNodeOps.length === 0 ? (
+                <div style={{ color: t.textFaint, fontSize: 11.5 }}>Sin operaciones registradas.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {allNodeOps.slice(0, 3).map((op) => (
+                    <div key={op.id} style={{ display: "flex", alignItems: "baseline", gap: "0.45rem", fontSize: 12 }}>
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {opTypeLabel(op.operation_type, op.params)}
+                      </span>
+                      <span style={{ ...chipStyle(OP_STATUS_COLOR[op.status] ?? t.textDim), fontSize: 10 }}>
+                        {OP_STATUS_LABEL[op.status] ?? op.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button style={{ ...actionBtn, marginTop: 8 }} onClick={() => setTab("operations")}>
+                Ver todas →
+              </button>
+            </Section>
+
+            <Section label="ALERTAS ACTIVAS">
+              {nodeActiveAlerts.length === 0 ? (
+                <div style={{ color: t.textFaint, fontSize: 11.5 }}>Sin alertas activas.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {nodeActiveAlerts.slice(0, 3).map((a) => (
+                    <div key={a.id} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 12, color: t.text }}>
+                      <span style={{ color: alertSeverityColor(a.severity) }}>●</span>
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {a.message}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button style={{ ...actionBtn, marginTop: 8 }} onClick={() => setTab("alerts")}>
+                Ver todas →
+              </button>
+            </Section>
+          </>
+        )}
+
         {effectiveTab === "log" && <NodeLog nodeId={nodeId} />}
 
         {effectiveTab === "telemetry" && (
@@ -631,7 +799,7 @@ export function Inspector({
                   />
                 )}
                 {deviceLatest?.uptime_seconds != null && (
-                  <MetricCard icon="⏱" label="UPTIME" value={fmtSeconds(deviceLatest.uptime_seconds)} />
+                  <MetricCard icon="⏱" label="UPTIME" value={fmtUptime(deviceLatest.uptime_seconds)} />
                 )}
                 {deviceLatest?.voltage != null && <MetricCard icon="🔌" label="VOLTAJE" value={`${deviceLatest.voltage} V`} />}
                 {deviceLatest?.channel_utilization != null && (
@@ -680,6 +848,14 @@ export function Inspector({
                 )}
               </>
             )}
+            {positionHistory.data != null && positionHistory.data.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <Section label="MAPA DEL HISTORIAL">
+                  <PositionMiniMap positions={positionHistory.data} />
+                </Section>
+              </div>
+            )}
+
             <div style={{ marginTop: 14 }}>
               <Section label="CAMBIOS DE POSICIÓN">
                 {positionHistory.data == null || positionHistory.data.length === 0 ? (
@@ -940,7 +1116,7 @@ export function Inspector({
                   )}
                   <div style={cardGrid}>
                     {stats24h.currentUptimeSeconds != null && (
-                      <MetricCard icon="⏱" label="UPTIME ACTUAL" value={fmtSeconds(stats24h.currentUptimeSeconds)} />
+                      <MetricCard icon="⏱" label="UPTIME ACTUAL" value={fmtUptime(stats24h.currentUptimeSeconds)} />
                     )}
                     <MetricCard
                       icon="🔁"
