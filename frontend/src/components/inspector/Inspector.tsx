@@ -1319,9 +1319,11 @@ export function Inspector({
 
             <Section label="PELIGRO">
               <p style={{ fontSize: 12, color: t.textDim, marginTop: 0 }}>
-                Borra este nodo del sistema: fila + todo su historial propio (posiciones,
+                Se elimina la información del nodo y todo su historial propio (posiciones,
                 telemetría, vecinos, etiquetas, grupos, enlaces con pasarelas). Es{" "}
-                <strong>irreversible</strong> — distinto de "ignorar", que solo lo oculta.
+                <strong>irreversible</strong>. No es como "ignorar", que solo lo oculta.
+                <br />
+                Los registros de Actividad/Alertas/Operaciones que lo incluyen no se borran.
               </p>
               {deleteArmed ? (
                 <button

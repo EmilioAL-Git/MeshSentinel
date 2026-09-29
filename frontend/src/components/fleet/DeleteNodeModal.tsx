@@ -49,10 +49,11 @@ export function DeleteNodeModal({
         )}
       </p>
       <p style={{ color: t.textDim, fontSize: 12 }}>
-        Se elimina la fila del nodo y todo su historial propio (posiciones, telemetría, vecinos,
-        etiquetas, grupos, enlaces con pasarelas). Es <strong>irreversible</strong> — nada de esto
-        es como "ignorar", que solo lo oculta. Los registros de Actividad/Alertas/Operaciones que
-        lo mencionan de pasada no se tocan.
+        Se elimina la información del nodo y todo su historial propio (posiciones, telemetría,
+        vecinos, etiquetas, grupos, enlaces con pasarelas). Es <strong>irreversible</strong>. No es
+        como "ignorar", que solo lo oculta.
+        <br />
+        Los registros de Actividad/Alertas/Operaciones que lo incluyen no se borran.
       </p>
       {armed ? (
         <button
