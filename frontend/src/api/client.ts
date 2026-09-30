@@ -328,6 +328,20 @@ export interface WipeNodesOut {
 export const wipeAllNodes = () =>
   send<WipeNodesOut>("DELETE", "/nodes", { confirm: WIPE_NODES_CONFIRM });
 
+// ── Exportar/importar configuración portable a otra instalación ─────────────
+// Alcance: reglas de alerta (globales o por grupo, nunca por nodo) +
+// canales/integraciones de notificación, perfiles de configuración,
+// definiciones de grupos/etiquetas, ajustes de Nexus. NO incluye gateways,
+// nodos/NodeDB ni historial — eso es específico de esta instalación.
+export const fetchConfigExport = () => get<Record<string, unknown>>("/config/export");
+export interface ConfigImportOut {
+  created: Record<string, number>;
+  skipped_existing: Record<string, number>;
+  skipped_invalid: string[];
+}
+export const importConfig = (bundle: Record<string, unknown>) =>
+  send<ConfigImportOut>("POST", "/config/import", bundle);
+
 // ── Selección inteligente de gateway ─────────────────────────────────────────
 // Único schema de selección compartido por operaciones individuales y por
 // lotes (Nivel 1 de la jerarquía) — nunca tres implementaciones distintas.
@@ -1228,6 +1242,25 @@ export const setNexusMode = (enabled: boolean) => send<NexusModeOut>("PUT", "/ne
 export const scanForNexusNodes = (gatewayId: string, windowSeconds = 30) =>
   send<NexusScanOut>("POST", "/nexus/scan", { gateway_id: gatewayId, window_seconds: windowSeconds });
 
+// Detección PASIVA: no manda nada, solo observa tráfico ya visto en el
+// canal Nexus (el backend escucha message.received en vivo, ver
+// nexus_gateway.py). Misma regla que el escaneo activo: solo sugiere.
+export interface NexusPassiveCandidateOut {
+  node_id: string;
+  gateway_id: string;
+  sample_text: string;
+  command: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  match_count: number;
+  already_marked: boolean;
+}
+
+export const fetchNexusPassiveCandidates = () =>
+  get<NexusPassiveCandidateOut[]>("/nexus/passive-candidates");
+export const dismissNexusPassiveCandidate = (nodeId: string) =>
+  send<void>("POST", `/nexus/passive-candidates/${encodeURIComponent(nodeId)}/dismiss`);
+
 // ── Cola de operaciones (ADR 0027 §4) ────────────────────────────────────────
 // Vocabulario de operador (M4.1): pending/sent/confirmed/no_response — nunca
 // el vocabulario del pipeline de administración (modelo distinto: el
@@ -1331,6 +1364,7 @@ export interface NexusSettingsOut {
   channel_name: string | null;
   response_window_seconds: number;
   scan_cooldown_seconds: number;
+  passive_detection_enabled: boolean;
   default_target_kind: NexusTargetKind;
   default_gateway_id: string | null;
   catalog_collapsed_default: boolean;

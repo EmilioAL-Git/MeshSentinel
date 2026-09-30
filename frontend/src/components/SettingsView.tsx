@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  fetchConfigExport,
   fetchSettings,
+  importConfig,
   patchSetting,
   resetSetting,
   wipeAllNodes,
   WIPE_NODES_CONFIRM,
+  type ConfigImportOut,
   type SettingOut,
 } from "../api/client";
 import { NexusPanel } from "./nexus/NexusPanel";
@@ -74,8 +77,115 @@ export function SettingsView() {
           </div>
         ))
       )}
+      <ConfigPortability />
       <NodeDbMaintenance />
       <NexusPanel />
+    </div>
+  );
+}
+
+function downloadJson(data: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function summarizeCounts(counts: Record<string, number>): string {
+  const parts = Object.entries(counts).filter(([, n]) => n > 0);
+  if (parts.length === 0) return "nada";
+  return parts.map(([key, n]) => `${n} ${key.replace(/_/g, " ")}`).join(", ");
+}
+
+/** Exportar/importar la configuración PORTABLE de esta instalación (reglas de
+ * alerta globales/por grupo, canales/integraciones, perfiles de
+ * configuración, grupos/etiquetas, ajustes de Nexus) para clonarla en otra.
+ * Deliberadamente fuera: gateways, nodos/NodeDB, historial — específicos de
+ * esta instalación. Importar nunca sobrescribe: solo crea lo que falte por
+ * nombre (pensado para sembrar una instalación nueva, no sincronizar dos ya
+ * vivas). */
+function ConfigPortability() {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+
+  const invalidateAll = () => {
+    for (const key of ["groups", "tags", "alert-rules", "channels", "providers", "profiles", "settings"]) {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  };
+
+  const exportMutation = useMutation({
+    mutationFn: fetchConfigExport,
+    onSuccess: (data) => {
+      downloadJson(data, `meshsentinel-config-${new Date().toISOString().slice(0, 10)}.json`);
+      toast("Configuración exportada");
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo exportar", { kind: "error" }),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: importConfig,
+    onSuccess: (res: ConfigImportOut) => {
+      toast(`Importado: ${summarizeCounts(res.created)} (omitido por ya existir: ${summarizeCounts(res.skipped_existing)})`);
+      if (res.skipped_invalid.length > 0) {
+        toast(res.skipped_invalid.join("; "), { kind: "error" });
+      }
+      invalidateAll();
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo importar", { kind: "error" }),
+    onSettled: () => setImporting(false),
+  });
+
+  const onFileChosen = async (file: File) => {
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      importMutation.mutate(parsed);
+    } catch {
+      toast("El archivo no es un JSON de configuración válido", { kind: "error" });
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2>Configuración portable</h2>
+      <div style={{ color: t.textDim, fontSize: 12.5, maxWidth: 640, marginBottom: 10 }}>
+        Exporta reglas de alerta (globales o por grupo), canales e integraciones de notificación,
+        perfiles de configuración, grupos/etiquetas y ajustes de Nexus a un archivo, para clonarlos en
+        otra instalación de MeshSentinel. NO incluye gateways, nodos ni historial — eso es propio de
+        cada instalación. Importar nunca sobrescribe: solo añade lo que aún no exista (por nombre).
+      </div>
+      <span style={{ display: "inline-flex", gap: 8 }}>
+        <button className="btn" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
+          Exportar configuración…
+        </button>
+        <button
+          className="btn ghost"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importing || importMutation.isPending}
+        >
+          Importar configuración…
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void onFileChosen(file);
+          }}
+        />
+      </span>
     </div>
   );
 }
