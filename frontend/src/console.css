@@ -22,6 +22,7 @@
 .ws {
   height: 100%;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background:
@@ -203,6 +204,15 @@ select.input {
 }
 .seg button:last-child {
   border-right: none;
+}
+/* Variante para listas dinámicas de longitud impredecible (p.ej. canales
+   con nombre real, Chat): el segmentado normal no envuelve — con pocas
+   opciones cortas ("Actividad|Chat") cabe siempre, pero una lista de
+   canales con nombres reales puede exceder el ancho disponible y quedaba
+   recortada en silencio por el `overflow: hidden` de `.seg`. */
+.seg.wrap {
+  flex-wrap: wrap;
+  overflow: visible;
 }
 .seg button.on {
   background: var(--accent-tint);

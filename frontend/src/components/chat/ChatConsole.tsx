@@ -153,7 +153,7 @@ export function ChatConsole({
           {rows.length} mensajes{history.hasNextPage ? " · histórico ↓" : " · histórico completo"}
         </span>
         <span className="sep" />
-        <span className="seg">
+        <span className="seg wrap">
           <button className={channelTab === "all" ? "on" : undefined} onClick={() => setChannelTab("all")}>
             Todos
           </button>
