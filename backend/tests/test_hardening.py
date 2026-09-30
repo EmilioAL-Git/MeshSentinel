@@ -285,8 +285,9 @@ async def test_operation_counts_global_and_group(session_factory):
 async def test_preview_blocks_node_routed_to_deleted_gateway(session_factory):
     """Antes: preview miraba solo nodes.gateway_id y daba por elegible un
     nodo cuya única pasarela estaba eliminada; create lo rechazaba después
-    (divergencia). Ahora ambos usan el mismo resolver."""
-    now = datetime.now(timezone.utc)
+    (divergencia). Ahora ambos usan el mismo resolver — sigue probado aquí
+    con una pasarela DESHABILITADA (retiro sin borrar la fila), que es el
+    caso que el resolver puede seguir detectando de verdad."""
     ingest = IngestService(session_factory)
     await ingest.handle_event(make_event("node.seen", {"node_id": "!00000001"}))
 
@@ -296,13 +297,37 @@ async def test_preview_blocks_node_routed_to_deleted_gateway(session_factory):
             "gw-test", name="gw", transport_type="usb", connection_params={},
             enabled=True, priority=0, desired_status="connected",
         )
-        await repo.soft_delete("gw-test", now)
+        await repo.update_config("gw-test", enabled=False)
 
     batches = BatchService(session_factory, make_settings())
     preview = await batches.preview("metadata.get", {}, BatchScope(node_ids=["!00000001"]))
     assert preview.eligible == []
     assert len(preview.excluded) == 1
     assert any("no enrutable" in b for b in preview.excluded[0].blockers)
+
+
+async def test_preview_allows_node_after_real_delete_of_its_gateway(session_factory):
+    """Borrado real (pedido explícito del usuario, ya no lógico, ver
+    GatewayHasActiveWorkError): sin fila, el resolver ya no distingue "nunca
+    configurada" de "borrada a propósito" — mismo criterio que
+    _fallback_allowed en gateway_routing.py. Riesgo aceptado: el operador
+    debe parar también el proceso, no solo pulsar Eliminar, si quiere
+    retirar de verdad una pasarela de las rutas automáticas."""
+    ingest = IngestService(session_factory)
+    await ingest.handle_event(make_event("node.seen", {"node_id": "!00000001"}))
+
+    async with session_factory() as session, session.begin():
+        repo = SqlGatewayRepository(session)
+        await repo.configure(
+            "gw-test", name="gw", transport_type="usb", connection_params={},
+            enabled=True, priority=0, desired_status="connected",
+        )
+        await repo.delete("gw-test")
+
+    batches = BatchService(session_factory, make_settings())
+    preview = await batches.preview("metadata.get", {}, BatchScope(node_ids=["!00000001"]))
+    assert len(preview.eligible) == 1
+    assert preview.excluded == []
 
 
 async def test_preview_eligible_implies_create_succeeds(session_factory):

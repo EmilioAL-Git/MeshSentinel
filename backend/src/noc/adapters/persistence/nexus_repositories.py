@@ -63,6 +63,20 @@ class SqlNexusOperationRepository:
         await self._session.flush()
         return _entity(m)
 
+    async def has_active_for_gateway(self, gateway_id: str) -> bool:
+        """Comprobación de seguridad antes de borrar un gateway de verdad:
+        ¿hay algo pendiente/enviado (esperando respuesta) por esta pasarela
+        en la cola Nexus (ADR 0027 §4) ahora mismo?"""
+        stmt = (
+            select(NexusOperationModel.id)
+            .where(
+                NexusOperationModel.gateway_id == gateway_id,
+                NexusOperationModel.status.in_(("pending", "sent")),
+            )
+            .limit(1)
+        )
+        return (await self._session.scalar(stmt)) is not None
+
     async def list_pending(self, limit: int = 200) -> list[NexusOperation]:
         stmt = (
             select(NexusOperationModel)

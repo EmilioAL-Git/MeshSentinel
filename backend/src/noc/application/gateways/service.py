@@ -13,13 +13,15 @@ Separa dos escrituras que nunca deben mezclarse en la misma llamada:
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from noc.adapters.events.command_queue import RedisCommandQueue
+from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
+from noc.adapters.persistence.nexus_repositories import SqlNexusOperationRepository
 from noc.adapters.persistence.repositories import SqlGatewayRepository
+from noc.application.dashboard import is_stale
 from noc.application.envelopes import make_command_envelope
 from noc.domain.nodes.entities import GatewayInfo
 
@@ -29,14 +31,33 @@ DISCOVER_TIMEOUT_SECONDS = 15.0
 TEST_CONNECTION_TIMEOUT_SECONDS = 30.0
 
 
+class GatewayHasActiveWorkError(Exception):
+    """El borrado de gateways ahora es real (pedido explícito del usuario:
+    "comprueba antes de borrar si hay algún proceso o trabajo ejecutándose
+    por si acaso") — sin esto, borrar una pasarela con una operación
+    admin/Nexus en vuelo la dejaría huérfana (referencia a un gateway_id
+    que ya no existe, sin nadie que la reclame)."""
+
+
+class GatewayStillConnectedError(Exception):
+    """Comprobación de vida del propio proceso, pedida aparte del trabajo
+    en vuelo: solo bloquea si hay una conexión REAL activa (status
+    "connected" — USB/TCP con nodo local), nunca un repuesto "idle" de la
+    piscina (M6.3, cuyo reseteo limpio al borrar y volver a latir es
+    justo el comportamiento buscado) ni uno "connecting"/"reconnecting"/
+    "error"/"disconnected"/"unassigned"."""
+
+
 class GatewayService:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
         command_queue: RedisCommandQueue,
+        stale_after_seconds: int = 90,
     ) -> None:
         self._session_factory = session_factory
         self._queue = command_queue
+        self._stale_after_seconds = stale_after_seconds
         self._waiters: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
     # ── Lectura ──────────────────────────────────────────────────────────────
@@ -185,9 +206,29 @@ class GatewayService:
         return info
 
     async def delete(self, gateway_id: str) -> bool:
-        now = datetime.now(timezone.utc)
         async with self._session_factory() as session, session.begin():
-            deleted = await SqlGatewayRepository(session).soft_delete(gateway_id, now)
+            repo = SqlGatewayRepository(session)
+            info = await repo.get(gateway_id)
+            # "connected" por sí solo no basta: un proceso muerto deja el
+            # último status congelado para siempre (nadie vuelve a
+            # heartbearlo) — sin comprobar frescura, una pasarela ya
+            # abandonada bloquearía su propio borrado indefinidamente.
+            if (
+                info is not None
+                and info.status == "connected"
+                and not is_stale(info.updated_at, self._stale_after_seconds)
+            ):
+                raise GatewayStillConnectedError(
+                    f"«{gateway_id}» sigue conectado de verdad — desconéctalo antes de eliminarlo"
+                )
+            if await SqlAdminOperationRepository(session).has_active_for_gateway(
+                gateway_id
+            ) or await SqlNexusOperationRepository(session).has_active_for_gateway(gateway_id):
+                raise GatewayHasActiveWorkError(
+                    f"«{gateway_id}» tiene operaciones pendientes o en vuelo — espera a que "
+                    "terminen (o cancélalas) antes de eliminarla"
+                )
+            deleted = await repo.delete(gateway_id)
         if deleted:
             await self._send_command(gateway_id, "command.gateway_disconnect", {})
         return deleted

@@ -123,6 +123,17 @@ class SqlAdminOperationRepository:
         m = await self._session.scalar(stmt)
         return _entity(m) if m else None
 
+    async def has_active_for_gateway(self, gateway_id: str) -> bool:
+        """Comprobación de seguridad antes de borrar un gateway de verdad
+        (pedida por el usuario): ¿hay algo pendiente/en vuelo dirigido a
+        esta pasarela ahora mismo? Mismo criterio de "no terminal" que
+        `active_counts`."""
+        stmt = select(AdminOperationModel.id).where(
+            AdminOperationModel.gateway_id == gateway_id,
+            AdminOperationModel.status.in_(("pending", "queued", "running")),
+        ).limit(1)
+        return (await self._session.scalar(stmt)) is not None
+
     async def active_counts(self, group_id: int | None = None) -> dict[str, int]:
         """Agregados de operaciones no terminales para HUD/insignias
         (hardening): pending/queued/running por conteo real en BD, nunca

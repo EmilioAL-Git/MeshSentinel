@@ -51,39 +51,35 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── Piscina de gateways (M6.3) ──────────────────────────────────────────
+  # Los 6 arrancan con transporte "idle": no conectan a nada, solo laten
+  # como "unassigned" hasta que se reclaman desde "+ Añadir gateway" en la
+  # interfaz — el asistente los reconfigura (USB/TCP) en caliente por
+  # comando, sin tocar este archivo ni reconstruir nada. Cero
+  # preconfiguración en .env por diseño (pedido explícito del usuario):
+  # transporte, dispositivo USB, host TCP... todo vive en la base de datos,
+  # nunca en variables de entorno. GATEWAY_ID sigue leyendo de .env solo
+  # para el primero (compatibilidad de nombre, "gw-01" por defecto) — es
+  # una etiqueta de infraestructura, no configuración de aplicación. Ajusta
+  # la cantidad de bloques si necesitas más o menos disponibles.
+  #
+  # Para USB en un host Linux (Docker SÍ puede pasar dispositivos ahí, a
+  # diferencia de Docker Desktop en Mac): añade a cualquier bloque
+  #   devices:
+  #     - "/dev/ttyACM0:/dev/ttyACM0"
+  # No uses privileged: true — mapear el dispositivo concreto basta.
   gateway:
     build: ./gateway
     environment:
       GATEWAY_ID: ${GATEWAY_ID:-gw-01}
-      GATEWAY_TRANSPORT: ${GATEWAY_TRANSPORT:-simulated}
-      MESHTASTIC_USB_DEVICE: ${MESHTASTIC_USB_DEVICE:-}
-      MESHTASTIC_RECONNECT_INITIAL_DELAY: ${MESHTASTIC_RECONNECT_INITIAL_DELAY:-5}
-      MESHTASTIC_RECONNECT_MAX_DELAY: ${MESHTASTIC_RECONNECT_MAX_DELAY:-300}
-      GATEWAY_TCP_HOST: ${GATEWAY_TCP_HOST:-}
-      GATEWAY_TCP_PORT: ${GATEWAY_TCP_PORT:-4403}
-      GATEWAY_SIM_SEED: ${GATEWAY_SIM_SEED:-42}
-      GATEWAY_SIM_SHARED_SEED: ${GATEWAY_SIM_SHARED_SEED:-0}
-      GATEWAY_SIM_SHARED_NODE_COUNT: ${GATEWAY_SIM_SHARED_NODE_COUNT:-4}
+      GATEWAY_TRANSPORT: idle
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
     depends_on:
       redis:
         condition: service_healthy
-    # Para GATEWAY_TRANSPORT=usb, descomentar y ajustar al dispositivo real
-    # (ver docs/operations/usb.md y docs/acceptance/usb.md). No usar
-    # privileged: true — mapear el dispositivo concreto es suficiente.
-    # devices:
-    #   - "/dev/ttyACM0:/dev/ttyACM0"
     restart: unless-stopped
 
-  # ── Piscina de gateways de repuesto (M6.3) ─────────────────────────────
-  # Arrancan con transporte "idle": no conectan a nada, solo laten como
-  # "unassigned" hasta que se reclaman desde "+ Añadir gateway" en la
-  # interfaz — el asistente los reconfigura (USB/TCP) en caliente por
-  # comando, sin tocar este archivo ni reconstruir nada. Numeración gw-02..
-  # gw-06, continuando la del gateway original (gw-01) — mismo formato de
-  # dos dígitos en toda la app, para no confundirlos entre sí. Ajusta la
-  # cantidad de bloques si necesitas más o menos repuestos disponibles.
   gateway-2:
     build: ./gateway
     environment:

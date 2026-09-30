@@ -104,11 +104,30 @@ el diseño a USB en particular.
    `connection_params` persistidos. Es un efecto secundario acotado dentro de
    una ruta ya existente, no infraestructura nueva.
 
-6. **Borrado lógico.** "Eliminar gateway" marca `enabled=false,
-   deleted_at=now()`; nunca se borra la fila (preserva la referencia de
-   `admin_operations.gateway_id`, `node.gateway_id`, etc.). Los listados
-   excluyen `deleted_at IS NOT NULL` por defecto, mismo patrón que
-   `include_ignored` de M1.2.
+6. **Borrado.** ~~Lógico: `enabled=false, deleted_at=now()`, nunca se borra
+   la fila~~ — **revisado (M6.3, piscina de repuestos): "Eliminar" es
+   borrado REAL de la fila**, pedido explícito del usuario tras comprobar
+   que el borrado lógico dejaba fantasmas permanentes al reutilizar
+   `gateway_id` en la piscina de repuestos (un contenedor nuevo hereda
+   `managed=true`/`deleted_at` de una fila vieja ya borrada, sin volver
+   nunca a `idle` limpio). `GatewayService.delete()` comprueba antes si hay
+   operaciones admin/Nexus `pending`/`queued`/`running`/`sent` dirigidas a
+   esa pasarela (`GatewayHasActiveWorkError`, 409) para no dejarlas
+   huérfanas, y también si el propio proceso reporta una conexión REAL
+   activa ahora mismo (`status == "connected"`, `GatewayStillConnectedError`,
+   409) — deliberadamente NO bloquea un repuesto `idle` sin reclamar (nunca
+   llega a "connected"), que es justo el caso que debe poder borrarse y
+   volver limpio. Riesgo aceptado explícitamente por el usuario: la referencia
+   histórica en `admin_operations.gateway_id`/`node.gateway_id` deja de
+   apuntar a una fila real (solo degrada el nombre bonito en pantallas de
+   historial, sin FK real, no rompe nada) y **el motor de enrutado de
+   administración remota ya no puede "recordar" que una pasarela se
+   retiró a propósito**: si su proceso sigue latiendo tras borrarla, el
+   siguiente heartbeat crea una fila nueva sin gestionar y vuelve a ser
+   candidata (`test_deleted_gateway_becomes_candidate_again_if_it_keeps_
+   heartbeating`, antes probaba justo lo contrario). Quien retira una
+   pasarela real de verdad debe parar también su proceso, no solo pulsar
+   Eliminar.
 
 7. **Compatibilidad `.env`.** Una fila con `managed=false` (heartbeat sin
    configuración de aplicación, comportamiento de hoy) se sigue mostrando en

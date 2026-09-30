@@ -153,21 +153,21 @@ async def test_selection_falls_back_to_cached_gateway_when_no_candidates(session
     assert chosen == "gw-01"
 
 
-async def test_fallback_never_returns_soft_deleted_gateway(session_factory):
-    """La pasarela cacheada fue eliminada (borrado lógico): el fallback NO la
-    resucita — la operación queda no enrutable (None)."""
+async def test_fallback_allowed_after_real_delete_without_further_heartbeat(session_factory):
+    """Borrado real (pedido explícito del usuario, ya no lógico): sin fila,
+    el fallback se comporta como si la pasarela nunca hubiera existido —
+    mismo criterio que test_fallback_allowed_for_gateway_without_row."""
     ingest = IngestService(session_factory)
     await seen(ingest, NODE_A, "gw-01", snr=5.0)
     await heartbeat(session_factory, "gw-01", name="Vieja")
-    now = datetime.now(timezone.utc)
     async with session_factory() as session:
-        await SqlGatewayRepository(session).soft_delete("gw-01", now)
+        await SqlGatewayRepository(session).delete("gw-01")
         await session.commit()
     async with session_factory() as session:
         chosen = await select_gateway_for_node(
             session, NODE_A, make_settings(), fallback_gateway_id="gw-01"
         )
-    assert chosen is None
+    assert chosen == "gw-01"
 
 
 async def test_fallback_never_returns_disabled_gateway(session_factory):
@@ -195,25 +195,27 @@ async def test_fallback_allowed_for_gateway_without_row(session_factory):
     assert chosen == "gw-01"
 
 
-async def test_deleted_gateway_with_active_link_is_not_a_candidate_either(session_factory):
-    """Aunque la pasarela eliminada siga emitiendo (proceso vivo), ni el
-    filtro de candidatos ni el fallback la eligen: gana la otra."""
+async def test_deleted_gateway_becomes_candidate_again_if_it_keeps_heartbeating(session_factory):
+    """Riesgo aceptado explícitamente por el usuario al pedir borrado real
+    total (en vez de lógico): si el PROCESO sigue vivo tras borrarla desde
+    la app, el siguiente heartbeat crea una fila nueva sin gestionar y
+    vuelve a ser candidata — ya no hay forma de "recordar" que se retiró a
+    propósito. Quien retira una pasarela real de verdad debe parar también
+    su proceso (docker rm / kill), no solo pulsar Eliminar."""
     ingest = IngestService(session_factory)
     await seen(ingest, NODE_A, "gw-01", snr=10.0, hops=0)  # mejor señal
     await seen(ingest, NODE_A, "gw-02", snr=-9.0, hops=3)
     await heartbeat(session_factory, "gw-01", name="Retirada")
     await heartbeat(session_factory, "gw-02")
-    now = datetime.now(timezone.utc)
     async with session_factory() as session:
-        await SqlGatewayRepository(session).soft_delete("gw-01", now)
+        await SqlGatewayRepository(session).delete("gw-01")
         await session.commit()
-    # El heartbeat posterior al borrado no lo revierte (upsert nunca toca config)
     await heartbeat(session_factory, "gw-01")
     async with session_factory() as session:
         chosen = await select_gateway_for_node(
             session, NODE_A, make_settings(), fallback_gateway_id="gw-01"
         )
-    assert chosen == "gw-02"
+    assert chosen == "gw-01"
 
 
 async def test_bulk_selection_routes_each_node_by_its_own_gateway(session_factory):

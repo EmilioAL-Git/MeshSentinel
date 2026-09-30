@@ -78,7 +78,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     command_queue = RedisCommandQueue(settings.redis_url, settings.commands_stream_prefix)
     # Gestión de gateways (M5, ADR 0021): CRUD + comandos command.gateway_*,
     # reutiliza el mismo stream de comandos que el pipeline de administración
-    app.state.gateways = GatewayService(app.state.db.session_factory, command_queue)
+    app.state.gateways = GatewayService(
+        app.state.db.session_factory, command_queue, settings.gateway_stale_after_seconds
+    )
     app.state.event_bus.subscribe(app.state.gateways.handle_event)
     # JenTastic-Nexus (ADR 0027): reutiliza el mismo stream de comandos. El
     # escaneo activo (POST /nexus/scan) relee chat_messages tras la ventana,

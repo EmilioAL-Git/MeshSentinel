@@ -1,11 +1,21 @@
 """Gestión de gateways (M5, ADR 0021): CRUD, comandos correlacionados por
-request_id, borrado lógico y reconciliación tras heartbeat."""
+request_id, borrado real y reconciliación tras heartbeat."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from noc.application.gateways.service import GatewayService
+import pytest
+
+from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
+from noc.adapters.persistence.nexus_repositories import SqlNexusOperationRepository
+from noc.application.gateways.service import (
+    GatewayHasActiveWorkError,
+    GatewayService,
+    GatewayStillConnectedError,
+)
 from noc.application.ingest import IngestService
+from noc.domain.admin.entities import AdminOperation
+from noc.domain.nexus.entities import NexusOperation
 
 GW = "gw-test"
 
@@ -18,13 +28,13 @@ class FakeQueue:
         self.sent.append((gateway_id, envelope))
 
 
-def envelope(event_type: str, payload: dict, gateway_id: str = GW) -> dict:
+def envelope(event_type: str, payload: dict, gateway_id: str = GW, ts: datetime | None = None) -> dict:
     return {
         "schema_version": 1,
         "event_type": event_type,
         "event_id": str(uuid.uuid4()),
         "gateway_id": gateway_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": (ts or datetime.now(timezone.utc)).isoformat(),
         "payload": payload,
     }
 
@@ -32,7 +42,9 @@ def envelope(event_type: str, payload: dict, gateway_id: str = GW) -> dict:
 async def seed_heartbeat(session_factory, status: str = "connected", ts: datetime | None = None) -> None:
     ingest = IngestService(session_factory)
     await ingest.handle_event(
-        envelope("gateway.status", {"status": status, "transport": "usb", "local_node_id": "!aaaaaaaa"})
+        envelope(
+            "gateway.status", {"status": status, "transport": "usb", "local_node_id": "!aaaaaaaa"}, ts=ts
+        )
     )
 
 
@@ -151,7 +163,9 @@ async def test_connect_and_disconnect_require_managed_gateway(session_factory):
     assert await service.disconnect(GW) is None
 
 
-async def test_disconnect_sends_command_and_soft_delete_disconnects(session_factory):
+async def test_disconnect_sends_command_and_delete_removes_row(session_factory):
+    """Borrado real (pedido explícito del usuario, ya no lógico): la fila
+    desaparece del todo, incluso pidiendo include_deleted."""
     queue = FakeQueue()
     service = GatewayService(session_factory, queue)
     await service.configure(GW, "Casa", "usb", {})
@@ -163,15 +177,91 @@ async def test_disconnect_sends_command_and_soft_delete_disconnects(session_fact
 
     deleted = await service.delete(GW)
     assert deleted is True
-    remaining = await service.list_all()
-    assert remaining == []  # excluido por defecto (borrado lógico, no físico)
-    all_rows = await service.list_all(include_deleted=True)
-    assert all_rows[0].enabled is False and all_rows[0].deleted_at is not None
+    assert await service.list_all() == []
+    assert await service.list_all(include_deleted=True) == []
+
+
+async def test_delete_blocked_while_really_connected(session_factory):
+    """Comprobación de vida pedida por el usuario, aparte del trabajo en
+    vuelo: si el proceso reporta una conexión REAL activa (status
+    "connected"), bloquea — hay que desconectarlo primero."""
+    service = GatewayService(session_factory, FakeQueue())
+    await service.configure(GW, "Casa", "usb", {})
+    await seed_heartbeat(session_factory, status="connected")
+
+    with pytest.raises(GatewayStillConnectedError):
+        await service.delete(GW)
+    assert (await service.get(GW)) is not None
+
+
+async def test_delete_allowed_when_connected_status_is_stale(session_factory):
+    """"connected" por sí solo no basta: un proceso muerto deja el último
+    status congelado para siempre (nadie vuelve a heartbearlo) — sin la
+    comprobación de frescura, una pasarela ya abandonada bloquearía su
+    propio borrado para siempre."""
+    service = GatewayService(session_factory, FakeQueue(), stale_after_seconds=90)
+    await service.configure(GW, "Casa", "usb", {})
+    old_ts = datetime.now(timezone.utc) - timedelta(seconds=200)
+    await seed_heartbeat(session_factory, status="connected", ts=old_ts)
+
+    assert await service.delete(GW) is True
+    assert (await service.get(GW)) is None
+
+
+async def test_delete_allowed_for_idle_spare_even_if_its_process_keeps_heartbeating(session_factory):
+    """El caso que motivó la pregunta del usuario: un repuesto "idle" de la
+    piscina (M6.3) sigue latiendo, pero NUNCA está "connected" de verdad
+    (nunca tuvo un nodo local real) — borrarlo debe seguir funcionando,
+    es como vuelve limpio para el siguiente heartbeat."""
+    service = GatewayService(session_factory, FakeQueue())
+    await service.configure(GW, "Casa", "usb", {})
+    await seed_heartbeat(session_factory, status="unassigned")
+
+    assert await service.delete(GW) is True
+    assert (await service.get(GW)) is None
 
 
 async def test_delete_unmanaged_returns_false(session_factory):
     service = GatewayService(session_factory, FakeQueue())
     assert await service.delete(GW) is False
+
+
+async def test_delete_blocked_by_active_admin_operation(session_factory):
+    """Comprobación de seguridad pedida por el usuario: no borrar una
+    pasarela con trabajo pendiente/en vuelo — la dejaría huérfana."""
+    service = GatewayService(session_factory, FakeQueue())
+    await service.configure(GW, "Casa", "usb", {})
+
+    async with session_factory() as session, session.begin():
+        await SqlAdminOperationRepository(session).create(
+            AdminOperation(
+                target_node_id="!00000001", gateway_id=GW,
+                operation_type="metadata.get", params={}, status="queued",
+            )
+        )
+
+    with pytest.raises(GatewayHasActiveWorkError):
+        await service.delete(GW)
+    # Sigue viva: el bloqueo no dejó la fila a medio borrar
+    assert (await service.get(GW)) is not None
+
+
+async def test_delete_blocked_by_active_nexus_operation(session_factory):
+    service = GatewayService(session_factory, FakeQueue())
+    await service.configure(GW, "Casa", "usb", {})
+
+    async with session_factory() as session, session.begin():
+        await SqlNexusOperationRepository(session).create(
+            NexusOperation(
+                gateway_id=GW, target_kind="broadcast", target_value=None,
+                command_name="INFO", args=[], text="/nexus INFO",
+                destructive=False, requires_save=False, busy_seconds=0,
+                status="sent",
+            )
+        )
+
+    with pytest.raises(GatewayHasActiveWorkError):
+        await service.delete(GW)
 
 
 # ── Descubrimiento / prueba de conexión: correlación por request_id ─────────

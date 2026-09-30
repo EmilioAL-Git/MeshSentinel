@@ -481,8 +481,11 @@ class SqlGatewayRepository:
     """Runtime (heartbeat) y configuración (M5, ADR 0021) conviven en la misma
     fila pero se escriben por caminos distintos: `upsert()` (heartbeat) nunca
     toca las columnas de configuración; `configure()`/`update_config()`/
-    `soft_delete()`/`set_desired_status()` (API de gestión) nunca tocan las de
-    estado runtime salvo `managed`/`desired_status`/`deleted_at`."""
+    `set_desired_status()` (API de gestión) nunca tocan las de estado
+    runtime salvo `managed`/`desired_status`/`deleted_at`. `delete()` es
+    borrado real (pedido explícito del usuario, ya no lógico) — si el
+    proceso sigue vivo, el siguiente heartbeat crea una fila nueva limpia
+    en vez de resucitar la vieja."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -630,12 +633,19 @@ class SqlGatewayRepository:
         await self._session.flush()
         return _to_entity(row, GatewayInfo, {"gateway_id": "id"})
 
-    async def soft_delete(self, gateway_id: str, deleted_at: datetime) -> bool:
+    async def delete(self, gateway_id: str) -> bool:
+        """Borrado real (pedido explícito del usuario: "si los borro con X,
+        deben borrar y desaparecer todo" — antes era lógico, ADR 0021 §6,
+        para preservar el gateway_id en referencias históricas de
+        admin_operations/alerts; esas siguen guardando el id como texto
+        plano, sin FK, así que perder la fila solo degrada su nombre
+        bonito en pantallas de historial, nunca rompe nada). Si el proceso
+        sigue vivo y late como spare de la piscina (M6.3), reaparecerá
+        limpio solo con el siguiente heartbeat — efecto de reseteo
+        deliberado, no un bug."""
         row = await self._session.get(GatewayModel, gateway_id)
         if row is None or not row.managed:
             return False
-        row.enabled = False
-        row.desired_status = "disconnected"
-        row.deleted_at = deleted_at
+        await self._session.delete(row)
         await self._session.flush()
         return True

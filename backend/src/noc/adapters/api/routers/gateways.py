@@ -25,7 +25,11 @@ from noc.application.activity import activity
 from noc.application.activity_events import render_gateway_action
 from noc.application.auth.actor import ActorContext, resolve_actor_label
 from noc.application.gateway_stats import GatewayStats, compute_multi_gateway_stats, scope_to_members
-from noc.application.gateways.service import GatewayService
+from noc.application.gateways.service import (
+    GatewayHasActiveWorkError,
+    GatewayService,
+    GatewayStillConnectedError,
+)
 from noc.config import get_settings
 
 router = APIRouter(prefix="/gateways", tags=["gateways"])
@@ -218,7 +222,10 @@ async def disconnect_gateway(gateway_id: str, request: Request, current_user: Re
 
 @router.delete("/{gateway_id}", status_code=204)
 async def delete_gateway(gateway_id: str, request: Request, current_user: RequireAuthDep) -> None:
-    deleted = await _service(request).delete(gateway_id)
+    try:
+        deleted = await _service(request).delete(gateway_id)
+    except (GatewayHasActiveWorkError, GatewayStillConnectedError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")
     await _narrate("delete", gateway_id, None, current_user)

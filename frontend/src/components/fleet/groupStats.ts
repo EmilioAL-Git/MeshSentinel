@@ -18,17 +18,19 @@ import type {
  */
 
 /**
- * Repuesto de la piscina (M6.3) sin reclamar de verdad ahora mismo: late
- * "idle" — nunca un enlace real, sea cual sea `managed` (un gateway_id
- * reutilizado por un proceso nuevo puede heredar `managed=true` de una fila
- * vieja ya borrada, sin que eso lo convierta en una conexión real). El
- * transporte "idle" solo existe mientras nadie lo ha reconfigurado desde el
- * arranque, así que basta como señal. Compartido por cualquier selector/
- * listado de gateways para no repetir el criterio (GatewaysView,
+ * Repuesto de la piscina (M6.3) sin reclamar de verdad: late "idle" Y no
+ * está gestionado. Las dos condiciones hacen falta — "idle" solo no basta:
+ * una pasarela YA configurada (managed=true) que el operador desconectó a
+ * propósito también late "idle" un instante, y no debe ofrecerse como
+ * repuesto libre (se pisaría su configuración real, host/nombre incluidos).
+ * Ahora que el borrado es real (ya no lógico), un gateway_id reutilizado
+ * tras borrarlo vuelve managed=false de forma fiable en el siguiente
+ * heartbeat — ya no hace falta ignorar `managed` para ese caso.
+ * Compartido por cualquier selector/listado de gateways (GatewaysView,
  * GatewaySelect, scopeGatewaysToGroup).
  */
 export function isUnclaimedSpare(g: GatewayOut): boolean {
-  return g.transport === "idle";
+  return g.transport === "idle" && !g.managed;
 }
 
 function avg(values: number[]): number | null {

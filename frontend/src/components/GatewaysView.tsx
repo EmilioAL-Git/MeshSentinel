@@ -135,14 +135,14 @@ function AddGatewayWizard({
       }),
     onSuccess: (result) => {
       setTestResult(result);
-      if (result.ok && !name) setName(result.local_short_name || result.local_long_name || gatewayId);
+      if (result.ok && !name) setName(result.local_short_name || result.local_long_name || spareLabel(gatewayId));
     },
   });
 
   const save = useMutation({
     mutationFn: () =>
       configureGateway(gatewayId, {
-        name: name || gatewayId,
+        name: name || spareLabel(gatewayId),
         transport_type: transportType,
         connection_params: connectionParams(),
         // Pre-registro sin proceso vivo aún (sin prueba de conexión): se guarda
@@ -410,7 +410,7 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
         <StatusLight status={gateway.status} />
         {!gateway.managed && <span className="chip" style={{ color: "var(--warn)", borderColor: "var(--warn)" }}>sin configurar</span>}
         {gateway.managed && !gateway.enabled && <span className="chip">deshabilitado</span>}
-        <span className="panel-count">{gateway.gateway_id} {expanded ? "▲" : "▼"}</span>
+        <span className="panel-count">{spareLabel(gateway.gateway_id)} {expanded ? "▲" : "▼"}</span>
       </div>
 
       <div className="panel-body">
@@ -428,11 +428,10 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
         {!gateway.managed && (
           <div>
             <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
-              Pasarela detectada por heartbeat (configuración de <span className="mono">.env</span>), aún sin
-              gestionar desde la aplicación.
+              Late de verdad, pero todavía no está gestionada desde la aplicación.
             </p>
             <button className="btn" disabled={doImport.isPending} onClick={() => doImport.mutate()}>
-              ⬆ Importar configuración actual
+              ⬆ Reclamar esta pasarela
             </button>
             {doImport.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(doImport.error)}</p>}
           </div>
