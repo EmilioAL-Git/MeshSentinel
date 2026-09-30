@@ -122,6 +122,11 @@ NEXUS_SETTINGS: tuple[NexusSettingSpec, ...] = (
     NexusSettingSpec("channel_name", None, _str_or_none),
     NexusSettingSpec("response_window_seconds", 30.0, _positive_float),
     NexusSettingSpec("scan_cooldown_seconds", 120.0, _positive_float),
+    # Detección PASIVA (sin enviar nada): observa message.received en vivo y
+    # sugiere cualquier nodo cuyo texto tenga forma de respuesta Nexus,
+    # aparte del escaneo activo (POST /nexus/scan). Apagable por si en una
+    # malla ruidosa se prefiere solo el escaneo explícito.
+    NexusSettingSpec("passive_detection_enabled", True, _bool),
     NexusSettingSpec("default_target_kind", "broadcast", _target_kind),
     NexusSettingSpec("default_gateway_id", None, _str_or_none),
     NexusSettingSpec("catalog_collapsed_default", False, _bool),

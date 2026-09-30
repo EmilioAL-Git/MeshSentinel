@@ -91,6 +91,20 @@ PARSERS: dict[str, Parser] = {}
 
 _UNKNOWN_COMMAND_RE = re.compile(r"^JT:\s*Unknown command '(?P<command>[^']*)'\s*$")
 
+# Toda respuesta Nexus observada hasta ahora empieza por "JT " o "JT:"
+# (alias viejo "Nexus ", ver `_first_line`), opcionalmente precedida del
+# marcador 🟢/🔴 (confirmado por el usuario: validez de la firma
+# criptográfica nueva de Meshtastic 2.8 — solo aparece en firmware ≥2.8,
+# ausente en respuestas de firmware anterior; el parser nunca depende de la
+# versión, solo de si el token está presente o no) — usado por la detección
+# PASIVA (`nexus_gateway.py`): no requiere haber mandado ningún comando,
+# solo que el TEXTO ya tenga la forma de una respuesta Nexus.
+_SIGNATURE_RE = re.compile(r"^(?:[🟢🔴]\s*)?(?:JT|Nexus)[\s:]")
+
+
+def looks_like_nexus_signature(text: str) -> bool:
+    return bool(_SIGNATURE_RE.match(text.strip()))
+
 
 @dataclass(frozen=True, slots=True)
 class ParsedResponse:
@@ -128,9 +142,10 @@ def _first_line(text: str, header: str) -> tuple[str | None, str]:
     """Valida la cabecera `JT <HEADER>`, devuelve (marcador, resto).
 
     Algunas respuestas llevan un marcador delante de `JT` (🟢/🔴 — confirmado
-    por el usuario: semáforo de si la firma del comando era válida, visto en
-    VERSION e INFO tanto en difusión como dirigidos). Se separa sin asumir
-    qué valores concretos existen, para no perder la cabecera al validarla.
+    por el usuario: validez de la firma criptográfica nueva de Meshtastic
+    2.8, solo presente en firmware ≥2.8; visto en VERSION e INFO tanto en
+    difusión como dirigidos). Se separa sin asumir qué valores concretos
+    existen, para no perder la cabecera al validarla.
 
     Firmware viejo (2.7.265, confirmado por captura real del usuario) usa
     "Nexus <HEADER>" en vez de "JT <HEADER>" — mismo contenido, cabecera
@@ -164,8 +179,9 @@ def _maybe_int(value: str) -> int | str:
 
 # --- VERSION ---------------------------------------------------------------
 # "JT VERSION: 2.7.268.dd79d33" · visto también con un marcador delante en
-# difusión propia: "🔴 JT VERSION: 2.8.005.b42309e" (significado del 🔴 sin
-# confirmar — se conserva tal cual, sin interpretarlo).
+# difusión propia: "🔴 JT VERSION: 2.8.005.b42309e" (confirmado por el
+# usuario: semáforo de validez de la firma criptográfica de Meshtastic 2.8,
+# solo en firmware ≥2.8 — se conserva tal cual, sin interpretar el valor).
 
 _VERSION_RE = re.compile(r"^(?:(?P<marker>\S+)\s+)?(?:JT|Nexus) VERSION:\s*(?P<version>\S+)\s*$")
 

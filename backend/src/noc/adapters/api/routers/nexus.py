@@ -5,7 +5,9 @@ Guard clause en TODO endpoint salvo la propia lectura del interruptor
 el modo OFF, `POST /scan` devuelve 404 — ni siquiera se manda el comando al
 gateway. El marcado (`PUT /nodes/{id}/nexus`) vive en `routers/nodes.py`
 junto a favorite/ignored (mismo patrón, ADR 0027 lo hereda de M1.2); aquí
-solo la sugerencia.
+solo la sugerencia — activa (`POST /scan`, manda una difusión y espera) o
+pasiva (`GET /passive-candidates`, solo observa tráfico ya visto, nunca
+envía nada; `POST /passive-candidates/{node_id}/dismiss` la descarta).
 """
 
 from datetime import datetime
@@ -18,7 +20,7 @@ from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SessionDep
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.nexus.builder import NexusCommandError
 from noc.application.nexus.catalog import COMMANDS, CommandSpec
-from noc.application.nexus_gateway import NexusGateway, NexusScanCooldownError
+from noc.application.nexus_gateway import NexusGateway, NexusScanCooldownError, PassiveCandidate
 from noc.application.nexus_operations import NexusOperationService, NexusTargetError
 from noc.application.nexus_settings import NexusSettingError, merge_settings, validate_changes
 from noc.domain.nexus.entities import NexusOperation, NexusOperationResponse
@@ -108,6 +110,7 @@ class SettingsOut(BaseModel):
     channel_name: str | None
     response_window_seconds: float
     scan_cooldown_seconds: float
+    passive_detection_enabled: bool
     default_target_kind: str
     default_gateway_id: str | None
     catalog_collapsed_default: bool
@@ -168,6 +171,41 @@ async def scan(body: ScanIn, request: Request, current_user: RequireAuthDep) -> 
             for c in candidates
         ]
     )
+
+
+class PassiveCandidateOut(BaseModel):
+    node_id: str
+    gateway_id: str
+    sample_text: str
+    command: str | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    match_count: int
+    already_marked: bool
+
+    @classmethod
+    def from_entity(cls, c: PassiveCandidate) -> "PassiveCandidateOut":
+        return cls(**{f: getattr(c, f) for f in cls.model_fields})
+
+
+@router.get("/passive-candidates", response_model=list[PassiveCandidateOut])
+async def list_passive_candidates(request: Request, current_user: RequireAuthDep) -> list[PassiveCandidateOut]:
+    """Sugerencias de la detección PASIVA (sin enviar nada): nodos cuyo
+    tráfico ya observado tiene forma de respuesta Nexus. Complementa a
+    `POST /scan` (activo) — ambas vías comparten el mismo destino final:
+    confirmación explícita por `PUT /nodes/{id}/nexus`."""
+    service = _service(request)
+    if not await service.is_mode_enabled():
+        raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    return [PassiveCandidateOut.from_entity(c) for c in await service.list_passive_candidates()]
+
+
+@router.post("/passive-candidates/{node_id}/dismiss", status_code=204)
+async def dismiss_passive_candidate(node_id: str, request: Request, current_user: RequireAuthDep) -> None:
+    service = _service(request)
+    if not await service.is_mode_enabled():
+        raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    service.dismiss_passive_candidate(node_id)
 
 
 # ── Cola de operaciones (ADR 0027 §4) ───────────────────────────────────────

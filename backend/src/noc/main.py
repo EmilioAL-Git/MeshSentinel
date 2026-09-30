@@ -80,10 +80,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # reutiliza el mismo stream de comandos que el pipeline de administración
     app.state.gateways = GatewayService(app.state.db.session_factory, command_queue)
     app.state.event_bus.subscribe(app.state.gateways.handle_event)
-    # JenTastic-Nexus (ADR 0027): reutiliza el mismo stream de comandos; sin
-    # listener propio en el bus (relee chat_messages tras la ventana, no
-    # correlación en vivo — ver docstring de application/nexus_gateway.py)
+    # JenTastic-Nexus (ADR 0027): reutiliza el mismo stream de comandos. El
+    # escaneo activo (POST /nexus/scan) relee chat_messages tras la ventana,
+    # sin correlación en vivo; la detección PASIVA sí necesita un listener
+    # propio en el bus, igual que ingest/admin/nexus_ops — ver docstring de
+    # application/nexus_gateway.py.
     app.state.nexus_gateway = NexusGateway(app.state.db.session_factory, command_queue)
+    app.state.event_bus.subscribe(app.state.nexus_gateway.handle_event)
 
     ingest = IngestService(
         app.state.db.session_factory,

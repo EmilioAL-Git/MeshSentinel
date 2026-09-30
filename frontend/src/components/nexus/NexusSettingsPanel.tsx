@@ -211,6 +211,17 @@ export function NexusSettingsPanel() {
             />
             Avisar cuando termine una difusión
           </label>
+          <label
+            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: t.textDim, cursor: "pointer" }}
+            title="Sugiere nodos JT sin mandar nada: observa el tráfico que ya llega por el canal Nexus. Sigue siendo solo sugerencia — el marcado siempre lo confirma un operador."
+          >
+            <input
+              type="checkbox"
+              checked={settings.passive_detection_enabled}
+              onChange={(e) => patch.mutate({ passive_detection_enabled: e.target.checked })}
+            />
+            Detección pasiva de nodos JT (sin enviar nada)
+          </label>
         </div>
       </div>
 

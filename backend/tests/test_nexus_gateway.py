@@ -166,3 +166,94 @@ async def test_scan_window_is_actually_awaited(session_factory):
     before = loop.time()
     await service.scan(GW, "operador", window_seconds=0.05)
     assert loop.time() - before >= 0.05
+
+
+# ── Detección PASIVA (sin enviar nada) ───────────────────────────────────
+
+
+async def test_passive_detection_ignores_traffic_while_mode_disabled(session_factory):
+    service = NexusGateway(session_factory, FakeQueue())
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": jt_info(NODE_A, "ABMO")}))
+    assert await service.list_passive_candidates() == []
+
+
+async def test_passive_detection_suggests_node_with_nexus_shaped_text(session_factory):
+    service = NexusGateway(session_factory, FakeQueue())
+    await service.set_mode_enabled(True, "admin")
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": jt_info(NODE_A, "ABMO")}))
+
+    [candidate] = await service.list_passive_candidates()
+    assert candidate.node_id == NODE_A
+    assert candidate.gateway_id == GW
+    assert candidate.command == "INFO"
+    assert candidate.match_count == 1
+    assert candidate.already_marked is False
+
+
+async def test_passive_detection_ignores_unrelated_traffic(session_factory):
+    service = NexusGateway(session_factory, FakeQueue())
+    await service.set_mode_enabled(True, "admin")
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": "hola, buenas tardes"}))
+    assert await service.list_passive_candidates() == []
+
+
+async def test_passive_detection_accumulates_repeated_sightings(session_factory):
+    service = NexusGateway(session_factory, FakeQueue())
+    await service.set_mode_enabled(True, "admin")
+    text = jt_info(NODE_A, "ABMO")
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": text}))
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": text}))
+
+    [candidate] = await service.list_passive_candidates()
+    assert candidate.match_count == 2
+
+
+async def test_passive_detection_marks_already_marked_nodes(session_factory):
+    await seed_message(session_factory, NODE_A, "hola")
+    async with session_factory() as session:
+        await SqlNodeRepository(session).set_flag(NODE_A, "is_nexus", True)
+        await session.commit()
+
+    service = NexusGateway(session_factory, FakeQueue())
+    await service.set_mode_enabled(True, "admin")
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": jt_info(NODE_A, "ABMO")}))
+
+    [candidate] = await service.list_passive_candidates()
+    assert candidate.already_marked is True
+
+
+async def test_passive_detection_dismiss_hides_candidate_and_future_sightings(session_factory):
+    service = NexusGateway(session_factory, FakeQueue())
+    await service.set_mode_enabled(True, "admin")
+    text = jt_info(NODE_A, "ABMO")
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": text}))
+    assert len(await service.list_passive_candidates()) == 1
+
+    service.dismiss_passive_candidate(NODE_A)
+    assert await service.list_passive_candidates() == []
+
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": text}))
+    assert await service.list_passive_candidates() == []  # sigue descartado, no reaparece
+
+
+async def test_passive_detection_respects_setting_toggle(session_factory):
+    from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
+
+    service = NexusGateway(session_factory, FakeQueue())
+    await service.set_mode_enabled(True, "admin")
+    async with session_factory() as session:
+        await SqlSystemSettingsRepository(session).upsert("nexus.passive_detection_enabled", False, "admin")
+        await session.commit()
+
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": jt_info(NODE_A, "ABMO")}))
+    assert await service.list_passive_candidates() == []
+
+
+async def test_passive_detection_never_marks_a_node_by_itself(session_factory):
+    service = NexusGateway(session_factory, FakeQueue())
+    await service.set_mode_enabled(True, "admin")
+    await service.handle_event(event("message.received", {"from_node_id": NODE_A, "text": jt_info(NODE_A, "ABMO")}))
+
+    async with session_factory() as session:
+        node = await SqlNodeRepository(session).get(NODE_A)
+    assert node is None or node.is_nexus is False
