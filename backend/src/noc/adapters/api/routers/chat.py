@@ -14,6 +14,8 @@ from pydantic import BaseModel
 
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.persistence.chat_repositories import SqlChatRepository
+from noc.adapters.persistence.repositories import SqlGatewayRepository
+from noc.application.channel_names import merge_channel_names
 from noc.domain.chat.entities import ChatMessage
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -75,17 +77,35 @@ async def list_messages(
         gateway_id=gateway_id,
         q=q,
     )
-    return [ChatMessageOut.from_entity(m) for m in messages]
+    names = await _channel_names(session)
+    out = []
+    for m in messages:
+        row = ChatMessageOut.from_entity(m)
+        if row.channel_name is None and row.channel_index in names:
+            row = row.model_copy(update={"channel_name": names[row.channel_index]})
+        out.append(row)
+    return out
+
+
+async def _channel_names(session: SessionDep) -> dict[int, str]:
+    return merge_channel_names(await SqlGatewayRepository(session).list_all())
 
 
 @router.get("/channels", response_model=ChatChannelsOut)
 async def list_channels(session: SessionDep) -> ChatChannelsOut:
     """Base del selector "Todos / Canal 0 / Canal 1 / ... / Directos": solo
     canales por los que ha circulado tráfico de verdad, con el nombre real
-    si ya se conoce (fase futura) o `None` (el cliente muestra "Canal N")."""
+    (leído del nodo local de cada pasarela, fusionado por prioridad — ver
+    `application/channel_names.py`) o `None` si ninguna pasarela lo conoce
+    (el cliente muestra "Canal N")."""
     repo = SqlChatRepository(session)
     channels: list[dict[str, Any]] = await repo.list_channels()
     dm_count = await repo.dm_count()
+    names = await _channel_names(session)
     return ChatChannelsOut(
-        channels=[ChatChannelOut(**c) for c in channels], dm_count=dm_count
+        channels=[
+            ChatChannelOut(**{**c, "channel_name": names.get(c["channel_index"], c["channel_name"])})
+            for c in channels
+        ],
+        dm_count=dm_count,
     )

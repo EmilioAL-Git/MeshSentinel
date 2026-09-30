@@ -117,7 +117,7 @@ class MeshtasticStreamTransport(Transport):
     async def _on_connected(self) -> None:
         info = await asyncio.to_thread(self._local_node_info)
         self.local_node_id, self.local_short_name, self.local_long_name, \
-            self.local_hw_model, self.local_firmware_version, nodes = info
+            self.local_hw_model, self.local_firmware_version, self.channels, nodes = info
         self.status = "connected"
         self._ever_connected = True
         await self.emit_status()
@@ -136,7 +136,10 @@ class MeshtasticStreamTransport(Transport):
 
     def _local_node_info(
         self,
-    ) -> tuple[str | None, str | None, str | None, str | None, str | None, dict[str, Any]]:
+    ) -> tuple[
+        str | None, str | None, str | None, str | None, str | None,
+        list[dict[str, Any]], dict[str, Any],
+    ]:
         nodes = dict(getattr(self._iface, "nodes", None) or {})
         my_info = self._iface.getMyNodeInfo() or {}
         user = my_info.get("user") or {}
@@ -149,8 +152,26 @@ class MeshtasticStreamTransport(Transport):
             user.get("longName"),
             user.get("hwModel"),
             firmware,
+            self._local_channels(),
             nodes,
         )
+
+    def _local_channels(self) -> list[dict[str, Any]]:
+        """Canales configurados en el nodo local (índice+nombre), mismo campo
+        (`localNode.channels[i].role`/`.index`/`.settings.name`) ya leído por
+        `_find_nexus_channel` (ADR 0027) — canales DISABLED o sin nombre se
+        omiten (el backend fusiona nombres de varias pasarelas, sin ellos no
+        aportan nada)."""
+        channels = getattr(self._iface.localNode, "channels", None) or []
+        out: list[dict[str, Any]] = []
+        for ch in channels:
+            if ch.role == 0:  # DISABLED
+                continue
+            name = (ch.settings.name or "").strip()
+            if not name:
+                continue
+            out.append({"index": int(ch.index), "name": name})
+        return out
 
     def _fail_pending_admin(self, reason: str) -> None:
         """Falla las operaciones admin en vuelo sin esperar su timeout completo."""

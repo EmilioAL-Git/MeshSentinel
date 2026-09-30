@@ -231,6 +231,7 @@ class GatewayOut(BaseModel):
     local_long_name: str | None
     local_hw_model: str | None
     local_firmware_version: str | None
+    channels: list[dict]
     name: str | None
     managed: bool
     transport_type: str | None

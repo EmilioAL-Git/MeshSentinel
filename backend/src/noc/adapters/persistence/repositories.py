@@ -502,6 +502,7 @@ class SqlGatewayRepository:
         existing.local_long_name = info.local_long_name
         existing.local_hw_model = info.local_hw_model
         existing.local_firmware_version = info.local_firmware_version
+        existing.channels = info.channels
         # Historial mínimo derivado de la transición (ADR 0021 §2): no una
         # tabla de eventos, solo el último dato de cada tipo.
         if info.status == "connected" and previous_status != "connected":

@@ -88,7 +88,7 @@ export function contentKey(row: ChatRow): string {
 
 export function channelLabel(row: Pick<ChatRow, "toNodeId" | "channelIndex" | "channelName">): string {
   if (row.toNodeId) return "Directos";
-  return row.channelName ?? `Canal ${row.channelIndex}`;
+  return row.channelName ? `${row.channelIndex} - ${row.channelName}` : `Canal ${row.channelIndex}`;
 }
 
 export function initials(name: string): string {

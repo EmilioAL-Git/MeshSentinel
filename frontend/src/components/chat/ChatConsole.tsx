@@ -164,7 +164,7 @@ export function ChatConsole({
               onClick={() => setChannelTab(c.channel_index)}
               title={`${c.message_count} mensajes`}
             >
-              {c.channel_name ?? `Canal ${c.channel_index}`}
+              {c.channel_name ? `${c.channel_index} - ${c.channel_name}` : `Canal ${c.channel_index}`}
             </button>
           ))}
           {dmCount > 0 && (

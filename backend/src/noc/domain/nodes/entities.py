@@ -129,6 +129,9 @@ class GatewayInfo:
     local_long_name: str | None = None
     local_hw_model: str | None = None
     local_firmware_version: str | None = None
+    # Canales del nodo local (índice+nombre), refrescados en cada conexión;
+    # `[{"index": int, "name": str}, ...]`
+    channels: list[dict] = field(default_factory=list)
     # Configuración gestionada desde la aplicación (M5, ADR 0021)
     name: str | None = None
     managed: bool = False

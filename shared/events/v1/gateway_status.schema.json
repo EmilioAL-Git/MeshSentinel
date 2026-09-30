@@ -16,7 +16,20 @@
     "local_short_name": { "type": ["string", "null"], "description": "Nombre corto del nodo local (M5, refrescado al conectar)" },
     "local_long_name": { "type": ["string", "null"], "description": "Nombre largo del nodo local (M5, refrescado al conectar)" },
     "local_hw_model": { "type": ["string", "null"], "description": "Hardware del nodo local (M5, refrescado al conectar)" },
-    "local_firmware_version": { "type": ["string", "null"], "description": "Firmware del nodo local (M5, refrescado al conectar)" }
+    "local_firmware_version": { "type": ["string", "null"], "description": "Firmware del nodo local (M5, refrescado al conectar)" },
+    "channels": {
+      "type": ["array", "null"],
+      "description": "Canales configurados en el nodo local (índice+nombre), refrescados al conectar",
+      "items": {
+        "type": "object",
+        "required": ["index", "name"],
+        "properties": {
+          "index": { "type": "integer" },
+          "name": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
   },
   "additionalProperties": false
 }

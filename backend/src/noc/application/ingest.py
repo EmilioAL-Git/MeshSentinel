@@ -428,6 +428,7 @@ class IngestService:
                 local_long_name=p.get("local_long_name"),
                 local_hw_model=p.get("local_hw_model"),
                 local_firmware_version=p.get("local_firmware_version"),
+                channels=p.get("channels") or [],
             )
         )
         # Diario operativo (Actividad 2.0 Fase 1): narrar SOLO transiciones de

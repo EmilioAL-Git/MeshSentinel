@@ -119,6 +119,7 @@ class SimulatedTransport(Transport):
         self.local_long_name = local.long_name
         self.local_hw_model = local.hw_model
         self.local_firmware_version = "2.7.0"
+        self.channels = [{"index": 0, "name": "LongFast"}]
         await self.emit_status()
         for node in self._nodes:
             await self._announce(node)

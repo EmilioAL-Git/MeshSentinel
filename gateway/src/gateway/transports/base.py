@@ -25,6 +25,9 @@ class Transport(ABC):
         self.local_long_name: str | None = None
         self.local_hw_model: str | None = None
         self.local_firmware_version: str | None = None
+        # Canales del nodo local (índice+nombre), refrescados al conectar —
+        # base de los nombres reales de canal en el Registro/Chat.
+        self.channels: list[dict[str, Any]] | None = None
 
     async def emit_status(self, detail: str | None = None) -> None:
         await self._emit(
@@ -38,6 +41,7 @@ class Transport(ABC):
                 "local_long_name": self.local_long_name,
                 "local_hw_model": self.local_hw_model,
                 "local_firmware_version": self.local_firmware_version,
+                "channels": self.channels,
             },
         )
 
