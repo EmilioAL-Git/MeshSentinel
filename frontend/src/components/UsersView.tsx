@@ -45,7 +45,7 @@ export function UsersView() {
   const users = usersQuery.data ?? [];
 
   return (
-    <div className="legacy-chrome" style={{ padding: "0.9rem", display: "flex", flexDirection: "column", gap: "1.2rem" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.2rem" }}>
       <div>
         <h2>Nuevo usuario</h2>
         <form

@@ -439,11 +439,18 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.6rem" }}>
               <Field k="Última conexión" v={relativeTime(gateway.last_connected_at)} />
               <Field k="Última desconexión" v={relativeTime(gateway.last_disconnected_at)} />
-              <Field
-                k="Último error"
-                v={gateway.last_error ? `${gateway.last_error} (${relativeTime(gateway.last_error_at)})` : "—"}
-              />
             </div>
+            {gateway.last_error && (
+              <div style={{ minWidth: 0 }}>
+                <div className="microlabel">Último error · {relativeTime(gateway.last_error_at)}</div>
+                <div
+                  className="mono"
+                  style={{ fontSize: 12, color: "var(--crit)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                >
+                  {gateway.last_error}
+                </div>
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
               <input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} />
@@ -528,7 +535,7 @@ export function GatewaysView() {
   return (
     <div className="ws">
       <div className="toolbar">
-        <span className="microlabel">Enlaces de malla</span>
+        <span className="microlabel">Gateways de malla</span>
         <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>
           {connected}/{list.length} conectados
         </span>

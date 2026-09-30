@@ -52,8 +52,8 @@ export function NexusPanel() {
         JenTastic-Nexus
       </h2>
       <p style={{ color: t.textDim, fontSize: 12.5, maxWidth: 640, marginTop: 4 }}>
-        Control de nodos con firmware JenTastic-Nexus por comandos de texto (ADR 0027). Con el
-        modo desactivado, esta funcionalidad no existe en el resto de la aplicación: ni pestañas,
+        Control de nodos con firmware JenTastic-Nexus por comandos de texto. Con el modo
+        desactivado, esta funcionalidad no existe en el resto de la aplicación: ni pestañas,
         ni marcado de nodos, ni comandos por la malla.
       </p>
       <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 10, cursor: "pointer" }}>

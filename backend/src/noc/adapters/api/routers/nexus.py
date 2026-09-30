@@ -63,7 +63,7 @@ class CatalogEntryOut(BaseModel):
 
 
 @router.get("/catalog", response_model=list[CatalogEntryOut])
-async def get_catalog(request: Request) -> list[CatalogEntryOut]:
+async def get_catalog(request: Request, current_user: RequireAuthDep) -> list[CatalogEntryOut]:
     """Catálogo COMPLETO del módulo (`application/nexus/catalog.py`), para
     que la UI ofrezca un explorador por categorías en vez de un campo de
     texto libre — pedido explícito del usuario. Puro (sin red/BD), pero
@@ -293,6 +293,7 @@ async def create_operation(
 @router.get("/operations", response_model=list[OperationOut])
 async def list_operations(
     request: Request,
+    current_user: RequireAuthDep,
     gateway_id: str | None = None,
     status: str | None = None,
     limit: int = Query(default=200, ge=1, le=500),
@@ -304,7 +305,7 @@ async def list_operations(
 
 
 @router.get("/operations/{op_id}", response_model=OperationOut)
-async def get_operation(op_id: int, request: Request) -> OperationOut:
+async def get_operation(op_id: int, request: Request, current_user: RequireAuthDep) -> OperationOut:
     if not await _service(request).is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
     op = await _operations(request).get(op_id)
@@ -327,7 +328,9 @@ class OperationResponseOut(BaseModel):
 
 
 @router.get("/operations/{op_id}/responses", response_model=list[OperationResponseOut])
-async def list_operation_responses(op_id: int, request: Request) -> list[OperationResponseOut]:
+async def list_operation_responses(
+    op_id: int, request: Request, current_user: RequireAuthDep
+) -> list[OperationResponseOut]:
     """Respuestas individuales de una operación de destino múltiple
     (broadcast/group, ADR 0027 §11) — lista vacía para destinos dirigidos
     (local/node/mac), que nunca escriben aquí."""

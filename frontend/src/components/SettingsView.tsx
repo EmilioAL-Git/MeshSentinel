@@ -12,10 +12,22 @@ import {
   type SettingOut,
 } from "../api/client";
 import { NexusPanel } from "./nexus/NexusPanel";
+import { UsersView } from "./UsersView";
+import { LoginLogView } from "./LoginLogView";
 import { toast } from "./shell/Toast";
 import { t } from "../tokens";
+import { useAuth } from "../context/AuthContext";
+import { useUrlString } from "../hooks/useUrlState";
 
 const CATEGORY_ORDER = ["network", "alerts", "admin", "activity"];
+
+const TAB_LABEL: Record<string, string> = {
+  general: "General",
+  mantenimiento: "Configuración",
+  nexus: "Nexus",
+  users: "Usuarios",
+  "login-log": "Accesos",
+};
 
 function fmt(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
@@ -42,6 +54,7 @@ function valueLabel(setting: SettingOut, value: number): string {
  * categoría/etiqueta/unidad/mínimo, aquí solo se renderiza el control.
  */
 export function SettingsView() {
+  const authState = useAuth();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: fetchSettings });
   const settings = settingsQuery.data ?? [];
@@ -54,32 +67,78 @@ export function SettingsView() {
     items: settings.filter((s) => s.category === cat),
   })).filter((g) => g.items.length > 0);
 
+  const canManageUsers = !authState.protectedMode || authState.isAdmin;
+  const tabs = [
+    "general",
+    "mantenimiento",
+    "nexus",
+    ...(canManageUsers ? ["users"] : []),
+    ...(authState.isAuthenticated ? ["login-log"] : []),
+  ];
+
+  const [urlTab, setUrlTab] = useUrlString("settings.tab", null, { replace: true });
+  const tab = urlTab != null && tabs.includes(urlTab) ? urlTab : tabs[0];
+
   return (
-    <div className="legacy-chrome" style={{ padding: "0.9rem", display: "flex", flexDirection: "column", gap: "1.4rem" }}>
-      <p style={{ color: t.textDim, fontSize: 12.5, maxWidth: 640 }}>
-        Umbrales y temporizadores operacionales de MeshSentinel. Un ajuste sin tocar vale su valor de fábrica
-        (variables de entorno del backend); al guardar aquí, el cambio se aplica de inmediato en todo el proceso,
-        sin reiniciar.
-      </p>
-      {settingsQuery.isLoading ? (
-        <div className="empty">Cargando…</div>
-      ) : (
-        groups.map((g) => (
-          <div key={g.category}>
-            <h2>{g.label}</h2>
-            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, fontSize: 12.5 }}>
-              <tbody>
-                {g.items.map((s) => (
-                  <SettingRow key={s.key} setting={s} onChanged={invalidate} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ))
+    <div className="legacy-chrome" style={{ padding: "0.9rem", display: "flex", flexDirection: "column", gap: "1.2rem" }}>
+      <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {tabs.map((id) => (
+          <button
+            key={id}
+            onClick={() => setUrlTab(id === tabs[0] ? null : id)}
+            style={{
+              background: tab === id ? t.accentTint : t.surface2,
+              border: `1px solid ${tab === id ? t.accent : t.borderSubtle}`,
+              color: tab === id ? t.text : t.textDim,
+              fontSize: 12,
+              fontWeight: tab === id ? 650 : 500,
+              borderRadius: 5,
+              padding: "0.4rem 0.75rem",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {TAB_LABEL[id]}
+          </button>
+        ))}
+      </span>
+
+      {tab === "general" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.4rem" }}>
+          <p style={{ color: t.textDim, fontSize: 12.5, maxWidth: 640 }}>
+            Umbrales y temporizadores operacionales de MeshSentinel. Un ajuste sin tocar vale su valor de
+            fábrica (variables de entorno del backend); al guardar aquí, el cambio se aplica de inmediato en
+            todo el proceso, sin reiniciar.
+          </p>
+          {settingsQuery.isLoading ? (
+            <div className="empty">Cargando…</div>
+          ) : (
+            groups.map((g) => (
+              <div key={g.category}>
+                <h2>{g.label}</h2>
+                <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, fontSize: 12.5 }}>
+                  <tbody>
+                    {g.items.map((s) => (
+                      <SettingRow key={s.key} setting={s} onChanged={invalidate} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))
+          )}
+        </div>
       )}
-      <ConfigPortability />
-      <NodeDbMaintenance />
-      <NexusPanel />
+
+      {tab === "mantenimiento" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.4rem" }}>
+          <ConfigPortability />
+          <NodeDbMaintenance />
+        </div>
+      )}
+
+      {tab === "nexus" && <NexusPanel />}
+      {tab === "users" && canManageUsers && <UsersView />}
+      {tab === "login-log" && authState.isAuthenticated && <LoginLogView />}
     </div>
   );
 }

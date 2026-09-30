@@ -13,8 +13,6 @@ export type View =
   | "activity"
   | "gateways"
   | "stats"
-  | "users"
-  | "login-log"
   | "settings";
 
 /**
@@ -29,18 +27,16 @@ export const VIEWS: { id: View; label: string; icon: string }[] = [
   { id: "jobs", label: "Trabajos", icon: "▶" },
   { id: "alerts", label: "Alertas", icon: "⚠" },
   { id: "profiles", label: "Perfiles", icon: "⧉" },
-  { id: "config", label: "Config", icon: "⚙" },
+  { id: "config", label: "Admin Remota", icon: "⚙" },
   { id: "activity", label: "Registro", icon: "▤" },
-  { id: "gateways", label: "Enlaces", icon: "⛭" },
+  { id: "gateways", label: "Gateways", icon: "⛭" },
   { id: "stats", label: "Top", icon: "✦" },
-  // Autenticación: "Usuarios" solo visible si eres admin O si el sistema aún
-  // está en modo abierto (así siempre hay una forma de crear el primer
-  // usuario); "Accesos" solo tiene sentido estando autenticado.
-  { id: "users", label: "Usuarios", icon: "👤" },
-  { id: "login-log", label: "Accesos", icon: "🔑" },
-  // Panel "Ajustes": umbrales operacionales editables sin redeploy — mismo
-  // criterio de visibilidad que Usuarios (RequireAdminDep en el backend).
-  { id: "settings", label: "Ajustes", icon: "🎚" },
+  // "Ajustes" agrupa Usuarios/Accesos (autenticación) junto al resto de
+  // configuración — mismo criterio de visibilidad de antes (RequireAdminDep
+  // en el backend para Usuarios). Icono "@wrench": sentinel que NavRail
+  // traduce a un SVG propio (llave inglesa monocroma) — los emoji a color
+  // como 🎚 desentonan del resto de glifos, que heredan currentColor.
+  { id: "settings", label: "Ajustes", icon: "@wrench" },
 ];
 
 const VIEW_IDS = new Set<string>(VIEWS.map((v) => v.id));
@@ -52,6 +48,7 @@ const VIEW_IDS = new Set<string>(VIEWS.map((v) => v.id));
 export function resolveView(v: string): View {
   if (v === "operations" || v === "batches") return "jobs";
   if (v === "dashboard" || v === "map") return "ops";
+  if (v === "users" || v === "login-log") return "settings";
   if (VIEW_IDS.has(v)) return v as View;
   return "ops";
 }

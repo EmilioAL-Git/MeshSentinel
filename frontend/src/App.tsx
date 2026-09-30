@@ -34,10 +34,8 @@ import { Inspector } from "./components/inspector/Inspector";
 import { BatchWizard } from "./components/jobs/BatchWizard";
 import { JobsView } from "./components/jobs/JobsView";
 import { OpsCenter } from "./components/opscenter/OpsCenter";
-import { LoginLogView } from "./components/LoginLogView";
 import { ProfilesView } from "./components/ProfilesView";
 import { StatsView } from "./components/stats/StatsView";
-import { UsersView } from "./components/UsersView";
 import { SettingsView } from "./components/SettingsView";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { FocusChip, type FocusState } from "./components/shell/FocusChip";
@@ -505,8 +503,7 @@ export default function App() {
   const hasCritAlert = (alertCounts.data?.critical_active ?? 0) > 0;
   const activeOpsCount = operationCounts.data?.active ?? 0;
   const railItems = VIEWS.filter((v) => {
-    if (v.id === "users" || v.id === "settings") return !authState.protectedMode || authState.isAdmin;
-    if (v.id === "login-log") return authState.isAuthenticated;
+    if (v.id === "settings") return !authState.protectedMode || authState.isAdmin || authState.isAuthenticated;
     return true;
   }).map((v) => ({
     ...v,
@@ -755,22 +752,6 @@ export default function App() {
                     setView("jobs");
                   }}
                 />
-              </div>
-            </div>
-          )}
-
-          {view === "users" && (
-            <div className="ws">
-              <div className="ws-scroll">
-                <UsersView />
-              </div>
-            </div>
-          )}
-
-          {view === "login-log" && (
-            <div className="ws">
-              <div className="ws-scroll">
-                <LoginLogView />
               </div>
             </div>
           )}

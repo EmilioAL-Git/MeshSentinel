@@ -28,7 +28,7 @@ export function GatewaySelect({
       className="input"
       style={compact ? { fontSize: 12 } : undefined}
       value={current}
-      title="Gateway para esta operación: Automático (algoritmo M6.2) · Preferido (nodo/grupo, con reserva automática) · una pasarela concreta (forzada, sin reserva)"
+      title="Gateway para esta operación: Automático (elige la mejor disponible) · Preferido (nodo/grupo, con reserva automática) · una pasarela concreta (forzada, sin reserva)"
       onChange={(e) => {
         const v = e.target.value;
         if (v === "auto" || v === "preferred") onChange({ mode: v });

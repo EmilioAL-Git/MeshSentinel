@@ -34,7 +34,7 @@ export function LoginLogView() {
   const entries = (query.data?.pages ?? []).flat();
 
   return (
-    <div className="legacy-chrome" style={{ padding: "0.9rem" }}>
+    <div>
       <h2>Accesos ({entries.length})</h2>
       {query.isLoading ? (
         <div className="empty">Cargando…</div>
