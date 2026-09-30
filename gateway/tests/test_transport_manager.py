@@ -34,20 +34,29 @@ def test_connection_success() -> None:
     asyncio.run(_test_connection_success())
 
 
-async def _test_connect_then_disconnect_clears_transport() -> None:
+async def _test_connect_then_disconnect_leaves_live_idle_transport() -> None:
+    """Antes dejaba manager.transport en None — el bucle de latido de
+    main.py dejaba de emitir para siempre (visto repetidamente con la
+    piscina M6.3). Ahora queda un IdleTransport vivo: sigue latiendo, y
+    "transport" pasa a "idle" de verdad para que se ofrezca de nuevo como
+    repuesto disponible sin reiniciar el proceso."""
     manager, events = make_manager()
     await manager.connect("simulated", {})
     await asyncio.sleep(0.05)
     assert manager.transport is not None
 
     await manager.disconnect()
-    assert manager.transport is None
+    assert manager.transport is not None
+    assert manager.transport.name == "idle"
     last_status = [p for et, p in events if et == "gateway.status"][-1]
     assert last_status["status"] == "unassigned"
+    assert last_status["transport"] == "idle"
+    assert last_status["detail"] == "disconnected by user"
+    await manager.teardown()
 
 
-def test_connect_then_disconnect_clears_transport() -> None:
-    asyncio.run(_test_connect_then_disconnect_clears_transport())
+def test_connect_then_disconnect_leaves_live_idle_transport() -> None:
+    asyncio.run(_test_connect_then_disconnect_leaves_live_idle_transport())
 
 
 async def _test_reconnect_tears_down_previous_transport() -> None:

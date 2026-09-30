@@ -147,21 +147,17 @@ class TransportManager:
         }
 
     async def disconnect(self) -> None:
-        transport_name = self._transport.name if self._transport is not None else self._base_settings.transport
-        await self.teardown()
-        await self._publish(
-            "gateway.status",
-            {
-                "status": "unassigned",
-                "transport": transport_name,
-                "local_node_id": None,
-                "detail": "disconnected by user",
-                "local_short_name": None,
-                "local_long_name": None,
-                "local_hw_model": None,
-                "local_firmware_version": None,
-            },
-        )
+        """Deja el proceso en un IdleTransport real (M6.3), no sin ninguno:
+        con `self._transport = None` (comportamiento anterior) el bucle de
+        latido de main.py deja de emitir para siempre — la fila se congela
+        con el último transporte/estado y nunca vuelve a aparecer como
+        repuesto disponible hasta reiniciar el proceso a mano. Con un
+        IdleTransport vivo, el latido sigue, "transport" pasa a "idle" de
+        verdad, y la pasarela reaparece sola como candidata."""
+        idle_settings = self._base_settings.model_copy(update={"transport": "idle"})
+        await self._start(idle_settings)
+        if self._transport is not None:
+            await self._transport.emit_status(detail="disconnected by user")
 
     async def discover(self, request_id: str | None = None) -> dict[str, Any]:
         from gateway.transports.usb import MeshtasticUsbTransport
