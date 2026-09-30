@@ -59,11 +59,15 @@ detalladas. Cambios de comportamiento reales, no solo de catalogación:
   `MCUINFO`, `WIFIOTA`, `VERIFYSTATS`, `CRSTATS`, `RSSI`/`SHORTRSSI`/
   `RSSITEL`.
 - **Marcador 🟢/🔴**: confirmado por el usuario tras verlo en campo — semáforo
-  de si la firma del comando era válida (`REQ_SIG`). Aparece delante de
-  `JT ...:` en más respuestas de las que se había visto (VERSION Y también
-  INFO, confirmado con captura real) — bug real encontrado y corregido: el
-  parser de INFO no lo esperaba y rechazaba la respuesta; generalizado a
-  los 6 parsers que comparten `_first_line()`.
+  de validez de la firma criptográfica nueva de Meshtastic 2.8 (`REQ_SIG`),
+  solo presente en respuestas de firmware ≥2.8 (ausente en 2.7.x). Aparece
+  delante de `JT ...:` en más respuestas de las que se había visto (VERSION
+  Y también INFO, confirmado con captura real) — bug real encontrado y
+  corregido: el parser de INFO no lo esperaba y rechazaba la respuesta;
+  generalizado a los 6 parsers que comparten `_first_line()`. El parser
+  nunca condiciona nada a la versión: solo comprueba si el token está
+  presente o no, así que firmware <2.8 (sin marcador) sigue funcionando
+  igual.
 - **Pendiente de re-verificar con captura**: `NODES` — el manual describe un
   resumen corto de una línea ("JT NODES: X total (Y active)"), pero la
   captura contra firmware 2.7.268 dio un volcado paginado bajo cabecera
