@@ -1,7 +1,6 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { activeGatewayCount, type NodeSummaryOut } from "../../api/client";
 import { NexusCatIcon } from "../nexus/NexusCatIcon";
-import { useNexusMode } from "../nexus/useNexusMode";
 import { relTime } from "../../time";
 import { CATEGORY_DEFS, classifyNode } from "./classify";
 
@@ -237,7 +236,7 @@ export function RosterHead({ visibleColumns }: { visibleColumns: FleetColumnId[]
   );
 }
 
-export function FleetRow({
+function FleetRowImpl({
   summary,
   selected,
   focusId,
@@ -250,6 +249,7 @@ export function FleetRow({
   visibleColumns,
   gatewayNodeIds,
   lowBatteryThreshold = 20,
+  nexusModeOn,
 }: {
   summary: NodeSummaryOut;
   selected: string | null;
@@ -266,6 +266,11 @@ export function FleetRow({
   gatewayNodeIds: Set<string>;
   /** Umbral de batería baja (thresholds del backend, no hardcodeado). */
   lowBatteryThreshold?: number;
+  /** Insignia JenTastic-Nexus (ADR 0027, §8): SIEMPRE por prop, nunca
+   * `useNexusMode()` aquí dentro — con cientos/miles de filas eso eran
+   * otras tantas suscripciones idénticas a la misma query (hardening de
+   * rendimiento de Flota). Se resuelve una sola vez en el padre. */
+  nexusModeOn: boolean;
 }) {
   const { node } = summary;
   // Actividad como INDICADOR (hardening): el roster ya no se ordena por
@@ -282,9 +287,6 @@ export function FleetRow({
     .filter(Boolean)
     .join(" ");
   const ctx: ColumnCtx = { gatewayNodeIds, lowBatteryThreshold };
-  // Insignia JenTastic-Nexus (ADR 0027, §8 del encargo): solo visible con el
-  // flag global ON Y el nodo marcado — ninguno de los dos basta por sí solo.
-  const nexusModeOn = useNexusMode();
   return (
     <div
       key={node.node_id}
@@ -350,3 +352,8 @@ export function FleetRow({
     </div>
   );
 }
+
+/** Memoizada: con cientos/miles de filas, re-renderizar TODAS en cada
+ * refetch/render del padre (aunque ni sus datos ni su selección cambien)
+ * deja de ser gratis — ver FleetRowImpl para el resto del hardening. */
+export const FleetRow = memo(FleetRowImpl);

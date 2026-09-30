@@ -34,6 +34,11 @@ class NexusOperation:
     response_text: str | None = None
     response_kind: str | None = None  # "structured"|"raw"|"unsupported" (parsers.py)
     response_data: dict | None = None
+    # Lote (ADR 0027 §14): agrupación informal de operaciones -node
+    # individuales a varios nodos seleccionados, espaciadas por el
+    # scheduler — None fuera de un lote (el resto del módulo no cambia).
+    batch_key: str | None = None
+    batch_interval_seconds: float | None = None
 
 
 @dataclass(slots=True)

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",
+    "@tanstack/react-virtual": "^3.14.13",
     "echarts": "^6.1.0",
     "leaflet": "^1.9.4",
     "react": "^18.3.1",

@@ -24,6 +24,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -170,6 +171,59 @@ class NexusOperationService:
         logger.info("nexus.op created id=%s gateway=%s text=%r", created.id, gateway_id, cmd.text)
         return created
 
+    MAX_BATCH_NODES = 300
+
+    async def create_batch(
+        self,
+        gateway_id: str,
+        command_name: str,
+        args: list[str],
+        node_short_names: list[str],
+        interval_seconds: float,
+        created_by: str | None,
+    ) -> list[NexusOperation]:
+        """Lote (ADR 0027 §14): UNA operación `-node <shortname>` por cada
+        nodo seleccionado en Flota, compartiendo `batch_key` — el scheduler
+        (`_dispatch`) las espacia entre sí por `interval_seconds`, en vez de
+        mandarlas todas en el mismo tick (a diferencia de difusión, que ya
+        llega a todos de una)."""
+        names = [n.strip() for n in node_short_names if n.strip()]
+        if not names:
+            raise NexusTargetError("selecciona al menos un nodo")
+        if len(names) > self.MAX_BATCH_NODES:
+            raise NexusTargetError(f"lote demasiado grande (máx. {self.MAX_BATCH_NODES} nodos)")
+        if interval_seconds < 1:
+            raise NexusTargetError("el intervalo mínimo entre envíos es 1 s")
+        settings = await self._load_settings()
+        batch_key = uuid4().hex[:16]
+        pending_ops: list[NexusOperation] = []
+        for name in names:
+            cmd = build_command(command_name, tuple(args), target=ShortName(name), prefix=settings["command_prefix"])
+            pending_ops.append(
+                NexusOperation(
+                    gateway_id=gateway_id,
+                    target_kind="node",
+                    target_value=name,
+                    command_name=cmd.spec.name,
+                    args=list(cmd.args),
+                    text=cmd.text,
+                    destructive=cmd.destructive,
+                    requires_save=cmd.requires_save,
+                    busy_seconds=cmd.busy_seconds,
+                    created_by=created_by,
+                    batch_key=batch_key,
+                    batch_interval_seconds=interval_seconds,
+                )
+            )
+        async with self._session_factory() as session, session.begin():
+            repo = SqlNexusOperationRepository(session)
+            created = [await repo.create(op) for op in pending_ops]
+        logger.info(
+            "nexus.op batch created key=%s gateway=%s n=%d command=%s",
+            batch_key, gateway_id, len(created), command_name,
+        )
+        return created
+
     async def get(self, op_id: int) -> NexusOperation | None:
         async with self._session_factory() as session:
             return await SqlNexusOperationRepository(session).get(op_id)
@@ -230,6 +284,10 @@ class NexusOperationService:
                 cmd = build_command(op.command_name, tuple(op.args), target=target)
                 if state.pacer.next_allowed_at(cmd, now) > now:
                     continue  # su turno de espaciado aún no ha llegado
+                if op.batch_key and op.batch_interval_seconds and await self._batch_not_ready(
+                    repo, op.batch_key, op.batch_interval_seconds, now
+                ):
+                    continue  # aún no le toca dentro de su lote (ADR 0027 §14)
                 envelope = make_command_envelope(
                     "command.send_text",
                     {"text": op.text, "channel_name": settings["channel_name"]},
@@ -240,6 +298,23 @@ class NexusOperationService:
                 state.correlator.register(str(op.id), target, now, busy_seconds=op.busy_seconds)
                 await repo.update_fields(op.id, {"status": "sent", "sent_at": now})
                 logger.info("nexus.op sent id=%s gateway=%s text=%r", op.id, op.gateway_id, op.text)
+
+    @staticmethod
+    async def _batch_not_ready(
+        repo: SqlNexusOperationRepository, batch_key: str, interval_seconds: float, now: datetime
+    ) -> bool:
+        """Gating de espaciado DENTRO de un lote (ADR 0027 §14) —
+        independiente del `CommandPacer`, que no espacia entre destinos
+        distintos. `list_pending()` ya ordena por `created_at, id`, así que
+        el primer miembro sin hermanos enviados pasa siempre; los
+        siguientes esperan a que pase `interval_seconds` desde el último
+        envío del MISMO lote."""
+        latest = await repo.latest_sent_in_batch(batch_key)
+        if latest is None:
+            return False
+        if latest.tzinfo is None:
+            latest = latest.replace(tzinfo=timezone.utc)
+        return now < latest + timedelta(seconds=interval_seconds)
 
     async def _expire_stuck(self, now: datetime) -> None:
         settings = await self._load_settings()
@@ -337,4 +412,9 @@ class NexusOperationService:
                     "response_data": parsed.data or None,
                 },
             )
+        # Destino dirigido resuelto: fuera del pool de candidatos, para que
+        # una respuesta POSTERIOR de otro comando abierto (p.ej. otro
+        # miembro del mismo lote) no se atribuya a este por error de "más
+        # reciente" (ver ResponseCorrelator.discard).
+        state.correlator.discard(op_id)
         logger.info("nexus.op confirmed id=%s gateway=%s", op_id, gateway_id)

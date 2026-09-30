@@ -133,6 +133,7 @@ export interface NodeFilterParams {
   gateway_id?: string;
   include_ignored?: boolean;
   only_ignored?: boolean;
+  nexus?: boolean;
 }
 
 export type GatewayStatus = "unassigned" | "connecting" | "reconnecting" | "connected" | "disconnected" | "error";
@@ -1264,6 +1265,7 @@ export const scanForNexusNodes = (gatewayId: string, windowSeconds = 30) =>
 // nexus_gateway.py). Misma regla que el escaneo activo: solo sugiere.
 export interface NexusPassiveCandidateOut {
   node_id: string;
+  short_name: string | null;
   gateway_id: string;
   sample_text: string;
   command: string | null;
@@ -1326,6 +1328,20 @@ export const previewNexusOperation = (body: NexusOperationIn) =>
   send<NexusOperationPreviewOut>("POST", "/nexus/operations/preview", body);
 export const createNexusOperation = (body: NexusOperationIn) =>
   send<NexusOperationOut>("POST", "/nexus/operations", body);
+
+/** Lote (ADR 0027 §14): una operación `-node <shortname>` por cada nombre
+ * en `target_values`, espaciadas entre sí por `interval_seconds` — para
+ * "toda la flota" se usa `createNexusOperation` con target_kind=broadcast
+ * (ya llega a todos de una), esto es solo para SUBCONJUNTOS seleccionados. */
+export interface NexusOperationBatchIn {
+  gateway_id: string;
+  command: string;
+  args?: string[];
+  target_values: string[];
+  interval_seconds?: number;
+}
+export const createNexusOperationBatch = (body: NexusOperationBatchIn) =>
+  send<NexusOperationOut[]>("POST", "/nexus/operations/batch", body);
 export const fetchNexusOperations = (gatewayId?: string, status?: NexusOperationStatus, limit = 100) => {
   const params = new URLSearchParams();
   if (gatewayId) params.set("gateway_id", gatewayId);
@@ -1357,6 +1373,7 @@ export interface NexusCatalogEntryOut {
   destructive: boolean;
   busy_seconds: number;
   broadcast_forbidden: boolean;
+  description: string;
 }
 export const fetchNexusCatalog = () => get<NexusCatalogEntryOut[]>("/nexus/catalog");
 

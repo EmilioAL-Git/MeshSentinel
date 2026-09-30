@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createNexusOperation,
+  displayName,
   fetchGateways,
   fetchNexusOperationResponses,
   fetchNexusOperations,
   fetchNexusSettings,
+  fetchNodes,
   previewNexusOperation,
   type NexusOperationOut,
   type NexusOperationPreviewOut,
@@ -14,7 +16,9 @@ import {
 } from "../../api/client";
 import { toast } from "../shell/Toast";
 import { t } from "../../tokens";
+import { NexusArgsField } from "./NexusArgsField";
 import { NexusCatalogBrowser } from "./NexusCatalogBrowser";
+import { NexusCommandHint } from "./NexusCommandHint";
 
 // Vocabulario de operador (M4.1, mismo criterio): nunca el vocabulario del
 // pipeline de administración remota (modelo distinto — ver ADR 0027 §4).
@@ -61,12 +65,28 @@ export function NexusOperationsPanel() {
   const gateways = (gatewaysQuery.data ?? []).filter((g) => g.status === "connected");
   const settingsQuery = useQuery({ queryKey: ["nexus-settings"], queryFn: fetchNexusSettings });
   const settings = settingsQuery.data;
+  // Confirmación reforzada de difusión destructiva (ADR 0027): en vez de
+  // teclear la palabra "BROADCAST", el operador teclea el número REAL de
+  // nodos marcados como Nexus ahora mismo — obliga a comprobar el alcance
+  // real antes de confirmar, no solo a copiar una palabra fija. Es un
+  // recuento informativo (nodos marcados en MeshSentinel), no una garantía
+  // de cuántos nodos recibirán de verdad el broadcast del canal.
+  const nexusCountQuery = useQuery({
+    queryKey: ["nodes", "nexus-count"],
+    queryFn: () => fetchNodes({ nexus: true }),
+  });
+  const nexusNodeCount = nexusCountQuery.data?.length;
+
+  // Sugerencias para los argumentos con forma de id de nodo (FAV/IGNORE/ZH/
+  // WATCH, ver NexusArgsField) — toda la flota, no solo la marcada Nexus.
+  const allNodesQuery = useQuery({ queryKey: ["nodes", "all-for-nexus-args"], queryFn: () => fetchNodes() });
+  const nodeOptions = (allNodesQuery.data ?? []).map((s) => ({ node_id: s.node.node_id, label: displayName(s.node) }));
 
   const [gatewayId, setGatewayId] = useState("");
   const [targetKind, setTargetKind] = useState<NexusTargetKind>("broadcast");
   const [targetValue, setTargetValue] = useState("");
   const [command, setCommand] = useState("");
-  const [argsInput, setArgsInput] = useState("");
+  const [args, setArgs] = useState<string[]>([]);
   const [preview, setPreview] = useState<NexusOperationPreviewOut | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [appliedDefaults, setAppliedDefaults] = useState(false);
@@ -80,7 +100,6 @@ export function NexusOperationsPanel() {
   }
 
   const kindDef = TARGET_KINDS.find((k) => k.value === targetKind)!;
-  const args = argsInput.trim() ? argsInput.trim().split(/\s+/) : [];
   const body = {
     gateway_id: gatewayId,
     command: command.trim().toUpperCase(),
@@ -110,7 +129,7 @@ export function NexusOperationsPanel() {
       toast("Operación encolada");
       setPreview(null);
       setConfirmText("");
-      setArgsInput("");
+      setArgs([]);
       queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
     },
     onError: (err) =>
@@ -119,9 +138,18 @@ export function NexusOperationsPanel() {
       }),
   });
 
-  const confirmPhrase = kindDef.needsValue ? targetValue.trim() : "BROADCAST";
+  const isBroadcast = targetKind === "broadcast";
+  // En difusión, el recuento tiene que haber cargado ya — nunca se deja
+  // confirmar "a ciegas" mientras la cifra real está en duda.
+  const confirmPhrase = kindDef.needsValue
+    ? targetValue.trim()
+    : isBroadcast
+      ? (nexusNodeCount != null ? String(nexusNodeCount) : null)
+      : "BROADCAST";
   const needsTypedConfirm = preview?.destructive ?? false;
-  const canQueue = preview != null && (!needsTypedConfirm || confirmText.trim() === confirmPhrase);
+  const canQueue =
+    preview != null &&
+    (!needsTypedConfirm || (confirmPhrase != null && confirmText.trim() === confirmPhrase));
 
   return (
     <div style={{ marginTop: "1.4rem" }}>
@@ -167,14 +195,13 @@ export function NexusOperationsPanel() {
           style={{ width: 140 }}
           placeholder="COMANDO"
           value={command}
-          onChange={(e) => { setCommand(e.target.value); setPreview(null); }}
+          onChange={(e) => { setCommand(e.target.value); setArgs([]); setPreview(null); }}
         />
-        <input
-          className="input mono"
-          style={{ width: 200 }}
-          placeholder="argumentos (espacio)"
-          value={argsInput}
-          onChange={(e) => { setArgsInput(e.target.value); setPreview(null); }}
+        <NexusArgsField
+          command={command}
+          args={args}
+          onChange={(next) => { setArgs(next); setPreview(null); }}
+          nodeOptions={nodeOptions}
         />
         <button
           className="btn"
@@ -184,8 +211,9 @@ export function NexusOperationsPanel() {
           Previsualizar
         </button>
       </div>
+      <NexusCommandHint command={command} />
       <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-        <NexusCatalogBrowser onSelect={(name) => { setCommand(name); setPreview(null); }} />
+        <NexusCatalogBrowser onSelect={(name) => { setCommand(name); setArgs([]); setPreview(null); }} />
         {settings && settings.pinned_nodes.length > 0 && kindDef.needsValue && targetKind === "node" && (
           <>
             <span style={{ color: t.textFaint, fontSize: 10.5 }}>fijados:</span>
@@ -210,7 +238,11 @@ export function NexusOperationsPanel() {
                 className="chip"
                 style={{ cursor: "pointer" }}
                 title={`${tpl.command} ${tpl.args}`}
-                onClick={() => { setCommand(tpl.command); setArgsInput(tpl.args); setPreview(null); }}
+                onClick={() => {
+                  setCommand(tpl.command);
+                  setArgs(tpl.args.trim() ? tpl.args.trim().split(/\s+/) : []);
+                  setPreview(null);
+                }}
               >
                 {tpl.label}
               </button>
@@ -229,7 +261,29 @@ export function NexusOperationsPanel() {
               <span className="chip">deja el nodo ocupado {preview.busy_seconds}s</span>
             )}
           </div>
-          {needsTypedConfirm && (
+          {needsTypedConfirm && isBroadcast && (
+            <div style={{ marginTop: 8 }}>
+              <label className="microlabel">
+                {confirmPhrase == null ? (
+                  "Comando destructivo en difusión — comprobando cuántos nodos Nexus hay marcados…"
+                ) : (
+                  <>
+                    Comando destructivo en difusión — afecta a{" "}
+                    <strong className="mono">{confirmPhrase}</strong> nodo(s) marcado(s) como Nexus.
+                    Escribe <strong className="mono">{confirmPhrase}</strong> para confirmar.
+                  </>
+                )}
+              </label>
+              <input
+                className="input"
+                style={{ display: "block", marginTop: 4, width: 220 }}
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                disabled={confirmPhrase == null}
+              />
+            </div>
+          )}
+          {needsTypedConfirm && !isBroadcast && (
             <div style={{ marginTop: 8 }}>
               <label className="microlabel">
                 Comando destructivo — escribe <strong className="mono">{confirmPhrase}</strong> para confirmar

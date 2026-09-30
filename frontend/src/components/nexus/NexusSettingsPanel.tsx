@@ -276,9 +276,14 @@ function HiddenCommandsEditor({ hidden, onChange }: { hidden: string[]; onChange
           {catalog.isLoading && <div style={{ color: t.textFaint, fontSize: 11.5 }}>Cargando…</div>}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "2px 8px" }}>
             {filtered.map((c) => (
-              <label key={c.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontFamily: t.fontMono, cursor: "pointer" }}>
+              <label
+                key={c.name}
+                title={c.description || undefined}
+                style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontFamily: t.fontMono, cursor: "pointer" }}
+              >
                 <input type="checkbox" checked={hiddenSet.has(c.name)} onChange={() => toggle(c.name)} />
                 {c.name}
+                {c.description && <span style={{ color: t.textFaint, fontSize: 10 }}>ⓘ</span>}
               </label>
             ))}
           </div>

@@ -383,3 +383,70 @@ async def test_node_target_never_writes_to_responses_table(session_factory):
     assert confirmed.id == op.id
     assert confirmed.response_text == "JT VERSION: 2.8.005.a"
     assert await service.list_responses(op.id) == []  # type: ignore[arg-type]
+
+
+# ── Lote (ADR 0027 §14): -node por cada seleccionado, espaciados ──────────
+
+
+async def test_create_batch_builds_one_node_operation_per_name(session_factory):
+    service = NexusOperationService(session_factory, FakeQueue())
+    ops = await service.create_batch(GW, "STATS", [], ["N018", "N019", "N020"], 5.0, "operador")
+    assert [o.target_kind for o in ops] == ["node", "node", "node"]
+    assert [o.target_value for o in ops] == ["N018", "N019", "N020"]
+    assert [o.text for o in ops] == ["/nexus-node N018 STATS", "/nexus-node N019 STATS", "/nexus-node N020 STATS"]
+    assert len({o.batch_key for o in ops}) == 1  # mismo lote
+
+
+async def test_create_batch_rejects_empty_selection(session_factory):
+    service = NexusOperationService(session_factory, FakeQueue())
+    with pytest.raises(NexusTargetError):
+        await service.create_batch(GW, "STATS", [], [], 5.0, "operador")
+
+
+async def test_create_batch_rejects_interval_below_one_second(session_factory):
+    service = NexusOperationService(session_factory, FakeQueue())
+    with pytest.raises(NexusTargetError):
+        await service.create_batch(GW, "STATS", [], ["N018"], 0.5, "operador")
+
+
+async def test_dispatch_spaces_batch_members_even_across_different_targets(session_factory):
+    """A diferencia de dos envíos dirigidos sueltos a destinos distintos
+    (que no se esperan entre sí, ver test_dispatch_directed_to_different_
+    targets_never_wait_on_each_other), los miembros de un MISMO lote sí se
+    espacian aunque cada uno vaya a un nodo distinto — es una cortesía de
+    producto (ADR 0027 §14), no una restricción del firmware."""
+    queue = FakeQueue()
+    service = NexusOperationService(session_factory, queue)
+    await service.create_batch(GW, "STATS", [], ["N018", "N019", "N020"], 5.0, "operador")
+
+    await service._dispatch(T0)
+    assert len(queue.sent) == 1  # solo el primero: sin hermanos enviados aún
+
+    await service._dispatch(at(2))
+    assert len(queue.sent) == 1  # dentro de los 5s del lote
+
+    await service._dispatch(at(5))
+    assert len(queue.sent) == 2  # le toca al segundo
+
+    await service._dispatch(at(7))
+    assert len(queue.sent) == 2  # el tercero espera su propio intervalo
+
+    await service._dispatch(at(10))
+    assert len(queue.sent) == 3
+
+
+async def test_batch_operations_correlate_responses_independently(session_factory):
+    """Cada operación del lote sigue siendo terminal-e-individual (destino
+    dirigido, campo único response_*) — el lote solo afecta al ESPACIADO
+    del envío, no a la correlación de respuestas."""
+    queue = FakeQueue()
+    service = NexusOperationService(session_factory, queue)
+    ops = await service.create_batch(GW, "VERSION", [], ["N018", "N019"], 5.0, "operador")
+    await service._dispatch(T0)
+    await service._dispatch(at(5))
+
+    await service.handle_event(message_event("!aaaaaaaa", "JT VERSION: 2.8.005.a", GW), now=at(6))
+    await service.handle_event(message_event("!bbbbbbbb", "JT VERSION: 2.7.268.b", GW), now=at(7))
+
+    confirmed = {o.id: o for o in await service.list_operations(GW, status="confirmed")}
+    assert set(confirmed) == {ops[0].id, ops[1].id}

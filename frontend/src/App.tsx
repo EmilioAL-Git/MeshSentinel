@@ -90,6 +90,7 @@ export default function App() {
     isDefault: (v) => v === undefined,
   });
   const [filtersFavorite, setFiltersFavorite] = useUrlFlag("nodes.favorite", { replace: true });
+  const [filtersNexus, setFiltersNexus] = useUrlFlag("nodes.nexus", { replace: true });
   const [filtersHwModel, setFiltersHwModel] = useUrlString("nodes.hw", null, { replace: true });
   const [filtersTag, setFiltersTag] = useUrlString("nodes.tag", null, { replace: true });
   const [filtersGroupId, setFiltersGroupId] = useUrlNumber("nodes.group", null, { replace: true });
@@ -101,6 +102,7 @@ export default function App() {
       q: filtersQ ?? undefined,
       online: filtersOnline,
       favorite: filtersFavorite || undefined,
+      nexus: filtersNexus || undefined,
       hw_model: filtersHwModel ?? undefined,
       tag: filtersTag ?? undefined,
       group_id: filtersGroupId ?? undefined,
@@ -112,6 +114,7 @@ export default function App() {
       filtersQ,
       filtersOnline,
       filtersFavorite,
+      filtersNexus,
       filtersHwModel,
       filtersTag,
       filtersGroupId,
@@ -125,6 +128,7 @@ export default function App() {
       setFiltersQ(next.q ?? null);
       setFiltersOnline(next.online);
       setFiltersFavorite(next.favorite ?? false);
+      setFiltersNexus(next.nexus ?? false);
       setFiltersHwModel(next.hw_model ?? null);
       setFiltersTag(next.tag ?? null);
       setFiltersGroupId(next.group_id ?? null);
@@ -136,6 +140,7 @@ export default function App() {
       setFiltersQ,
       setFiltersOnline,
       setFiltersFavorite,
+      setFiltersNexus,
       setFiltersHwModel,
       setFiltersTag,
       setFiltersGroupId,
@@ -416,6 +421,17 @@ export default function App() {
     mutationFn: ({ id, value }: { id: string; value: boolean }) => setNodeIgnored(id, value),
     onSettled: invalidateNodeData,
   });
+  // useCallback (hardening de Flota): FleetRow está memoizado con
+  // React.memo — un handler nuevo en cada render de App invalidaría ese
+  // memo en TODAS las filas del roster a la vez.
+  const handleToggleFavorite = useCallback(
+    (id: string, value: boolean) => toggleFavorite.mutate({ id, value }),
+    [toggleFavorite.mutate],
+  );
+  const handleToggleIgnored = useCallback(
+    (id: string, value: boolean) => toggleIgnored.mutate({ id, value }),
+    [toggleIgnored.mutate],
+  );
   const onNodesDeleted = useCallback(
     (ids: string[]) => {
       invalidateNodeData();
@@ -673,8 +689,8 @@ export default function App() {
               selected={selected}
               focusId={focus?.id ?? null}
               onSelect={setSelected}
-              onToggleFavorite={(id, value) => toggleFavorite.mutate({ id, value })}
-              onToggleIgnored={(id, value) => toggleIgnored.mutate({ id, value })}
+              onToggleFavorite={handleToggleFavorite}
+              onToggleIgnored={handleToggleIgnored}
               checkedIds={checkedIds}
               onCheckedChange={setCheckedIds}
               onCreateBatch={() => setWizardOpen(true)}

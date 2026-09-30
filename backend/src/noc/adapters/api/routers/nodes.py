@@ -66,6 +66,7 @@ async def list_nodes(
     gateway_id: str | None = None,
     include_ignored: bool = False,
     only_ignored: bool = False,
+    nexus: bool | None = None,
 ) -> list[NodeSummaryOut]:
     threshold = get_settings().node_offline_after_seconds
     summaries = await SqlNodeRepository(session).list_summaries()
@@ -86,6 +87,7 @@ async def list_nodes(
             gateway_id=gateway_id,
             include_ignored=include_ignored,
             only_ignored=only_ignored,
+            nexus=nexus,
         ),
         threshold,
     )

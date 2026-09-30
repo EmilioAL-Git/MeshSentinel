@@ -13,6 +13,7 @@ import {
 import { toast } from "../shell/Toast";
 import { t } from "../../tokens";
 import { NexusCatalogBrowser } from "./NexusCatalogBrowser";
+import { NexusCommandHint } from "./NexusCommandHint";
 import { STATUS_COLORS, STATUS_LABELS } from "./NexusOperationsPanel";
 
 const btn: CSSProperties = {
@@ -177,6 +178,7 @@ export function NodeNexusPanel({
           Previsualizar
         </button>
       </div>
+      <NexusCommandHint command={command} />
       <div style={{ marginTop: 6 }}>
         <NexusCatalogBrowser onSelect={(name) => { setCommand(name); setPreview(null); }} />
       </div>

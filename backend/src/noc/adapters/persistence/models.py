@@ -541,6 +541,11 @@ class NexusOperationModel(Base):
     response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     response_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Lote (ADR 0027 §14): operaciones -node individuales a varios nodos
+    # seleccionados, espaciadas — agrupación informal por clave compartida,
+    # sin tabla propia (a diferencia de admin_batches, ADR 0016).
+    batch_key: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    batch_interval_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class NexusOperationResponseModel(Base):

@@ -83,6 +83,7 @@ class PassiveCandidate:
     last_seen_at: datetime
     match_count: int
     already_marked: bool
+    short_name: str | None = None  # resuelto contra nodes en list_passive_candidates, nunca al registrar
 
 
 # Bolsa acotada, en memoria del proceso (mismo criterio que `_last_scan_at`
@@ -270,8 +271,10 @@ class NexusGateway:
         async with self._session_factory() as session:
             existing = await SqlNodeRepository(session).list_for_ids(list(self._passive))
         marked_ids = {n.node_id for n in existing if n.is_nexus}
+        names = {n.node_id: (n.short_name or n.long_name) for n in existing}
         candidates = [
-            replace(c, already_marked=c.node_id in marked_ids) for c in self._passive.values()
+            replace(c, already_marked=c.node_id in marked_ids, short_name=names.get(c.node_id))
+            for c in self._passive.values()
         ]
         candidates.sort(key=lambda c: c.last_seen_at, reverse=True)
         return candidates

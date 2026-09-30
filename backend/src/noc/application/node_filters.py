@@ -22,6 +22,7 @@ class NodeFilters:
     gateway_id: str | None = None
     include_ignored: bool = False
     only_ignored: bool = False
+    nexus: bool | None = None
 
     @property
     def is_empty(self) -> bool:
@@ -62,6 +63,8 @@ def apply_filters(
             if battery is None or battery >= filters.battery_below:
                 continue
         if filters.gateway_id is not None and node.gateway_id != filters.gateway_id:
+            continue
+        if filters.nexus is not None and node.is_nexus != filters.nexus:
             continue
         result.append(s)
     return result

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SessionDep
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.nexus.builder import NexusCommandError
-from noc.application.nexus.catalog import COMMANDS, CommandSpec
+from noc.application.nexus.catalog import COMMANDS, CommandSpec, describe
 from noc.application.nexus_gateway import NexusGateway, NexusScanCooldownError, PassiveCandidate
 from noc.application.nexus_operations import NexusOperationService, NexusTargetError
 from noc.application.nexus_settings import NexusSettingError, merge_settings, validate_changes
@@ -52,6 +52,7 @@ class CatalogEntryOut(BaseModel):
     destructive: bool
     busy_seconds: float
     broadcast_forbidden: bool
+    description: str  # "" si no hay entrada documentada (nunca inventado)
 
     @classmethod
     def from_spec(cls, spec: CommandSpec) -> "CatalogEntryOut":
@@ -59,6 +60,7 @@ class CatalogEntryOut(BaseModel):
             name=spec.name, category=spec.category.value, aliases=list(spec.aliases),
             mutation=spec.mutation.value, destructive=spec.destructive,
             busy_seconds=spec.busy_seconds, broadcast_forbidden=spec.broadcast_forbidden,
+            description=describe(spec.name),
         )
 
 
@@ -175,6 +177,7 @@ async def scan(body: ScanIn, request: Request, current_user: RequireAuthDep) -> 
 
 class PassiveCandidateOut(BaseModel):
     node_id: str
+    short_name: str | None
     gateway_id: str
     sample_text: str
     command: str | None
@@ -288,6 +291,36 @@ async def create_operation(
     except (NexusCommandError, NexusTargetError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return OperationOut.from_entity(op)
+
+
+class BatchOperationIn(BaseModel):
+    gateway_id: str
+    command: str
+    args: list[str] = []
+    # Nombres cortos (-node), uno por nodo seleccionado en Flota — ADR 0027 §14.
+    target_values: list[str]
+    interval_seconds: float = 5.0
+
+
+@router.post("/operations/batch", response_model=list[OperationOut])
+async def create_operation_batch(
+    body: BatchOperationIn, request: Request, current_user: RequireAuthDep
+) -> list[OperationOut]:
+    """Lote: una operación `-node <shortname>` por cada nodo seleccionado en
+    Flota, espaciadas entre sí por `interval_seconds` (ADR 0027 §14) — para
+    "toda la flota" se usa `POST /operations` con `target_kind=broadcast`
+    (ya llega a todos de una), este endpoint es solo para SUBCONJUNTOS."""
+    service = _service(request)
+    if not await service.is_mode_enabled():
+        raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    issued_by = current_user.username if current_user else "system"
+    try:
+        ops = await _operations(request).create_batch(
+            body.gateway_id, body.command, body.args, body.target_values, body.interval_seconds, issued_by
+        )
+    except (NexusCommandError, NexusTargetError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [OperationOut.from_entity(op) for op in ops]
 
 
 @router.get("/operations", response_model=list[OperationOut])

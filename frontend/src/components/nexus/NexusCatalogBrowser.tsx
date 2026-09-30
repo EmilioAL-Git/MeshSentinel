@@ -38,18 +38,26 @@ const btn: CSSProperties = {
 
 const rowBtn: CSSProperties = {
   display: "flex",
-  alignItems: "center",
-  gap: 6,
+  flexDirection: "column",
+  alignItems: "flex-start",
+  gap: 2,
   width: "100%",
   textAlign: "left",
-  background: "transparent",
-  border: "none",
+  background: t.bg,
+  border: `1px solid ${t.borderSubtle}`,
   color: t.text,
   cursor: "pointer",
-  padding: "0.2rem 0.3rem",
+  padding: "0.25rem 0.4rem",
   fontFamily: t.fontMono,
-  fontSize: 12,
+  fontSize: 11.5,
   borderRadius: 4,
+};
+
+const gridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
+  gap: 5,
+  marginTop: 4,
 };
 
 /**
@@ -61,8 +69,17 @@ const rowBtn: CSSProperties = {
  * nunca envía nada por sí mismo, sigue habiendo que previsualizar y
  * confirmar como con cualquier comando tecleado a mano.
  */
-export function NexusCatalogBrowser({ onSelect }: { onSelect: (name: string) => void }) {
-  const [open, setOpen] = useState(false);
+export function NexusCatalogBrowser({
+  onSelect,
+  defaultOpen = false,
+}: {
+  onSelect: (name: string) => void;
+  /** Visible sin tener que pulsar "Explorar catálogo" antes — pedido
+   * explícito del usuario para el cuadro de Flota ("las operaciones a la
+   * vista"); Ajustes sigue colapsado por defecto (sin cambios ahí). */
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const [filter, setFilter] = useState("");
   const catalog = useQuery({ queryKey: ["nexus-catalog"], queryFn: fetchNexusCatalog, enabled: open });
   // Ajustes (ADR 0027 §13): hidden_commands filtra el explorador (nunca el
@@ -129,38 +146,57 @@ export function NexusCatalogBrowser({ onSelect }: { onSelect: (name: string) => 
             <div style={{ color: t.textFaint, fontSize: 11.5 }}>Sin coincidencias.</div>
           )}
           {grouped.map(([category, entries]) => (
-            <details key={category} open={!collapsedDefault ? grouped.length <= 3 || filter.trim() !== "" : filter.trim() !== ""}>
+            <details
+              key={category}
+              open={
+                defaultOpen
+                  ? true
+                  : !collapsedDefault
+                    ? grouped.length <= 3 || filter.trim() !== ""
+                    : filter.trim() !== ""
+              }
+            >
               <summary style={{ cursor: "pointer", fontSize: 11, color: t.textDim, padding: "0.15rem 0" }}>
                 {CATEGORY_LABEL[category] ?? category} <span style={{ color: t.textFaint }}>({entries.length})</span>
               </summary>
-              <div style={{ display: "flex", flexDirection: "column" }}>
+              <div style={gridStyle}>
                 {entries.map((entry) => (
                   <button
                     key={entry.name}
                     style={rowBtn}
-                    title={entry.aliases.length ? `alias: ${entry.aliases.join(", ")}` : undefined}
+                    title={[
+                      entry.description || undefined,
+                      entry.aliases.length ? `alias: ${entry.aliases.join(", ")}` : undefined,
+                    ].filter(Boolean).join(" — ") || undefined}
                     onClick={() => {
                       onSelect(entry.name);
                       setOpen(false);
                     }}
                   >
-                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {entry.name}
-                    </span>
-                    {entry.mutation === "never" ? (
-                      <span style={{ fontSize: 9.5, color: t.textFaint }}>consulta</span>
-                    ) : (
-                      <span style={{ fontSize: 9.5, color: t.accent }}>muta</span>
-                    )}
-                    {entry.destructive && <span style={{ fontSize: 9.5, color: t.crit }}>⚠ destructivo</span>}
-                    {entry.busy_seconds > 0 && (
-                      <span style={{ fontSize: 9.5, color: t.warn }}>{entry.busy_seconds}s</span>
-                    )}
-                    {entry.broadcast_forbidden && (
-                      <span style={{ fontSize: 9.5, color: t.textFaint }} title="Bloqueado en difusión/grupo">
-                        🚫difusión
+                    <span style={{ display: "flex", alignItems: "center", gap: 3, maxWidth: "100%" }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {entry.name}
                       </span>
-                    )}
+                      {entry.description && (
+                        <span style={{ fontSize: 10, color: t.textFaint, flexShrink: 0 }}>ⓘ</span>
+                      )}
+                    </span>
+                    <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {entry.mutation === "never" ? (
+                        <span style={{ fontSize: 9.5, color: t.textFaint }}>consulta</span>
+                      ) : (
+                        <span style={{ fontSize: 9.5, color: t.accent }}>muta</span>
+                      )}
+                      {entry.destructive && <span style={{ fontSize: 9.5, color: t.crit }}>⚠ destructivo</span>}
+                      {entry.busy_seconds > 0 && (
+                        <span style={{ fontSize: 9.5, color: t.warn }}>{entry.busy_seconds}s</span>
+                      )}
+                      {entry.broadcast_forbidden && (
+                        <span style={{ fontSize: 9.5, color: t.textFaint }} title="Bloqueado en difusión/grupo">
+                          🚫
+                        </span>
+                      )}
+                    </span>
                   </button>
                 ))}
               </div>

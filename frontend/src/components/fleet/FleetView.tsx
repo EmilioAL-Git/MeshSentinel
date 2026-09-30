@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   displayName,
   type AlertOut,
@@ -10,6 +11,7 @@ import {
   type TagOut,
 } from "../../api/client";
 import { usePersistedState } from "../../hooks/usePersistedState";
+import { useNexusMode } from "../nexus/useNexusMode";
 import { AddToGroupMenu } from "./AddToGroupMenu";
 import { AssignNodeTypeMenu } from "./AssignNodeTypeMenu";
 import { ColumnPicker } from "./ColumnPicker";
@@ -17,6 +19,7 @@ import { DeleteNodeModal } from "./DeleteNodeModal";
 import { FleetBlocks } from "./FleetBlocks";
 import { GroupBar } from "./GroupBar";
 import { computeFleetGroupMetrics } from "./groupStats";
+import { NexusFleetOpsModal } from "../nexus/NexusFleetOpsModal";
 import { DEFAULT_FLEET_COLUMNS, FLEET_COLUMNS, FleetRow, buildFleetGrid, type FleetColumnId } from "./instruments";
 
 /**
@@ -84,6 +87,8 @@ export function FleetView({
   lowBatteryThreshold: number;
 }) {
   const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; label?: string } | null>(null);
+  const [nexusOpsOpen, setNexusOpsOpen] = useState(false);
+  const nexusModeOn = useNexusMode();
   const set = (patch: NodeFilterParams) => onFiltersChange({ ...filters, ...patch });
   const hasFilters = Object.values(filters).some((v) => v !== undefined && v !== "" && v !== false);
   const isGrouped = activeGroup != null;
@@ -106,6 +111,20 @@ export function FleetView({
     );
   }, [summaries]);
 
+  // Virtualización del roster plano (hardening de Flota): con "Toda la red"
+  // fácilmente son 1000+ nodos — montar 1000+ `.roster-row` de golpe es lo
+  // que de verdad hacía lento el explorador (memoizar filas no ayuda aquí:
+  // pasar de una lista filtrada corta a la lista completa es contenido
+  // NUEVO, no un re-render evitable). Solo el roster plano lo necesita: en
+  // modo bloques (grupo activo) el volumen ya está acotado por el grupo.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: isGrouped ? 0 : stableSummaries.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 34, // .roster-row min-height (console.css)
+    overscan: 12,
+  });
+
   // Memoizados: con miles de nodos, recorrer `summaries`/`allSummaries` en
   // cada render (incl. los que no cambian ni datos ni selección) deja de
   // ser gratis.
@@ -121,21 +140,30 @@ export function FleetView({
   const favCount = useMemo(() => allSummaries.filter((s) => s.node.is_favorite).length, [allSummaries]);
   const groupMetrics = useMemo(() => computeFleetGroupMetrics(summaries, alerts), [summaries, alerts]);
 
-  const toggleChecked = (id: string) => {
-    const next = new Set(checkedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    onCheckedChange(next);
-  };
+  // useCallback (hardening): con cientos/miles de FleetRow memoizados
+  // (React.memo), pasar un handler nuevo en cada render de FleetView
+  // invalidaría el memo de TODAS las filas a la vez, sin motivo.
+  const toggleChecked = useCallback(
+    (id: string) => {
+      const next = new Set(checkedIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      onCheckedChange(next);
+    },
+    [checkedIds, onCheckedChange],
+  );
   const allVisibleChecked = useMemo(
     () => summaries.length > 0 && summaries.every((s) => checkedIds.has(s.node.node_id)),
     [summaries, checkedIds],
   );
 
-  const requestDeleteOne = (id: string) => {
-    const summary = allSummaries.find((s) => s.node.node_id === id);
-    setDeleteTarget({ ids: [id], label: summary ? displayName(summary.node) : id });
-  };
+  const requestDeleteOne = useCallback(
+    (id: string) => {
+      const summary = allSummaries.find((s) => s.node.node_id === id);
+      setDeleteTarget({ ids: [id], label: summary ? displayName(summary.node) : id });
+    },
+    [allSummaries],
+  );
 
   return (
     <div className="ws">
@@ -211,6 +239,16 @@ export function FleetView({
         >
           ★ favoritos
         </button>
+        {nexusModeOn && (
+          <button
+            className={`btn ghost${filters.nexus ? " primary" : ""}`}
+            style={filters.nexus ? { color: "var(--accent)", borderColor: "var(--accent)", background: "var(--accent-tint)" } : undefined}
+            onClick={() => set({ nexus: filters.nexus ? undefined : true })}
+            title="Mostrar solo nodos marcados como JenTastic-Nexus"
+          >
+            🐱 nexus
+          </button>
+        )}
         <span className="sep" />
         <select className="input" value={filters.hw_model ?? ""} onChange={(e) => set({ hw_model: e.target.value || undefined })}>
           <option value="">hardware</option>
@@ -273,13 +311,26 @@ export function FleetView({
             ✕ limpiar
           </button>
         )}
+        {nexusModeOn && (
+          <button className="btn ghost" onClick={() => setNexusOpsOpen(true)}>
+            🐱 Operaciones Nexus
+          </button>
+        )}
         <span style={{ marginLeft: "auto" }} />
         <ColumnPicker visible={visibleColumns} onChange={setVisibleColumns} />
       </div>
 
+      {nexusOpsOpen && (
+        <NexusFleetOpsModal
+          onClose={() => setNexusOpsOpen(false)}
+          allSummaries={allSummaries}
+          checkedIds={checkedIds}
+        />
+      )}
+
       {/* Roster: bloques por categoría dentro de un grupo, lista plana en "Toda la red" */}
       <div className="panel" style={{ flex: 1, border: "none" }}>
-        <div className="ws-scroll">
+        <div className="ws-scroll" ref={scrollRef}>
           {loading && <div className="empty">Cargando flota…</div>}
           {error && <div className="empty" style={{ color: "var(--crit)" }}>Error consultando la API.</div>}
           {!loading && summaries.length === 0 && (
@@ -299,6 +350,7 @@ export function FleetView({
               onCheckedChange={onCheckedChange}
               lowBatteryThreshold={lowBatteryThreshold}
               visibleColumns={visibleColumns}
+              nexusModeOn={nexusModeOn}
             />
           )}
           {!loading && summaries.length > 0 && !isGrouped && (
@@ -315,23 +367,40 @@ export function FleetView({
                   onCheckedChange(next);
                 }}
               />
-              {stableSummaries.map((summary) => (
-                <FleetRow
-                  key={summary.node.node_id}
-                  summary={summary}
-                  selected={selected}
-                  focusId={focusId}
-                  checked={checkedIds.has(summary.node.node_id)}
-                  onSelect={onSelect}
-                  onToggleFavorite={onToggleFavorite}
-                  onToggleIgnored={onToggleIgnored}
-                  onRequestDelete={requestDeleteOne}
-                  onToggleChecked={toggleChecked}
-                  visibleColumns={visibleColumns}
-                  gatewayNodeIds={gatewayNodeIds}
-                  lowBatteryThreshold={lowBatteryThreshold}
-                />
-              ))}
+              <div style={{ position: "relative", height: rowVirtualizer.getTotalSize() }}>
+                {rowVirtualizer.getVirtualItems().map((item) => {
+                  const summary = stableSummaries[item.index];
+                  return (
+                    <div
+                      key={summary.node.node_id}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: item.size,
+                        transform: `translateY(${item.start}px)`,
+                      }}
+                    >
+                      <FleetRow
+                        summary={summary}
+                        selected={selected}
+                        focusId={focusId}
+                        checked={checkedIds.has(summary.node.node_id)}
+                        onSelect={onSelect}
+                        onToggleFavorite={onToggleFavorite}
+                        onToggleIgnored={onToggleIgnored}
+                        onRequestDelete={requestDeleteOne}
+                        onToggleChecked={toggleChecked}
+                        visibleColumns={visibleColumns}
+                        gatewayNodeIds={gatewayNodeIds}
+                        lowBatteryThreshold={lowBatteryThreshold}
+                        nexusModeOn={nexusModeOn}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             </>
           )}
         </div>

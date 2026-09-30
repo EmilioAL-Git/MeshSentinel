@@ -192,6 +192,7 @@ async def test_apply_filters(session_factory):
         repo = SqlNodeRepository(session)
         await repo.set_flag(NODES[0], "is_favorite", True)
         await repo.set_flag(NODES[2], "is_ignored", True)
+        await repo.set_flag(NODES[1], "is_nexus", True)
         tags = SqlTagRepository(session)
         solar = await tags.create(Tag(name="solar"))
         await tags.set_node_tags(NODES[0], [solar.id])
@@ -218,6 +219,8 @@ async def test_apply_filters(session_factory):
     assert ids(NodeFilters(group_id=g.id)) == {NODES[1]}
     assert ids(NodeFilters(favorite=True)) == {NODES[0]}
     assert ids(NodeFilters(gateway_id="gw-b")) == {NODES[1]}
+    assert ids(NodeFilters(nexus=True)) == {NODES[1]}
+    assert ids(NodeFilters(nexus=False)) == {NODES[0]}
     # Online/offline y batería
     assert ids(NodeFilters(online=True)) == {NODES[0], NODES[1]}
     assert ids(NodeFilters(include_ignored=True, online=False)) == {NODES[2]}

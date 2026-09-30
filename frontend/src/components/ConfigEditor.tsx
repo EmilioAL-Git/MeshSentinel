@@ -16,6 +16,7 @@ import {
   type SectionSnapshot,
 } from "../api/client";
 import { NodeSelect } from "./NodeSelect";
+import { ConfirmModal } from "./shell/ConfirmModal";
 import { GatewaySelect } from "./shell/GatewaySelect";
 import { toast } from "./shell/Toast";
 import { styles } from "../styles";
@@ -258,6 +259,7 @@ export function ConfigEditor({ summaries }: Props) {
   const [activeSection, setActiveSection] = useState<string>("owner");
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmRefreshAll, setConfirmRefreshAll] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [gatewaySelection, setGatewaySelection] = useState<GatewaySelectionIn>(GATEWAY_SELECTION_PREFERRED);
 
@@ -355,10 +357,22 @@ export function ConfigEditor({ summaries }: Props) {
           <button
             style={{ ...btn, opacity: nodeId ? 1 : 0.5 }}
             disabled={!nodeId || refresh.isPending}
-            onClick={() => refresh.mutate(undefined)}
+            onClick={() => setConfirmRefreshAll(true)}
           >
             Refrescar todo
           </button>
+          {confirmRefreshAll && (
+            <ConfirmModal
+              title="Leer configuración completa"
+              message="Esto encola 26 lecturas (una por cada sección de configuración más el propietario). Es solo lectura, pero ocupa tiempo de aire de la malla mientras se completan."
+              confirmLabel="Leer las 26 secciones"
+              onConfirm={() => {
+                setConfirmRefreshAll(false);
+                refresh.mutate(undefined);
+              }}
+              onCancel={() => setConfirmRefreshAll(false)}
+            />
+          )}
           {refresh.isSuccess && (
             <span style={styles.dim}>
               Encoladas {refresh.data.operation_ids.length} lecturas. Se irán completando por la cola.

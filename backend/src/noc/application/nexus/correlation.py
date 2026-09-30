@@ -64,6 +64,16 @@ class ResponseCorrelator:
                 best = candidate
         return best[2] if best else None
 
+    def discard(self, command_id: str) -> None:
+        """Retira un candidato YA resuelto de forma terminal (destino
+        dirigido: local/node/mac/device) — sin esto, `match()` seguiría
+        devolviéndolo para siempre (es el "más reciente" entre los
+        abiertos, nunca se quita solo) y una respuesta de OTRO comando
+        abierto a la vez se perdería en silencio en vez de atribuirse al
+        siguiente candidato. Nunca se llama para difusión/grupo: esos
+        necesitan seguir abiertos para acumular varias respuestas."""
+        self._pending = [p for p in self._pending if p.command_id != command_id]
+
     @staticmethod
     def _specificity(p: _Pending, from_node_id: str) -> int | None:
         match p.target:

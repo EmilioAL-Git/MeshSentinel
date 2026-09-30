@@ -24,6 +24,7 @@ export function FleetBlocks({
   onCheckedChange,
   lowBatteryThreshold,
   visibleColumns,
+  nexusModeOn,
 }: {
   summaries: NodeSummaryOut[];
   gatewayNodeIds: Set<string>;
@@ -38,6 +39,8 @@ export function FleetBlocks({
   /** Umbral de batería baja (thresholds del backend, no hardcodeado). */
   lowBatteryThreshold?: number;
   visibleColumns: FleetColumnId[];
+  /** Resuelto una sola vez por el padre (FleetView) — ver instruments.tsx. */
+  nexusModeOn: boolean;
 }) {
   const byCategory = useMemo(() => groupByCategory(summaries, gatewayNodeIds), [summaries, gatewayNodeIds]);
 
@@ -99,6 +102,7 @@ export function FleetBlocks({
                 visibleColumns={visibleColumns}
                 gatewayNodeIds={gatewayNodeIds}
                 lowBatteryThreshold={lowBatteryThreshold}
+                nexusModeOn={nexusModeOn}
               />
             ))}
           </BlockAccordion>

@@ -247,7 +247,8 @@ function NexusPassiveDetection() {
       <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12, fontSize: 12.5 }}>
         <thead>
           <tr style={{ textAlign: "left", color: t.textFaint, fontSize: 11 }}>
-            <th style={{ padding: "4px 8px" }}>Nodo</th>
+            <th style={{ padding: "4px 8px" }}>Nombre</th>
+            <th style={{ padding: "4px 8px" }}>idNodo</th>
             <th style={{ padding: "4px 8px" }}>Pasarela</th>
             <th style={{ padding: "4px 8px" }}>Comando visto</th>
             <th style={{ padding: "4px 8px" }}>Visto ×</th>
@@ -258,13 +259,14 @@ function NexusPassiveDetection() {
         <tbody>
           {candidates.length === 0 && (
             <tr>
-              <td colSpan={6} style={{ padding: "8px", color: t.textFaint }}>
+              <td colSpan={7} style={{ padding: "8px", color: t.textFaint }}>
                 {candidatesQuery.isLoading ? "Cargando…" : "Sin candidatos todavía."}
               </td>
             </tr>
           )}
           {candidates.map((c) => (
             <tr key={c.node_id} style={{ borderTop: `1px solid ${t.borderSubtle}` }} title={c.sample_text}>
+              <td style={{ padding: "6px 8px" }}>{c.short_name ?? "—"}</td>
               <td className="mono" style={{ padding: "6px 8px" }}>{c.node_id}</td>
               <td style={{ padding: "6px 8px" }}>{c.gateway_id}</td>
               <td className="mono" style={{ padding: "6px 8px" }}>{c.command ?? "—"}</td>

@@ -50,6 +50,7 @@ import {
   opTypeLabel,
 } from "../jobs/status";
 import { displayValue } from "../ConfigEditor";
+import { ConfirmModal } from "../shell/ConfirmModal";
 import { FloatingWindow } from "../shell/FloatingWindow";
 import { PreferredGatewaySelect } from "../shell/GatewaySelect";
 import { toast } from "../shell/Toast";
@@ -392,6 +393,7 @@ export function Inspector({
   // teclear nada, pedido explícito del usuario), mismo patrón que
   // GatewaysView/DeleteNodeModal.
   const [deleteArmed, setDeleteArmed] = useState(false);
+  const [confirmRefreshConfig, setConfirmRefreshConfig] = useState(false);
   const deleteThisNode = useMutation({
     mutationFn: () => deleteNode(nodeId),
     onSuccess: () => {
@@ -1438,9 +1440,26 @@ export function Inspector({
             <button style={{ ...actionBtn, width: "100%" }} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Encola metadata.get (solo lectura)">
               ⚙ Pedir metadata
             </button>
-            <button style={{ ...actionBtn, width: "100%" }} disabled={refreshConfig.isPending} onClick={() => refreshConfig.mutate()} title="Encola la lectura de todas las secciones de configuración (solo lectura)">
+            <button
+              style={{ ...actionBtn, width: "100%" }}
+              disabled={refreshConfig.isPending}
+              onClick={() => setConfirmRefreshConfig(true)}
+              title="Encola la lectura de todas las secciones de configuración (solo lectura)"
+            >
               ⟳ Leer configuración
             </button>
+            {confirmRefreshConfig && (
+              <ConfirmModal
+                title="Leer configuración completa"
+                message="Esto encola 26 lecturas (una por cada sección de configuración más el propietario). Es solo lectura, pero ocupa tiempo de aire de la malla mientras se completan."
+                confirmLabel="Leer las 26 secciones"
+                onConfirm={() => {
+                  setConfirmRefreshConfig(false);
+                  refreshConfig.mutate();
+                }}
+                onCancel={() => setConfirmRefreshConfig(false)}
+              />
+            )}
           </div>
           {n?.is_ignored && (
             <div style={{ ...chipStyle(t.textDim), display: "inline-block", marginTop: 8, fontSize: 10.5 }}>

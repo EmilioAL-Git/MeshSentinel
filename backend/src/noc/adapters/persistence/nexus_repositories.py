@@ -34,6 +34,8 @@ class SqlNexusOperationRepository:
             status=op.status,
             created_by=op.created_by,
             created_at=op.created_at or datetime.now(timezone.utc),
+            batch_key=op.batch_key,
+            batch_interval_seconds=op.batch_interval_seconds,
         )
         self._session.add(m)
         await self._session.flush()
@@ -81,11 +83,23 @@ class SqlNexusOperationRepository:
         stmt = (
             select(NexusOperationModel)
             .where(NexusOperationModel.status == "pending")
-            .order_by(NexusOperationModel.created_at)
+            .order_by(NexusOperationModel.created_at, NexusOperationModel.id)
             .limit(limit)
         )
         rows = await self._session.scalars(stmt)
         return [_entity(r) for r in rows]
+
+    async def latest_sent_in_batch(self, batch_key: str) -> datetime | None:
+        """Última vez que se despachó CUALQUIER operación de este lote
+        (ADR 0027 §14) — gating de espaciado entre miembros del lote,
+        independiente del `CommandPacer` del núcleo puro (que no espacia
+        entre destinos DISTINTOS)."""
+        return await self._session.scalar(
+            select(func.max(NexusOperationModel.sent_at)).where(
+                NexusOperationModel.batch_key == batch_key,
+                NexusOperationModel.sent_at.is_not(None),
+            )
+        )
 
     async def list_expired_sent(self, now: datetime, base_window_seconds: float) -> list[NexusOperation]:
         """Sin GET de verificación (ADR 0013) ni reporte del gateway (ADR
