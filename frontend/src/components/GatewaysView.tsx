@@ -166,23 +166,28 @@ function AddGatewayWizard({
     <div className="panel" style={{ margin: "0.75rem", flexShrink: 0 }}>
       <div className="panel-head">
         <span className="panel-title">Nuevo enlace</span>
-        <input
-          className="input mono"
-          style={{ width: 170 }}
-          list="gateway-id-candidates"
-          placeholder="gateway_id (p. ej. gw-02)"
-          value={gatewayId}
-          onChange={(e) => {
-            setGatewayId(e.target.value.trim());
-            setDevices(null);
-            setTestResult(null);
-          }}
-        />
-        <datalist id="gateway-id-candidates">
-          {candidates.map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
+        {candidates.length > 0 ? (
+          <select
+            className="input mono"
+            style={{ width: 170 }}
+            value={gatewayId}
+            onChange={(e) => {
+              setGatewayId(e.target.value);
+              setDevices(null);
+              setTestResult(null);
+            }}
+          >
+            {candidates.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span style={{ color: "var(--text-dim)", fontSize: 12 }}>
+            Sin pasarelas de repuesto disponibles ahora mismo
+          </span>
+        )}
         <span className="seg">
           {(["usb", "tcp"] as const).map((tt) => (
             <button
@@ -242,7 +247,7 @@ function AddGatewayWizard({
               className="btn"
               disabled={!gatewayId.trim() || discover.isPending}
               onClick={() => discover.mutate()}
-              title={!gatewayId.trim() ? "Escribe primero el gateway_id del proceso a buscar" : undefined}
+              title={!gatewayId.trim() ? "No hay pasarelas de repuesto disponibles" : undefined}
             >
               {discover.isPending ? "Buscando…" : "⌕ Buscar dispositivos"}
             </button>
@@ -287,7 +292,7 @@ function AddGatewayWizard({
             className="btn"
             disabled={!gatewayId.trim() || !paramsReady || test.isPending}
             onClick={() => test.mutate()}
-            title={!gatewayId.trim() ? "Escribe primero el gateway_id del proceso a probar" : undefined}
+            title={!gatewayId.trim() ? "No hay pasarelas de repuesto disponibles" : undefined}
           >
             {test.isPending ? "Probando…" : "▶ Probar conexión"}
           </button>

@@ -76,34 +76,18 @@ services:
     #   - "/dev/ttyACM0:/dev/ttyACM0"
     restart: unless-stopped
 
-  # Segunda pasarela simulada para validar Multi-Gateway (M6.2): semilla
-  # exclusiva distinta + la MISMA semilla compartida => nodos SHRxx idénticos
-  # oídos por ambas pasarelas. Descomentar para levantarla:
-  # gateway-2:
-  #   build: ./gateway
-  #   environment:
-  #     GATEWAY_ID: gw-02
-  #     GATEWAY_TRANSPORT: simulated
-  #     GATEWAY_SIM_SEED: 1042
-  #     GATEWAY_SIM_SHARED_SEED: ${GATEWAY_SIM_SHARED_SEED:-7}
-  #     GATEWAY_SIM_SHARED_NODE_COUNT: ${GATEWAY_SIM_SHARED_NODE_COUNT:-4}
-  #     GATEWAY_REDIS_URL: redis://redis:6379/0
-  #     GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-
   # ── Piscina de gateways de repuesto (M6.3) ─────────────────────────────
   # Arrancan con transporte "idle": no conectan a nada, solo laten como
   # "unassigned" hasta que se reclaman desde "+ Añadir gateway" en la
   # interfaz — el asistente los reconfigura (USB/TCP) en caliente por
-  # comando, sin tocar este archivo ni reconstruir nada. Ajusta la cantidad
-  # de bloques si necesitas más o menos repuestos disponibles.
-  gateway-spare-1:
+  # comando, sin tocar este archivo ni reconstruir nada. Numeración gw-02..
+  # gw-06, continuando la del gateway original (gw-01) — mismo formato de
+  # dos dígitos en toda la app, para no confundirlos entre sí. Ajusta la
+  # cantidad de bloques si necesitas más o menos repuestos disponibles.
+  gateway-2:
     build: ./gateway
     environment:
-      GATEWAY_ID: gw-spare-1
+      GATEWAY_ID: gw-02
       GATEWAY_TRANSPORT: idle
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
@@ -112,10 +96,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  gateway-spare-2:
+  gateway-3:
     build: ./gateway
     environment:
-      GATEWAY_ID: gw-spare-2
+      GATEWAY_ID: gw-03
       GATEWAY_TRANSPORT: idle
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
@@ -124,10 +108,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  gateway-spare-3:
+  gateway-4:
     build: ./gateway
     environment:
-      GATEWAY_ID: gw-spare-3
+      GATEWAY_ID: gw-04
       GATEWAY_TRANSPORT: idle
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
@@ -136,10 +120,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  gateway-spare-4:
+  gateway-5:
     build: ./gateway
     environment:
-      GATEWAY_ID: gw-spare-4
+      GATEWAY_ID: gw-05
       GATEWAY_TRANSPORT: idle
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
@@ -148,10 +132,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  gateway-spare-5:
+  gateway-6:
     build: ./gateway
     environment:
-      GATEWAY_ID: gw-spare-5
+      GATEWAY_ID: gw-06
       GATEWAY_TRANSPORT: idle
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
