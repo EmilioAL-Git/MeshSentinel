@@ -415,14 +415,7 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
           </div>
         )}
 
-        {!gateway.managed && gateway.transport === "idle" && (
-          <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
-            Repuesto libre de la piscina (M6.3) — resérvalo desde «+ Añadir gateway» escribiendo{" "}
-            <span className="mono">{gateway.gateway_id}</span> y el transporte real (USB/TCP).
-          </p>
-        )}
-
-        {!gateway.managed && gateway.transport !== "idle" && (
+        {!gateway.managed && (
           <div>
             <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
               Pasarela detectada por heartbeat (configuración de <span className="mono">.env</span>), aún sin
@@ -532,7 +525,10 @@ export function GatewaysView() {
   const [wizardOpen, setWizardOpen] = useState(false);
 
   const all = gateways.data ?? [];
-  const list = all.filter((g) => g.deleted_at == null);
+  // Repuestos de la piscina (M6.3) sin reclamar: laten "idle" pero no son un
+  // enlace real todavía — solo deben verse como candidatos del asistente,
+  // nunca como una tarjeta más en el listado (serían 5 tarjetas vacías).
+  const list = all.filter((g) => g.deleted_at == null && !(g.transport === "idle" && !g.managed));
   const deleted = all.filter((g) => g.deleted_at != null);
   // M6.2: con varios procesos sin configurar a la vez, el asistente ofrece
   // un selector explícito en vez de auto-elegir el primero.

@@ -151,7 +151,12 @@ export function scopeGatewaysToGroup(
   groupNodeIds: Set<string> | null,
   groupGwStats: MultiGatewayStatsOut | undefined,
 ): GatewayOut[] {
-  const enabled = gateways.filter((g) => g.enabled && g.deleted_at == null);
+  // Repuestos de la piscina (M6.3) sin reclamar: laten "idle" pero no son un
+  // enlace real — no deben contar en "conectadas/habilitadas" ni aparecer
+  // como "caída" en HUD/StatusBar.
+  const enabled = gateways.filter(
+    (g) => g.enabled && g.deleted_at == null && !(g.transport === "idle" && !g.managed),
+  );
   if (groupNodeIds == null) return enabled;
   const statsById = new Map((groupGwStats?.gateways ?? []).map((g) => [g.gateway_id, g]));
   return enabled.filter((g) => (statsById.get(g.gateway_id)?.nodes_visible ?? 0) > 0);
