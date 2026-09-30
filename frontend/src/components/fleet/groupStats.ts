@@ -18,13 +18,17 @@ import type {
  */
 
 /**
- * Repuesto de la piscina (M6.3) sin reclamar: late "idle" pero no es un
- * enlace real todavía. Compartido por cualquier selector/listado de
- * gateways para no repetir el criterio (GatewaysView, GatewaySelect,
- * scopeGatewaysToGroup).
+ * Repuesto de la piscina (M6.3) sin reclamar de verdad ahora mismo: late
+ * "idle" — nunca un enlace real, sea cual sea `managed` (un gateway_id
+ * reutilizado por un proceso nuevo puede heredar `managed=true` de una fila
+ * vieja ya borrada, sin que eso lo convierta en una conexión real). El
+ * transporte "idle" solo existe mientras nadie lo ha reconfigurado desde el
+ * arranque, así que basta como señal. Compartido por cualquier selector/
+ * listado de gateways para no repetir el criterio (GatewaysView,
+ * GatewaySelect, scopeGatewaysToGroup).
  */
 export function isUnclaimedSpare(g: GatewayOut): boolean {
-  return g.transport === "idle" && !g.managed;
+  return g.transport === "idle";
 }
 
 function avg(values: number[]): number | null {

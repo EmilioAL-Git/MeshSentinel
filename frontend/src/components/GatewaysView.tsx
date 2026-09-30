@@ -66,6 +66,17 @@ const TRANSPORT_LABEL: Record<string, string> = {
   idle: "Repuesto",
 };
 
+/**
+ * El gateway_id técnico de un repuesto de la piscina (gw-02..gw-06, vive en
+ * docker-compose.yml — gw-01 es el gateway original, fuera de la piscina)
+ * nunca se muestra al operador: en la interfaz se numeran desde 1. Solo
+ * cosmético — el id real sigue siendo el value del <option>.
+ */
+function spareLabel(gatewayId: string): string {
+  const n = Number(gatewayId.replace(/^gw-0*/, ""));
+  return Number.isFinite(n) && n > 1 ? `Gateway ${n - 1}` : gatewayId;
+}
+
 /** Par clave/valor en mono, la unidad de lectura de los módulos del rack. */
 function Field({ k, v, title }: { k: string; v: React.ReactNode; title?: string }) {
   return (
@@ -180,7 +191,7 @@ function AddGatewayWizard({
           >
             {candidates.map((c) => (
               <option key={c} value={c}>
-                {c}
+                {spareLabel(c)}
               </option>
             ))}
           </select>
@@ -349,14 +360,7 @@ function AddGatewayWizard({
           {save.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(save.error)}</p>}
           {managedConflict && (
             <p style={{ color: "var(--crit)", fontSize: 12 }}>
-              Ya existe un enlace configurado con «{gatewayId}» — edítalo desde su panel en vez de crear uno nuevo.
-            </p>
-          )}
-          {!managedConflict && !isKnownCandidate && gatewayId.trim() && (
-            <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
-              «{gatewayId}» todavía no ha reportado actividad: se guardará esta configuración a la espera de que
-              arranques ese proceso con <span className="mono">GATEWAY_ID={gatewayId}</span>. Puedes probar la
-              conexión igualmente si el proceso ya está en marcha.
+              «{spareLabel(gatewayId)}» ya está configurado — edítalo desde su panel en vez de crear uno nuevo.
             </p>
           )}
         </div>
@@ -536,9 +540,22 @@ export function GatewaysView() {
   // nunca como una tarjeta más en el listado (serían 5 tarjetas vacías).
   const list = all.filter((g) => g.deleted_at == null && !isUnclaimedSpare(g));
   const deleted = all.filter((g) => g.deleted_at != null);
-  // M6.2: con varios procesos sin configurar a la vez, el asistente ofrece
-  // un selector explícito en vez de auto-elegir el primero.
-  const candidates = all.filter((g) => !g.managed || g.deleted_at != null).map((g) => g.gateway_id);
+  // El desplegable de "+ Añadir gateway" muestra SOLO repuestos de la
+  // piscina M6.3 vivos ahora mismo (pedido explícito: nada de fantasmas de
+  // procesos retirados, ni pasarelas ya gestionadas/borradas que antes
+  // también se ofrecían para reclamar) — "vivo" = con heartbeat reciente,
+  // ya que un contenedor eliminado deja de latir pero su fila persiste.
+  const CANDIDATE_FRESH_MS = 120_000;
+  const now = Date.now();
+  const candidates = all
+    .filter(
+      (g) =>
+        isUnclaimedSpare(g) &&
+        g.updated_at != null &&
+        now - new Date(g.updated_at).getTime() < CANDIDATE_FRESH_MS,
+    )
+    .map((g) => g.gateway_id)
+    .sort();
   const statsById = new Map((stats.data?.gateways ?? []).map((g) => [g.gateway_id, g]));
   const connected = list.filter((g) => g.status === "connected").length;
 
