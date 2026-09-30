@@ -706,7 +706,7 @@ export default function App() {
                   </button>
                 </span>
               </div>
-              <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+              <div style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
                 {registerTab === "activity" ? (
                   <ActivityConsole entries={activity} summaries={summaries} gateways={gateways.data ?? []} />
                 ) : (
