@@ -14,6 +14,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks: [noc]
     restart: unless-stopped
 
   redis:
@@ -26,6 +27,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks: [noc]
     restart: unless-stopped
 
   backend:
@@ -37,6 +39,7 @@ services:
     environment:
       NOC_DATABASE_URL: ${NOC_DATABASE_URL:-postgresql+asyncpg://noc:noc@postgres:5432/noc}
       NOC_REDIS_URL: redis://redis:6379/0
+      NOC_GATEWAY_LAUNCHER_URL: http://gateway-launcher:9000
       NOC_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
       LOW_BATTERY_THRESHOLD: ${LOW_BATTERY_THRESHOLD:-20}
       OFFLINE_MINUTES_WARNING: ${OFFLINE_MINUTES_WARNING:-30}
@@ -49,95 +52,68 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks: [noc]
     restart: unless-stopped
 
-  # ── Piscina de gateways (M6.3) ──────────────────────────────────────────
-  # Los 6 arrancan con transporte "idle": no conectan a nada, solo laten
-  # como "unassigned" hasta que se reclaman desde "+ Añadir gateway" en la
-  # interfaz — el asistente los reconfigura (USB/TCP) en caliente por
-  # comando, sin tocar este archivo ni reconstruir nada. Cero
-  # preconfiguración en .env por diseño (pedido explícito del usuario):
-  # transporte, dispositivo USB, host TCP... todo vive en la base de datos,
-  # nunca en variables de entorno. GATEWAY_ID sigue leyendo de .env solo
-  # para el primero (compatibilidad de nombre, "gw-01" por defecto) — es
-  # una etiqueta de infraestructura, no configuración de aplicación. Ajusta
-  # la cantidad de bloques si necesitas más o menos disponibles.
+  # ── Lanzador de gateways (ADR 0028) ───────────────────────────────────────
+  # Crea/destruye contenedores gateway bajo demanda (desde "+ Añadir
+  # gateway" en la interfaz) hablando con el socket de Docker. Es el ÚNICO
+  # servicio que lo monta — deliberadamente aislado del backend, que tiene
+  # una API HTTP con usuarios autenticados y por tanto más superficie de
+  # ataque (ver ADR 0028 §1). Sin puertos publicados: solo se habla con él
+  # desde dentro de esta red.
+  #
+  # /dev montado solo lectura: le basta para LISTAR dispositivos USB del
+  # host (GET /devices); el mapeo real de un dispositivo a un contenedor
+  # nuevo lo hace el propio daemon de Docker al crearlo, sin que el
+  # lanzador necesite verlo también él. Sustituye por completo a la antigua
+  # piscina estática de 6 contenedores idle (M6.3, retirada).
+  gateway-launcher:
+    build: ./launcher
+    environment:
+      LAUNCHER_GATEWAY_IMAGE: meshtastic-noc-gateway:local
+      LAUNCHER_DOCKER_NETWORK: meshtastic-noc
+      LAUNCHER_GATEWAY_REDIS_URL: redis://redis:6379/0
+      LAUNCHER_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /dev:/dev:ro
+    networks: [noc]
+    restart: unless-stopped
+
+  # Pasarela original: arranca desde variables de entorno (ADR 0021 §1,
+  # compatibilidad total, sin cambios) — no la crea ni la destruye el
+  # lanzador. Imagen etiquetada explícitamente: es la que
+  # `gateway-launcher` instancia para cualquier pasarela nueva que se cree
+  # desde la interfaz ("LAUNCHER_GATEWAY_IMAGE" arriba debe coincidir).
   #
   # Para USB en un host Linux (Docker SÍ puede pasar dispositivos ahí, a
-  # diferencia de Docker Desktop en Mac): añade a cualquier bloque
+  # diferencia de Docker Desktop en Mac): añade
   #   devices:
   #     - "/dev/ttyACM0:/dev/ttyACM0"
-  # No uses privileged: true — mapear el dispositivo concreto basta.
+  # No uses privileged: true — mapear el dispositivo concreto basta. Las
+  # pasarelas creadas desde "+ Añadir gateway" no necesitan este paso a
+  # mano: el lanzador mapea el dispositivo elegido automáticamente.
   gateway:
+    # scale: 0 — nunca arranca contenedor con un `docker compose up` normal
+    # (pedido explícito del usuario: no quiere ver una pasarela simulada por
+    # defecto), pero SIGUE construyéndose con `docker compose build` (a
+    # diferencia de `profiles`, que también excluiría el build) — es la
+    # imagen que `gateway-launcher` instancia para cualquier pasarela nueva
+    # creada desde la interfaz. Para arrancar este contenedor concreto a
+    # mano: `docker compose up -d --scale gateway=1 gateway`.
+    scale: 0
     build: ./gateway
+    image: meshtastic-noc-gateway:local
     environment:
       GATEWAY_ID: ${GATEWAY_ID:-gw-01}
-      GATEWAY_TRANSPORT: idle
+      GATEWAY_TRANSPORT: ${GATEWAY_TRANSPORT:-simulated}
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
     depends_on:
       redis:
         condition: service_healthy
-    restart: unless-stopped
-
-  gateway-2:
-    build: ./gateway
-    environment:
-      GATEWAY_ID: gw-02
-      GATEWAY_TRANSPORT: idle
-      GATEWAY_REDIS_URL: redis://redis:6379/0
-      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  gateway-3:
-    build: ./gateway
-    environment:
-      GATEWAY_ID: gw-03
-      GATEWAY_TRANSPORT: idle
-      GATEWAY_REDIS_URL: redis://redis:6379/0
-      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  gateway-4:
-    build: ./gateway
-    environment:
-      GATEWAY_ID: gw-04
-      GATEWAY_TRANSPORT: idle
-      GATEWAY_REDIS_URL: redis://redis:6379/0
-      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  gateway-5:
-    build: ./gateway
-    environment:
-      GATEWAY_ID: gw-05
-      GATEWAY_TRANSPORT: idle
-      GATEWAY_REDIS_URL: redis://redis:6379/0
-      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  gateway-6:
-    build: ./gateway
-    environment:
-      GATEWAY_ID: gw-06
-      GATEWAY_TRANSPORT: idle
-      GATEWAY_REDIS_URL: redis://redis:6379/0
-      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
-    depends_on:
-      redis:
-        condition: service_healthy
+    networks: [noc]
     restart: unless-stopped
 
   frontend:
@@ -146,7 +122,12 @@ services:
       - "${NOC_HTTP_PORT:-8080}:80"
     depends_on:
       - backend
+    networks: [noc]
     restart: unless-stopped
+
+networks:
+  noc:
+    name: meshtastic-noc
 
 volumes:
   postgres-data:

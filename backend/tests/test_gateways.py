@@ -6,12 +6,15 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from noc.adapters.gateways.launcher_client import LauncherContainerNotFound, LauncherError
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.nexus_repositories import SqlNexusOperationRepository
 from noc.application.gateways.service import (
+    GatewayAlreadyExistsError,
     GatewayHasActiveWorkError,
     GatewayService,
     GatewayStillConnectedError,
+    LauncherUnavailableError,
 )
 from noc.application.ingest import IngestService
 from noc.domain.admin.entities import AdminOperation
@@ -208,11 +211,10 @@ async def test_delete_allowed_when_connected_status_is_stale(session_factory):
     assert (await service.get(GW)) is None
 
 
-async def test_delete_allowed_for_idle_spare_even_if_its_process_keeps_heartbeating(session_factory):
-    """El caso que motivó la pregunta del usuario: un repuesto "idle" de la
-    piscina (M6.3) sigue latiendo, pero NUNCA está "connected" de verdad
-    (nunca tuvo un nodo local real) — borrarlo debe seguir funcionando,
-    es como vuelve limpio para el siguiente heartbeat."""
+async def test_delete_allowed_for_unassigned_gateway_even_if_its_process_keeps_heartbeating(session_factory):
+    """Una pasarela que late pero nunca llega a "connected" de verdad (sin
+    nodo local real) debe poder borrarse igual — vuelve limpia con el
+    siguiente heartbeat si el proceso sigue vivo."""
     service = GatewayService(session_factory, FakeQueue())
     await service.configure(GW, "Casa", "usb", {})
     await seed_heartbeat(session_factory, status="unassigned")
@@ -360,3 +362,116 @@ async def test_heartbeat_upsert_never_touches_config_fields(session_factory):
     assert info.name == "Casa"
     assert info.priority == 7
     assert info.connection_params == {"device": "/dev/cu.a"}
+
+
+# ── Lanzador de contenedores (ADR 0028) ─────────────────────────────────────
+
+
+class FakeLauncher:
+    def __init__(self) -> None:
+        self.created: list[tuple[str, str, dict]] = []
+        self.destroyed: list[str] = []
+        self.fail_create = False
+        self.fail_destroy = False
+        self.not_found_on_destroy = False
+
+    async def list_devices(self):
+        return [{"port": "/dev/ttyACM0", "description": None, "vid": None, "pid": None, "serial_number": None}]
+
+    async def create_container(self, gateway_id, transport_type, connection_params):
+        if self.fail_create:
+            raise LauncherError("docker rechazó la creación")
+        self.created.append((gateway_id, transport_type, connection_params))
+        return {"gateway_id": gateway_id, "container_id": "abc", "name": f"noc-gateway-{gateway_id}"}
+
+    async def destroy_container(self, gateway_id):
+        if self.not_found_on_destroy:
+            raise LauncherContainerNotFound(gateway_id)
+        if self.fail_destroy:
+            raise LauncherError("docker rechazó el borrado")
+        self.destroyed.append(gateway_id)
+
+
+async def test_provision_creates_container_and_managed_row(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+
+    info = await service.provision(GW, "Oficina", "tcp", {"host": "10.0.0.5"})
+
+    assert launcher.created == [(GW, "tcp", {"host": "10.0.0.5"})]
+    assert info.managed is True
+    assert info.container_managed is True
+    assert info.transport_type == "tcp"
+
+
+async def test_provision_rejects_existing_managed_gateway(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.configure(GW, "Casa", "usb", {})
+
+    with pytest.raises(GatewayAlreadyExistsError):
+        await service.provision(GW, "Otra", "tcp", {"host": "10.0.0.5"})
+    assert launcher.created == []
+
+
+async def test_provision_without_launcher_configured_raises(session_factory):
+    service = GatewayService(session_factory, FakeQueue())
+    with pytest.raises(LauncherUnavailableError):
+        await service.provision(GW, "Oficina", "tcp", {"host": "10.0.0.5"})
+
+
+async def test_provision_leaves_no_row_when_launcher_fails(session_factory):
+    launcher = FakeLauncher()
+    launcher.fail_create = True
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+
+    with pytest.raises(LauncherUnavailableError):
+        await service.provision(GW, "Oficina", "tcp", {"host": "10.0.0.5"})
+    assert (await service.get(GW)) is None
+
+
+async def test_delete_destroys_container_when_container_managed(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.provision(GW, "Oficina", "tcp", {"host": "10.0.0.5"})
+
+    assert await service.delete(GW) is True
+    assert launcher.destroyed == [GW]
+    assert (await service.get(GW)) is None
+
+
+async def test_delete_treats_already_gone_container_as_success(session_factory):
+    launcher = FakeLauncher()
+    launcher.not_found_on_destroy = True
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.provision(GW, "Oficina", "tcp", {"host": "10.0.0.5"})
+
+    assert await service.delete(GW) is True
+    assert (await service.get(GW)) is None
+
+
+async def test_delete_aborts_row_when_launcher_destroy_fails(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.provision(GW, "Oficina", "tcp", {"host": "10.0.0.5"})
+    launcher.fail_destroy = True
+
+    with pytest.raises(LauncherUnavailableError):
+        await service.delete(GW)
+    assert (await service.get(GW)) is not None
+
+
+async def test_delete_does_not_call_launcher_for_external_gateway(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.configure(GW, "Casa", "usb", {})  # externo: container_managed=False
+
+    assert await service.delete(GW) is True
+    assert launcher.destroyed == []
+
+
+async def test_list_launcher_devices_proxies_to_launcher(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    devices = await service.list_launcher_devices()
+    assert devices[0]["port"] == "/dev/ttyACM0"

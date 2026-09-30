@@ -26,9 +26,11 @@ from noc.application.activity_events import render_gateway_action
 from noc.application.auth.actor import ActorContext, resolve_actor_label
 from noc.application.gateway_stats import GatewayStats, compute_multi_gateway_stats, scope_to_members
 from noc.application.gateways.service import (
+    GatewayAlreadyExistsError,
     GatewayHasActiveWorkError,
     GatewayService,
     GatewayStillConnectedError,
+    LauncherUnavailableError,
 )
 from noc.config import get_settings
 
@@ -86,10 +88,47 @@ class GatewayUpdateIn(BaseModel):
     priority: int | None = None
 
 
+class GatewayCreateIn(BaseModel):
+    """"+ Añadir gateway" → "Crear un contenedor nuevo" (ADR 0028): a
+    diferencia de `configure`, este gateway_id NO debe existir todavía."""
+
+    gateway_id: str = Field(min_length=1, max_length=63, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$")
+    name: str = Field(min_length=1, max_length=128)
+    transport_type: str = Field(pattern="^(usb|tcp|simulated)$")
+    connection_params: dict[str, Any] = Field(default_factory=dict)
+
+
 @router.get("", response_model=list[GatewayOut])
 async def list_gateways(session: SessionDep, include_deleted: bool = Query(False)) -> list[GatewayOut]:
     gateways = await SqlGatewayRepository(session).list_all(include_deleted)
     return [GatewayOut.from_entity(g) for g in gateways]
+
+
+@router.post("", response_model=GatewayOut)
+async def create_gateway(body: GatewayCreateIn, request: Request, current_user: RequireAuthDep) -> GatewayOut:
+    try:
+        info = await _service(request).provision(
+            body.gateway_id, body.name, body.transport_type, body.connection_params
+        )
+    except GatewayAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LauncherUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    await _narrate("create", body.gateway_id, info.name, current_user)
+    return GatewayOut.from_entity(info)
+
+
+# Registrado ANTES de GET /gateways/{gateway_id}: "devices" no es un gateway_id.
+@router.get("/devices", response_model=list[DeviceOut])
+async def launcher_devices(request: Request, _user: RequireAuthDep) -> list[DeviceOut]:
+    """Dispositivos USB del host vía gateway-launcher, para el paso 1 de
+    "Crear un contenedor nuevo" — antes de que exista ningún proceso al que
+    correlacionar (a diferencia de POST /{gateway_id}/discover)."""
+    try:
+        devices = await _service(request).list_launcher_devices()
+    except LauncherUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return [DeviceOut(**d) for d in devices]
 
 
 class GatewayStatsOut(BaseModel):
@@ -226,6 +265,8 @@ async def delete_gateway(gateway_id: str, request: Request, current_user: Requir
         deleted = await _service(request).delete(gateway_id)
     except (GatewayHasActiveWorkError, GatewayStillConnectedError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LauncherUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")
     await _narrate("delete", gateway_id, None, current_user)

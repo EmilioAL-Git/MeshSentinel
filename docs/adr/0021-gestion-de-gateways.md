@@ -8,6 +8,10 @@
   vigentes. La vista se etiqueta hoy **"Enlaces"** en el riel de navegación
   (el identificador interno `gateways` no cambió) y fue re-cromada como
   "rack de módulos" en v0.8.0.
+- **Nota (ADR 0028)**: la piscina estática de repuestos descrita en §6 (M6.3)
+  se retiró por completo — sustituida por un lanzador de contenedores bajo
+  demanda. §6 se deja tal cual como registro histórico de esa decisión ya
+  superada; ADR 0028 es la referencia vigente para creación/borrado.
 
 ## Contexto
 

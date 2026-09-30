@@ -17,22 +17,6 @@ import type {
  * y sencillamente no se pinta — nunca se inventa un valor.
  */
 
-/**
- * Repuesto de la piscina (M6.3) sin reclamar de verdad: late "idle" Y no
- * está gestionado. Las dos condiciones hacen falta — "idle" solo no basta:
- * una pasarela YA configurada (managed=true) que el operador desconectó a
- * propósito también late "idle" un instante, y no debe ofrecerse como
- * repuesto libre (se pisaría su configuración real, host/nombre incluidos).
- * Ahora que el borrado es real (ya no lógico), un gateway_id reutilizado
- * tras borrarlo vuelve managed=false de forma fiable en el siguiente
- * heartbeat — ya no hace falta ignorar `managed` para ese caso.
- * Compartido por cualquier selector/listado de gateways (GatewaysView,
- * GatewaySelect, scopeGatewaysToGroup).
- */
-export function isUnclaimedSpare(g: GatewayOut): boolean {
-  return g.transport === "idle" && !g.managed;
-}
-
 function avg(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((a, b) => a + b, 0) / values.length;
@@ -167,7 +151,7 @@ export function scopeGatewaysToGroup(
   groupNodeIds: Set<string> | null,
   groupGwStats: MultiGatewayStatsOut | undefined,
 ): GatewayOut[] {
-  const enabled = gateways.filter((g) => g.enabled && g.deleted_at == null && !isUnclaimedSpare(g));
+  const enabled = gateways.filter((g) => g.enabled && g.deleted_at == null);
   if (groupNodeIds == null) return enabled;
   const statsById = new Map((groupGwStats?.gateways ?? []).map((g) => [g.gateway_id, g]));
   return enabled.filter((g) => (statsById.get(g.gateway_id)?.nodes_visible ?? 0) > 0);

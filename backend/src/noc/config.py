@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     login_rate_limit_per_username: int = 5
     login_rate_limit_per_ip: int = 20
 
+    # ── Lanzador de gateways (ADR 0028) ───────────────────────────────
+    # Sidecar aparte que crea/destruye contenedores gateway hablando con el
+    # socket de Docker — el backend nunca lo monta directamente. Si no
+    # responde (no desplegado, entorno sin Docker), "+ Añadir gateway" solo
+    # ofrece registrar un proceso externo.
+    gateway_launcher_url: str = "http://gateway-launcher:9000"
+
     api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = []
 

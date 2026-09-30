@@ -3,11 +3,13 @@ import { useState } from "react";
 import {
   configureGateway,
   connectGateway,
+  createGateway,
   deleteGateway,
   disconnectGateway,
   discoverDevices,
   fetchGateways,
   fetchGatewayStats,
+  fetchLauncherDevices,
   importGateway,
   testGatewayConnection,
   updateGateway,
@@ -17,16 +19,29 @@ import {
   type GatewayStatus,
   type TestConnectionResultOut,
 } from "../api/client";
-import { isUnclaimedSpare } from "./fleet/groupStats";
 import { relativeTime } from "../time";
 
 /**
- * Enlaces (identidad v0.8): las pasarelas dejan de ser tarjetas apiladas y
- * pasan a ser módulos de un rack — un panel por enlace con luz de estado,
- * telemetría de cobertura M6.2 y controles inline. La lógica (asistente
- * Buscar→Probar→Guardar, conectar/desconectar, borrado lógico) es la de M5,
- * intacta; solo cambia la presentación.
+ * Enlaces (identidad v0.8): las pasarelas son módulos de un rack — un panel
+ * por enlace con luz de estado, telemetría de cobertura M6.2 y controles
+ * inline. "+ Añadir enlace" (ADR 0028) tiene dos caminos: crear un
+ * contenedor nuevo (gateway-launcher lo crea/destruye bajo demanda, sin
+ * tocar docker-compose.yml) o registrar un proceso externo que el operador
+ * ya arranca por su cuenta (nativo, `.env`, otro host). Ya no existe la
+ * piscina estática de repuestos (M6.3, retirada).
  */
+
+/** slug apto como gateway_id a partir del nombre elegido por el operador. */
+function slugify(name: string): string {
+  const base = name
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return base ? `gw-${base}` : "";
+}
 
 const STATUS_COLOR: Record<string, string> = {
   connected: "var(--ok)",
@@ -63,19 +78,8 @@ const TRANSPORT_LABEL: Record<string, string> = {
   tcp: "TCP",
   http: "HTTP",
   simulated: "SIM",
-  idle: "Repuesto",
+  idle: "Inactivo",
 };
-
-/**
- * El gateway_id técnico de un repuesto de la piscina (gw-02..gw-06, vive en
- * docker-compose.yml — gw-01 es el gateway original, fuera de la piscina)
- * nunca se muestra al operador: en la interfaz se numeran desde 1. Solo
- * cosmético — el id real sigue siendo el value del <option>.
- */
-function spareLabel(gatewayId: string): string {
-  const n = Number(gatewayId.replace(/^gw-0*/, ""));
-  return Number.isFinite(n) && n > 1 ? `Gateway ${n - 1}` : gatewayId;
-}
 
 /** Par clave/valor en mono, la unidad de lectura de los módulos del rack. */
 function Field({ k, v, title }: { k: string; v: React.ReactNode; title?: string }) {
@@ -89,23 +93,196 @@ function Field({ k, v, title }: { k: string; v: React.ReactNode; title?: string 
   );
 }
 
-// ── Asistente: Buscar dispositivos → Seleccionar → Probar conexión → Guardar ─
+// ── Asistente: crear un contenedor nuevo (ADR 0028), o registrar un proceso
+// externo que el operador ya arranca por su cuenta ──────────────────────────
 
-function AddGatewayWizard({
-  initialGatewayId,
-  candidates,
+/** Paso "Crear un contenedor nuevo": el lanzador lo crea ya con el
+ * transporte definitivo, sin el baile idle→reconectar de los repuestos
+ * M6.3 (retirados) — una única llamada a POST /gateways. */
+function CreateContainerStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
+  const queryClient = useQueryClient();
+  const [transportType, setTransportType] = useState<"usb" | "tcp" | "simulated">("simulated");
+  const [devices, setDevices] = useState<DeviceOut[] | null>(null);
+  const [selectedPort, setSelectedPort] = useState("");
+  const [tcpHost, setTcpHost] = useState("");
+  const [tcpPort, setTcpPort] = useState("4403");
+  const [name, setName] = useState("");
+  const [gatewayId, setGatewayId] = useState("");
+  const [idEdited, setIdEdited] = useState(false);
+
+  const connectionParams = (): Record<string, unknown> => {
+    if (transportType === "usb") return selectedPort ? { device: selectedPort } : {};
+    if (transportType === "tcp") return { host: tcpHost.trim(), port: Number(tcpPort) || 4403 };
+    return {};
+  };
+
+  const discover = useMutation({
+    mutationFn: () => fetchLauncherDevices(),
+    onSuccess: (found) => setDevices(found),
+  });
+
+  const create = useMutation({
+    mutationFn: () =>
+      createGateway({
+        gateway_id: gatewayId,
+        name,
+        transport_type: transportType,
+        connection_params: connectionParams(),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gateways"] });
+      onCreated();
+    },
+  });
+
+  const paramsReady = transportType === "tcp" ? tcpHost.trim() !== "" : true;
+  const idValid = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/.test(gatewayId);
+
+  return (
+    <div className="panel-body">
+      <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
+        gateway-launcher crea un contenedor nuevo y lo conecta directamente con este transporte — no
+        hace falta reconstruir ni tocar docker-compose.yml.
+      </p>
+
+      <div style={{ marginBottom: "0.8rem" }}>
+        <span className="seg">
+          {(["simulated", "usb", "tcp"] as const).map((tt) => (
+            <button
+              key={tt}
+              className={transportType === tt ? "on" : undefined}
+              onClick={() => { setTransportType(tt); setDevices(null); }}
+            >
+              {TRANSPORT_LABEL[tt]}
+            </button>
+          ))}
+        </span>
+      </div>
+
+      {transportType === "tcp" && (
+        <div style={{ marginBottom: "0.8rem", display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", fontSize: 12 }}>
+          <label>
+            Host{" "}
+            <input
+              className="input"
+              style={{ width: 190, fontFamily: "var(--font-mono)" }}
+              placeholder="192.168.1.50 o meshtastic.local"
+              value={tcpHost}
+              onChange={(e) => setTcpHost(e.target.value)}
+            />
+          </label>
+          <label>
+            Puerto{" "}
+            <input
+              className="input"
+              style={{ width: 80 }}
+              type="number"
+              value={tcpPort}
+              onChange={(e) => setTcpPort(e.target.value)}
+            />
+          </label>
+          <span style={{ color: "var(--text-faint)" }}>
+            El firmware solo admite un cliente TCP a la vez — cierra la app oficial si está conectada.
+          </span>
+        </div>
+      )}
+
+      {transportType === "usb" && (
+        <div style={{ marginBottom: "0.8rem" }}>
+          <button className="btn" disabled={discover.isPending} onClick={() => discover.mutate()}>
+            {discover.isPending ? "Buscando…" : "⌕ Buscar dispositivos del host"}
+          </button>
+          {discover.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(discover.error)}</p>}
+          {devices != null && devices.length === 0 && (
+            <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
+              Sin dispositivos detectados en el host de gateway-launcher.
+            </p>
+          )}
+          {devices != null && devices.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginTop: "0.5rem" }}>
+              {devices.map((d) => (
+                <label
+                  key={d.port}
+                  style={{
+                    display: "flex", gap: "0.6rem", alignItems: "center", cursor: "pointer", fontSize: 12,
+                    border: "1px solid " + (selectedPort === d.port ? "var(--accent)" : "var(--border)"),
+                    borderRadius: 3, padding: "0.4rem 0.6rem",
+                    background: selectedPort === d.port ? "var(--accent-tint)" : "transparent",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="device"
+                    checked={selectedPort === d.port}
+                    onChange={() => setSelectedPort(d.port)}
+                  />
+                  <span className="mono">{d.port}</span>
+                  <span style={{ color: "var(--text-dim)" }}>{d.description ?? "—"}</span>
+                  {d.vid && d.pid && <span style={{ color: "var(--text-faint)" }}>VID:PID {d.vid}:{d.pid}</span>}
+                  {d.serial_number && <span style={{ color: "var(--text-faint)" }}>S/N {d.serial_number}</span>}
+                </label>
+              ))}
+            </div>
+          )}
+          <p style={{ color: "var(--text-faint)", fontSize: 11 }}>
+            Vacío = autodetección al arrancar el contenedor. Solo funciona si Docker puede ver
+            dispositivos USB del host (no en Docker Desktop/macOS).
+          </p>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+        <label style={{ fontSize: 12 }}>
+          Nombre{" "}
+          <input
+            className="input"
+            style={{ minWidth: 200 }}
+            placeholder="p. ej. Casa, Repetidor Norte…"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (!idEdited) setGatewayId(slugify(e.target.value));
+            }}
+          />
+        </label>
+        <label style={{ fontSize: 12 }}>
+          gateway_id{" "}
+          <input
+            className="input mono"
+            style={{ width: 160 }}
+            value={gatewayId}
+            onChange={(e) => { setGatewayId(e.target.value); setIdEdited(true); }}
+          />
+        </label>
+        <button
+          className="btn primary"
+          disabled={!name.trim() || !idValid || !paramsReady || create.isPending}
+          onClick={() => create.mutate()}
+          title={!idValid ? "gateway_id: solo alfanumérico, '-', '_', '.'" : undefined}
+        >
+          {create.isPending ? "Creando…" : "Crear pasarela"}
+        </button>
+        <button className="btn ghost" onClick={onCancel}>✕ Cancelar</button>
+      </div>
+      {create.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(create.error)}</p>}
+    </div>
+  );
+}
+
+/** Paso "Registrar externo": pre-registro de un proceso que el operador ya
+ * arranca por su cuenta (nativo, `.env`, otro host) — gateway-launcher no
+ * interviene. Mismo asistente Buscar→Probar→Guardar de siempre. */
+function RegisterExternalStep({
   gateways,
   onCancel,
   onSaved,
 }: {
-  initialGatewayId: string;
-  candidates: string[];
   gateways: GatewayOut[];
   onCancel: () => void;
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [gatewayId, setGatewayId] = useState(initialGatewayId);
+  const [gatewayId, setGatewayId] = useState("");
   const [transportType, setTransportType] = useState<"usb" | "tcp">("usb");
   const [devices, setDevices] = useState<DeviceOut[] | null>(null);
   const [selectedPort, setSelectedPort] = useState("");
@@ -121,28 +298,22 @@ function AddGatewayWizard({
 
   const discover = useMutation({
     mutationFn: () => discoverDevices(gatewayId),
-    onSuccess: (found) => {
-      setDevices(found);
-      setTestResult(null);
-    },
+    onSuccess: (found) => { setDevices(found); setTestResult(null); },
   });
 
   const test = useMutation({
     mutationFn: () =>
-      testGatewayConnection(gatewayId, {
-        transport_type: transportType,
-        connection_params: connectionParams(),
-      }),
+      testGatewayConnection(gatewayId, { transport_type: transportType, connection_params: connectionParams() }),
     onSuccess: (result) => {
       setTestResult(result);
-      if (result.ok && !name) setName(result.local_short_name || result.local_long_name || spareLabel(gatewayId));
+      if (result.ok && !name) setName(result.local_short_name || result.local_long_name || gatewayId);
     },
   });
 
   const save = useMutation({
     mutationFn: () =>
       configureGateway(gatewayId, {
-        name: name || spareLabel(gatewayId),
+        name: name || gatewayId,
         transport_type: transportType,
         connection_params: connectionParams(),
         // Pre-registro sin proceso vivo aún (sin prueba de conexión): se guarda
@@ -161,12 +332,7 @@ function AddGatewayWizard({
   // Un gateway_id que nunca ha reportado heartbeat se puede guardar sin
   // probar conexión: es un pre-registro a la espera de que el proceso
   // correspondiente arranque con ese GATEWAY_ID. Uno ya visto en vivo exige
-  // probar antes de guardar, como siempre. «Nunca visto» se deriva del estado
-  // de la fila, no de la lista de candidatos: una fila creada por pre-registro
-  // conserva status "unassigned" y sin nodo local/historial hasta que su
-  // proceso reporta de verdad — así un pre-registro con errata se puede
-  // volver a guardar (o re-crear tras borrarlo) sin exigir una prueba contra
-  // un proceso que aún no existe.
+  // probar antes de guardar, como siempre.
   const existing = gateways.find((g) => g.gateway_id === gatewayId);
   const everSeen =
     !!existing &&
@@ -175,196 +341,200 @@ function AddGatewayWizard({
   const managedConflict = !!existing && existing.managed && existing.deleted_at == null && everSeen;
 
   return (
-    <div className="panel" style={{ margin: "0.75rem", flexShrink: 0 }}>
-      <div className="panel-head">
-        <span className="panel-title">Nuevo enlace</span>
-        {candidates.length > 0 ? (
-          <select
+    <div className="panel-body">
+      <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
+        Para un proceso que arrancas tú (nativo fuera de Docker, otro host…) con su propio
+        GATEWAY_ID — gateway-launcher no lo toca.
+      </p>
+      <div style={{ marginBottom: "0.8rem", display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ fontSize: 12 }}>
+          gateway_id{" "}
+          <input
             className="input mono"
-            style={{ width: 170 }}
+            style={{ width: 160 }}
             value={gatewayId}
-            onChange={(e) => {
-              setGatewayId(e.target.value);
-              setDevices(null);
-              setTestResult(null);
-            }}
-          >
-            {candidates.map((c) => (
-              <option key={c} value={c}>
-                {spareLabel(c)}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span style={{ color: "var(--text-dim)", fontSize: 12 }}>
-            Sin pasarelas de repuesto disponibles ahora mismo
-          </span>
-        )}
+            onChange={(e) => { setGatewayId(e.target.value); setDevices(null); setTestResult(null); }}
+          />
+        </label>
         <span className="seg">
           {(["usb", "tcp"] as const).map((tt) => (
             <button
               key={tt}
               className={transportType === tt ? "on" : undefined}
-              onClick={() => {
-                setTransportType(tt);
-                setTestResult(null);
-              }}
+              onClick={() => { setTransportType(tt); setTestResult(null); }}
             >
               {TRANSPORT_LABEL[tt]}
             </button>
           ))}
         </span>
-        <span className="panel-count" />
-        <button className="btn ghost" onClick={onCancel}>✕ Cancelar</button>
       </div>
-      <div className="panel-body">
-        {transportType === "tcp" && (
-          <div style={{ marginBottom: "0.8rem" }}>
-            <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
-              1 · Dirección del nodo en la red (WiFi/Ethernet). Sin búsqueda automática: introduce el
-              host manualmente. El firmware solo admite un cliente TCP a la vez — cierra la app
-              oficial si está conectada a ese nodo.
-            </p>
-            <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", fontSize: 12 }}>
-              <label>
-                Host{" "}
-                <input
-                  className="input"
-                  style={{ width: 190, fontFamily: "var(--font-mono)" }}
-                  placeholder="192.168.1.50 o meshtastic.local"
-                  value={tcpHost}
-                  onChange={(e) => { setTcpHost(e.target.value); setTestResult(null); }}
-                />
-              </label>
-              <label>
-                Puerto{" "}
-                <input
-                  className="input"
-                  style={{ width: 80 }}
-                  type="number"
-                  value={tcpPort}
-                  onChange={(e) => { setTcpPort(e.target.value); setTestResult(null); }}
-                />
-              </label>
-            </div>
-          </div>
-        )}
 
-        {transportType === "usb" && (
-          <div style={{ marginBottom: "0.8rem" }}>
-            <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
-              1 · Buscar dispositivos USB conectados a esta pasarela.
-            </p>
-            <button
-              className="btn"
-              disabled={!gatewayId.trim() || discover.isPending}
-              onClick={() => discover.mutate()}
-              title={!gatewayId.trim() ? "No hay pasarelas de repuesto disponibles" : undefined}
-            >
-              {discover.isPending ? "Buscando…" : "⌕ Buscar dispositivos"}
-            </button>
-            {discover.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(discover.error)}</p>}
-            {devices != null && devices.length === 0 && (
-              <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
-                Sin dispositivos detectados. Comprueba el cable o pulsa buscar de nuevo.
-              </p>
-            )}
-            {devices != null && devices.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginTop: "0.5rem" }}>
-                {devices.map((d) => (
-                  <label
-                    key={d.port}
-                    style={{
-                      display: "flex", gap: "0.6rem", alignItems: "center", cursor: "pointer", fontSize: 12,
-                      border: "1px solid " + (selectedPort === d.port ? "var(--accent)" : "var(--border)"),
-                      borderRadius: 3, padding: "0.4rem 0.6rem",
-                      background: selectedPort === d.port ? "var(--accent-tint)" : "transparent",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="device"
-                      checked={selectedPort === d.port}
-                      onChange={() => { setSelectedPort(d.port); setTestResult(null); }}
-                    />
-                    <span className="mono">{d.port}</span>
-                    <span style={{ color: "var(--text-dim)" }}>{d.description ?? "—"}</span>
-                    {d.vid && d.pid && <span style={{ color: "var(--text-faint)" }}>VID:PID {d.vid}:{d.pid}</span>}
-                    {d.serial_number && <span style={{ color: "var(--text-faint)" }}>S/N {d.serial_number}</span>}
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
+      {transportType === "tcp" && (
         <div style={{ marginBottom: "0.8rem" }}>
-          <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>2 · Probar la conexión antes de guardar.</p>
+          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", fontSize: 12 }}>
+            <label>
+              Host{" "}
+              <input
+                className="input"
+                style={{ width: 190, fontFamily: "var(--font-mono)" }}
+                placeholder="192.168.1.50 o meshtastic.local"
+                value={tcpHost}
+                onChange={(e) => { setTcpHost(e.target.value); setTestResult(null); }}
+              />
+            </label>
+            <label>
+              Puerto{" "}
+              <input
+                className="input"
+                style={{ width: 80 }}
+                type="number"
+                value={tcpPort}
+                onChange={(e) => { setTcpPort(e.target.value); setTestResult(null); }}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {transportType === "usb" && (
+        <div style={{ marginBottom: "0.8rem" }}>
           <button
             className="btn"
-            disabled={!gatewayId.trim() || !paramsReady || test.isPending}
-            onClick={() => test.mutate()}
-            title={!gatewayId.trim() ? "No hay pasarelas de repuesto disponibles" : undefined}
+            disabled={!gatewayId.trim() || discover.isPending}
+            onClick={() => discover.mutate()}
+            title={!gatewayId.trim() ? "Escribe primero el gateway_id del proceso" : undefined}
           >
-            {test.isPending ? "Probando…" : "▶ Probar conexión"}
+            {discover.isPending ? "Buscando…" : "⌕ Buscar dispositivos"}
           </button>
-          {testResult && (
-            testResult.ok ? (
-              <p style={{ color: "var(--ok)", fontSize: 12 }}>
-                ✓ Conectado — nodo {testResult.local_short_name ?? testResult.local_node_id}
-                {testResult.local_hw_model ? ` (${testResult.local_hw_model})` : ""}
-                {testResult.local_firmware_version ? ` · fw ${testResult.local_firmware_version}` : ""}
-              </p>
-            ) : (
-              <p style={{ color: "var(--crit)", fontSize: 12 }}>✗ {testResult.error ?? "Fallo de conexión"}</p>
-            )
-          )}
-        </div>
-
-        <div>
-          <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>3 · Nombre y guardar.</p>
-          <input
-            className="input"
-            style={{ minWidth: 220 }}
-            placeholder="Nombre (p. ej. Casa, Repetidor Norte…)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <button
-            className={`btn${testResult?.ok || !isKnownCandidate ? " primary" : ""}`}
-            style={{ marginLeft: "0.5rem" }}
-            disabled={
-              managedConflict ||
-              (isKnownCandidate && !testResult?.ok) ||
-              // TCP sin host guardaría {host: ""} y el connect posterior
-              // revienta en el transporte (fail-fast, ADR 0023); USB sin
-              // puerto sí es válido: params vacíos = autodetección al arrancar.
-              (transportType === "tcp" && !paramsReady) ||
-              !name.trim() ||
-              !gatewayId.trim() ||
-              save.isPending
-            }
-            onClick={() => save.mutate()}
-            title={
-              managedConflict
-                ? "Ya hay un enlace configurado con este identificador"
-                : isKnownCandidate && !testResult?.ok
-                  ? "Prueba la conexión con éxito antes de guardar"
-                  : transportType === "tcp" && !paramsReady
-                    ? "Introduce el host del nodo TCP"
-                    : undefined
-            }
-          >
-            Guardar enlace
-          </button>
-          {save.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(save.error)}</p>}
-          {managedConflict && (
-            <p style={{ color: "var(--crit)", fontSize: 12 }}>
-              «{spareLabel(gatewayId)}» ya está configurado — edítalo desde su panel en vez de crear uno nuevo.
+          {discover.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(discover.error)}</p>}
+          {devices != null && devices.length === 0 && (
+            <p style={{ color: "var(--text-dim)", fontSize: 12 }}>
+              Sin dispositivos detectados. Comprueba el cable o pulsa buscar de nuevo.
             </p>
           )}
+          {devices != null && devices.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginTop: "0.5rem" }}>
+              {devices.map((d) => (
+                <label
+                  key={d.port}
+                  style={{
+                    display: "flex", gap: "0.6rem", alignItems: "center", cursor: "pointer", fontSize: 12,
+                    border: "1px solid " + (selectedPort === d.port ? "var(--accent)" : "var(--border)"),
+                    borderRadius: 3, padding: "0.4rem 0.6rem",
+                    background: selectedPort === d.port ? "var(--accent-tint)" : "transparent",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="device"
+                    checked={selectedPort === d.port}
+                    onChange={() => { setSelectedPort(d.port); setTestResult(null); }}
+                  />
+                  <span className="mono">{d.port}</span>
+                  <span style={{ color: "var(--text-dim)" }}>{d.description ?? "—"}</span>
+                  {d.vid && d.pid && <span style={{ color: "var(--text-faint)" }}>VID:PID {d.vid}:{d.pid}</span>}
+                  {d.serial_number && <span style={{ color: "var(--text-faint)" }}>S/N {d.serial_number}</span>}
+                </label>
+              ))}
+            </div>
+          )}
         </div>
+      )}
+
+      <div style={{ marginBottom: "0.8rem" }}>
+        <button
+          className="btn"
+          disabled={!gatewayId.trim() || !paramsReady || test.isPending}
+          onClick={() => test.mutate()}
+        >
+          {test.isPending ? "Probando…" : "▶ Probar conexión"}
+        </button>
+        {testResult && (
+          testResult.ok ? (
+            <p style={{ color: "var(--ok)", fontSize: 12 }}>
+              ✓ Conectado — nodo {testResult.local_short_name ?? testResult.local_node_id}
+              {testResult.local_hw_model ? ` (${testResult.local_hw_model})` : ""}
+              {testResult.local_firmware_version ? ` · fw ${testResult.local_firmware_version}` : ""}
+            </p>
+          ) : (
+            <p style={{ color: "var(--crit)", fontSize: 12 }}>✗ {testResult.error ?? "Fallo de conexión"}</p>
+          )
+        )}
       </div>
+
+      <div>
+        <input
+          className="input"
+          style={{ minWidth: 220 }}
+          placeholder="Nombre (p. ej. Casa, Repetidor Norte…)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <button
+          className={`btn${testResult?.ok || !isKnownCandidate ? " primary" : ""}`}
+          style={{ marginLeft: "0.5rem" }}
+          disabled={
+            managedConflict ||
+            (isKnownCandidate && !testResult?.ok) ||
+            (transportType === "tcp" && !paramsReady) ||
+            !name.trim() ||
+            !gatewayId.trim() ||
+            save.isPending
+          }
+          onClick={() => save.mutate()}
+          title={
+            managedConflict
+              ? "Ya hay un enlace configurado con este identificador"
+              : isKnownCandidate && !testResult?.ok
+                ? "Prueba la conexión con éxito antes de guardar"
+                : transportType === "tcp" && !paramsReady
+                  ? "Introduce el host del nodo TCP"
+                  : undefined
+          }
+        >
+          Guardar enlace
+        </button>
+        <button className="btn ghost" style={{ marginLeft: "0.5rem" }} onClick={onCancel}>✕ Cancelar</button>
+        {save.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(save.error)}</p>}
+        {managedConflict && (
+          <p style={{ color: "var(--crit)", fontSize: 12 }}>
+            «{gatewayId}» ya está configurado — edítalo desde su panel en vez de crear uno nuevo.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddGatewayWizard({
+  gateways,
+  onCancel,
+  onSaved,
+}: {
+  gateways: GatewayOut[];
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [mode, setMode] = useState<"create" | "external">("create");
+  return (
+    <div className="panel" style={{ margin: "0.75rem", flexShrink: 0 }}>
+      <div className="panel-head">
+        <span className="panel-title">Nuevo enlace</span>
+        <span className="seg">
+          <button className={mode === "create" ? "on" : undefined} onClick={() => setMode("create")}>
+            Crear contenedor
+          </button>
+          <button className={mode === "external" ? "on" : undefined} onClick={() => setMode("external")}>
+            Registrar externo
+          </button>
+        </span>
+        <span className="panel-count" />
+      </div>
+      {mode === "create" ? (
+        <CreateContainerStep onCancel={onCancel} onCreated={onSaved} />
+      ) : (
+        <RegisterExternalStep gateways={gateways} onCancel={onCancel} onSaved={onSaved} />
+      )}
     </div>
   );
 }
@@ -410,7 +580,8 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
         <StatusLight status={gateway.status} />
         {!gateway.managed && <span className="chip" style={{ color: "var(--warn)", borderColor: "var(--warn)" }}>sin configurar</span>}
         {gateway.managed && !gateway.enabled && <span className="chip">deshabilitado</span>}
-        <span className="panel-count">{spareLabel(gateway.gateway_id)} {expanded ? "▲" : "▼"}</span>
+        {gateway.container_managed && <span className="chip" title="Contenedor creado/destruido por gateway-launcher">contenedor</span>}
+        <span className="panel-count mono">{gateway.gateway_id} {expanded ? "▲" : "▼"}</span>
       </div>
 
       <div className="panel-body">
@@ -493,8 +664,12 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
                   {gateway.enabled ? "Deshabilitar" : "Habilitar"}
                 </button>
                 {deleteArmed ? (
-                  <button className="btn danger" onClick={() => doDelete.mutate()}>
-                    ¿Eliminar «{gateway.name}»?
+                  <button
+                    className="btn danger"
+                    onClick={() => doDelete.mutate()}
+                    title={gateway.container_managed ? "También destruye su contenedor Docker" : undefined}
+                  >
+                    {gateway.container_managed ? "¿Eliminar y destruir contenedor?" : `¿Eliminar «${gateway.name}»?`}
                   </button>
                 ) : (
                   <button className="btn" onClick={() => setDeleteArmed(true)}>
@@ -534,27 +709,8 @@ export function GatewaysView() {
   const [wizardOpen, setWizardOpen] = useState(false);
 
   const all = gateways.data ?? [];
-  // Repuestos de la piscina (M6.3) sin reclamar: laten "idle" pero no son un
-  // enlace real todavía — solo deben verse como candidatos del asistente,
-  // nunca como una tarjeta más en el listado (serían 5 tarjetas vacías).
-  const list = all.filter((g) => g.deleted_at == null && !isUnclaimedSpare(g));
+  const list = all.filter((g) => g.deleted_at == null);
   const deleted = all.filter((g) => g.deleted_at != null);
-  // El desplegable de "+ Añadir gateway" muestra SOLO repuestos de la
-  // piscina M6.3 vivos ahora mismo (pedido explícito: nada de fantasmas de
-  // procesos retirados, ni pasarelas ya gestionadas/borradas que antes
-  // también se ofrecían para reclamar) — "vivo" = con heartbeat reciente,
-  // ya que un contenedor eliminado deja de latir pero su fila persiste.
-  const CANDIDATE_FRESH_MS = 120_000;
-  const now = Date.now();
-  const candidates = all
-    .filter(
-      (g) =>
-        isUnclaimedSpare(g) &&
-        g.updated_at != null &&
-        now - new Date(g.updated_at).getTime() < CANDIDATE_FRESH_MS,
-    )
-    .map((g) => g.gateway_id)
-    .sort();
   const statsById = new Map((stats.data?.gateways ?? []).map((g) => [g.gateway_id, g]));
   const connected = list.filter((g) => g.status === "connected").length;
 
@@ -574,8 +730,6 @@ export function GatewaysView() {
       {wizardOpen ? (
         <div className="ws-scroll">
           <AddGatewayWizard
-            initialGatewayId={candidates[0] ?? ""}
-            candidates={candidates}
             gateways={all}
             onCancel={() => setWizardOpen(false)}
             onSaved={() => setWizardOpen(false)}

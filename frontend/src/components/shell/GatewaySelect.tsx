@@ -1,5 +1,4 @@
 import { type GatewaySelectionIn, type GatewayOut } from "../../api/client";
-import { isUnclaimedSpare } from "../fleet/groupStats";
 
 /**
  * Selección inteligente de gateway (Nivel 1 de la jerarquía): único selector
@@ -22,7 +21,7 @@ export function GatewaySelect({
   compact?: boolean;
 }) {
   const current = value.mode === "forced" ? (value.gateway_id ?? "") : value.mode;
-  const rows = gateways.filter((g) => g.enabled && g.deleted_at == null && !isUnclaimedSpare(g));
+  const rows = gateways.filter((g) => g.enabled && g.deleted_at == null);
 
   return (
     <select
@@ -62,7 +61,7 @@ export function PreferredGatewaySelect({
   onChange: (gatewayId: string | null) => void;
   gateways: GatewayOut[];
 }) {
-  const rows = gateways.filter((g) => g.enabled && g.deleted_at == null && !isUnclaimedSpare(g));
+  const rows = gateways.filter((g) => g.enabled && g.deleted_at == null);
   return (
     <select
       className="input"

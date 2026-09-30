@@ -542,6 +542,7 @@ class SqlGatewayRepository:
         enabled: bool,
         priority: int,
         desired_status: str,
+        container_managed: bool = False,
     ) -> GatewayInfo:
         row = await self._session.get(GatewayModel, gateway_id)
         if row is None:
@@ -559,6 +560,11 @@ class SqlGatewayRepository:
         row.enabled = enabled
         row.priority = priority
         row.desired_status = desired_status
+        # Solo se activa explícitamente al provisionar vía el lanzador
+        # (ADR 0028) — una reconfiguración manual posterior de una pasarela
+        # ya container_managed no debe desactivarlo por accidente.
+        if container_managed:
+            row.container_managed = True
         row.deleted_at = None
         # (Re)configurar es adoptar un dispositivo, potencialmente distinto del
         # que dejó su rastro en esta fila (borrado y vuelto a crear con el
@@ -640,9 +646,11 @@ class SqlGatewayRepository:
         admin_operations/alerts; esas siguen guardando el id como texto
         plano, sin FK, así que perder la fila solo degrada su nombre
         bonito en pantallas de historial, nunca rompe nada). Si el proceso
-        sigue vivo y late como spare de la piscina (M6.3), reaparecerá
-        limpio solo con el siguiente heartbeat — efecto de reseteo
-        deliberado, no un bug."""
+        sigue vivo (p. ej. un externo no destruido por esta llamada) y
+        vuelve a latir, reaparecerá limpio con el siguiente heartbeat —
+        efecto de reseteo deliberado, no un bug. `GatewayService.delete()`
+        (ADR 0028) destruye antes el contenedor real si `container_managed`,
+        así que en ese caso no hay ningún proceso que pueda resucitar la fila."""
         row = await self._session.get(GatewayModel, gateway_id)
         if row is None or not row.managed:
             return False

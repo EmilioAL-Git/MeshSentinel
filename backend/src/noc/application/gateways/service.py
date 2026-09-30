@@ -18,6 +18,11 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from noc.adapters.events.command_queue import RedisCommandQueue
+from noc.adapters.gateways.launcher_client import (
+    GatewayLauncherClient,
+    LauncherContainerNotFound,
+    LauncherError,
+)
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.nexus_repositories import SqlNexusOperationRepository
 from noc.adapters.persistence.repositories import SqlGatewayRepository
@@ -42,10 +47,23 @@ class GatewayHasActiveWorkError(Exception):
 class GatewayStillConnectedError(Exception):
     """Comprobación de vida del propio proceso, pedida aparte del trabajo
     en vuelo: solo bloquea si hay una conexión REAL activa (status
-    "connected" — USB/TCP con nodo local), nunca un repuesto "idle" de la
-    piscina (M6.3, cuyo reseteo limpio al borrar y volver a latir es
-    justo el comportamiento buscado) ni uno "connecting"/"reconnecting"/
-    "error"/"disconnected"/"unassigned"."""
+    "connected" — USB/TCP con nodo local), nunca un transporte "idle" (tras
+    un disconnect(), sigue latiendo pero sin conexión real — reseteo limpio
+    al borrar es el comportamiento buscado) ni uno "connecting"/
+    "reconnecting"/"error"/"disconnected"/"unassigned"."""
+
+
+class GatewayAlreadyExistsError(Exception):
+    """`provision()`: ya hay una fila configurada (`managed=True`) con ese
+    gateway_id — crear un contenedor nuevo nunca reconfigura un enlace
+    existente, para eso está "Editar" en su propio panel."""
+
+
+class LauncherUnavailableError(Exception):
+    """`gateway-launcher` (ADR 0028) no respondió o rechazó la operación —
+    la fila en BD no se toca: ni se crea al provisionar, ni se borra al
+    eliminar una pasarela `container_managed` (evita un contenedor huérfano
+    sin fila que lo represente, o una fila sin contenedor real detrás)."""
 
 
 class GatewayService:
@@ -54,10 +72,12 @@ class GatewayService:
         session_factory: async_sessionmaker[AsyncSession],
         command_queue: RedisCommandQueue,
         stale_after_seconds: int = 90,
+        launcher: GatewayLauncherClient | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._queue = command_queue
         self._stale_after_seconds = stale_after_seconds
+        self._launcher = launcher
         self._waiters: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
     # ── Lectura ──────────────────────────────────────────────────────────────
@@ -109,6 +129,55 @@ class GatewayService:
             return None
         finally:
             self._waiters.pop(request_id, None)
+
+    # ── Lanzador de contenedores (ADR 0028) ──────────────────────────────────
+
+    async def list_launcher_devices(self) -> list[dict[str, Any]]:
+        """Dispositivos USB visibles en el host, vía gateway-launcher — para
+        el paso 1 del asistente "Crear un contenedor nuevo", antes de que
+        exista ningún gateway_id/proceso. Distinto de `discover()` (que
+        correlaciona con un proceso YA vivo, para reconfigurar uno
+        existente)."""
+        if self._launcher is None:
+            raise LauncherUnavailableError("gateway-launcher no está configurado en este despliegue")
+        try:
+            return await self._launcher.list_devices()
+        except LauncherError as exc:
+            raise LauncherUnavailableError(str(exc)) from exc
+
+    async def provision(
+        self,
+        gateway_id: str,
+        name: str,
+        transport_type: str,
+        connection_params: dict[str, Any],
+    ) -> GatewayInfo:
+        """"+ Añadir gateway" → "Crear un contenedor nuevo": pide al lanzador
+        crear el contenedor YA con el transporte definitivo como variables de
+        arranque (sin el baile idle→reconectar de los repuestos M6.3,
+        retirados) y persiste la fila como container_managed. Si ya existe
+        una fila configurada con este gateway_id, se rechaza antes de tocar
+        el lanzador — nunca se reconfigura un enlace existente por esta vía."""
+        if self._launcher is None:
+            raise LauncherUnavailableError("gateway-launcher no está configurado en este despliegue")
+        existing = await self.get(gateway_id)
+        if existing is not None and existing.managed:
+            raise GatewayAlreadyExistsError(f"«{gateway_id}» ya está configurado — elige otro identificador")
+        try:
+            await self._launcher.create_container(gateway_id, transport_type, connection_params)
+        except LauncherError as exc:
+            raise LauncherUnavailableError(str(exc)) from exc
+        async with self._session_factory() as session, session.begin():
+            return await SqlGatewayRepository(session).configure(
+                gateway_id,
+                name,
+                transport_type,
+                connection_params,
+                enabled=True,
+                priority=0,
+                desired_status="connected",
+                container_managed=True,
+            )
 
     # ── Configuración (CRUD) ────────────────────────────────────────────────
 
@@ -228,6 +297,17 @@ class GatewayService:
                     f"«{gateway_id}» tiene operaciones pendientes o en vuelo — espera a que "
                     "terminen (o cancélalas) antes de eliminarla"
                 )
+            # ADR 0028: si el contenedor lo creó el lanzador, se destruye
+            # ANTES de borrar la fila — si el lanzador falla, se aborta todo
+            # (ni fila borrada ni comando enviado) para no dejar un
+            # contenedor huérfano sin fila que lo represente.
+            if info is not None and info.container_managed and self._launcher is not None:
+                try:
+                    await self._launcher.destroy_container(gateway_id)
+                except LauncherContainerNotFound:
+                    pass  # ya no existe: idempotente, seguimos con el borrado
+                except LauncherError as exc:
+                    raise LauncherUnavailableError(str(exc)) from exc
             deleted = await repo.delete(gateway_id)
         if deleted:
             await self._send_command(gateway_id, "command.gateway_disconnect", {})

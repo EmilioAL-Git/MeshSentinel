@@ -239,6 +239,7 @@ class GatewayOut(BaseModel):
     enabled: bool
     priority: int
     desired_status: str
+    container_managed: bool
     deleted_at: datetime | None
     last_connected_at: datetime | None
     last_disconnected_at: datetime | None

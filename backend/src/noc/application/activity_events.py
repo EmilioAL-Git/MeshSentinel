@@ -466,6 +466,7 @@ def render_gateway_status(
 # por el propio proceso gateway vía heartbeat) — no se duplican, narran
 # hechos distintos (intención vs. resultado).
 _GATEWAY_ACTION_NARRATIVE: dict[str, tuple[Priority, str, str]] = {
+    "create": ("important", "🆕", "{actor} creó la pasarela {name} (contenedor nuevo)"),
     "connect": ("important", "🔌", "{actor} conectó la pasarela {name}"),
     "disconnect": ("warning", "🔌", "{actor} desconectó la pasarela {name}"),
     "configure": ("important", "🛠", "{actor} configuró la pasarela {name}"),

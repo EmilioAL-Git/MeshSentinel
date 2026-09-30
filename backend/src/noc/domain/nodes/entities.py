@@ -140,6 +140,9 @@ class GatewayInfo:
     enabled: bool = True
     priority: int = 0
     desired_status: str = "disconnected"
+    # ADR 0028: contenedor creado/destruido por gateway-launcher, distinto de
+    # un proceso externo (nativo, `.env`, despliegue manual).
+    container_managed: bool = False
     deleted_at: datetime | None = None
     last_connected_at: datetime | None = None
     last_disconnected_at: datetime | None = None

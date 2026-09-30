@@ -34,6 +34,15 @@ services:
     volumes:
       - ./gateway/src:/app/src
 
+  gateway-launcher:
+    build:
+      context: ./launcher
+    command: ["uvicorn", "launcher.main:app", "--host", "0.0.0.0", "--port", "9000", "--reload"]
+    environment:
+      LAUNCHER_LOG_LEVEL: DEBUG
+    volumes:
+      - ./launcher/src:/app/src
+
   frontend:
     image: node:22-alpine
     build: !reset null

@@ -28,6 +28,7 @@ from noc.adapters.api.routers import (
 )
 from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.command_queue import RedisCommandQueue
+from noc.adapters.gateways.launcher_client import GatewayLauncherClient
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
 from noc.adapters.persistence.repositories import SqlNodeRepository
@@ -77,9 +78,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     command_queue = RedisCommandQueue(settings.redis_url, settings.commands_stream_prefix)
     # Gestión de gateways (M5, ADR 0021): CRUD + comandos command.gateway_*,
-    # reutiliza el mismo stream de comandos que el pipeline de administración
+    # reutiliza el mismo stream de comandos que el pipeline de administración.
+    # `launcher` (ADR 0028): sidecar aparte que crea/destruye contenedores —
+    # si no responde, "provision"/"delete de container_managed" fallan con
+    # un 502 claro, el resto de la gestión de gateways sigue intacta.
     app.state.gateways = GatewayService(
-        app.state.db.session_factory, command_queue, settings.gateway_stale_after_seconds
+        app.state.db.session_factory,
+        command_queue,
+        settings.gateway_stale_after_seconds,
+        launcher=GatewayLauncherClient(settings.gateway_launcher_url),
     )
     app.state.event_bus.subscribe(app.state.gateways.handle_event)
     # JenTastic-Nexus (ADR 0027): reutiliza el mismo stream de comandos. El

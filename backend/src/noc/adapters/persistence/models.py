@@ -43,6 +43,9 @@ class GatewayModel(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     desired_status: Mapped[str] = mapped_column(String(16), default="disconnected")
+    # Ciclo de vida del contenedor Docker gestionado por gateway-launcher
+    # (ADR 0028), ortogonal a `managed`. Ver GatewayService.provision/delete.
+    container_managed: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -155,6 +155,7 @@ export interface GatewayOut {
   enabled: boolean;
   priority: number;
   desired_status: "connected" | "disconnected";
+  container_managed: boolean;
   deleted_at: string | null;
   last_connected_at: string | null;
   last_disconnected_at: string | null;
@@ -252,6 +253,22 @@ export interface TestConnectionResultOut {
   local_hw_model: string | null;
   local_firmware_version: string | null;
 }
+
+/** Dispositivos USB del host vía gateway-launcher (ADR 0028) — para "Crear
+ * un contenedor nuevo", antes de que exista ningún proceso al que
+ * correlacionar. Distinto de discoverDevices(), que pregunta a un proceso
+ * YA vivo. */
+export const fetchLauncherDevices = () => get<DeviceOut[]>("/gateways/devices");
+
+export interface CreateGatewayIn {
+  gateway_id: string;
+  name: string;
+  transport_type: "usb" | "tcp" | "simulated";
+  connection_params: Record<string, unknown>;
+}
+/** "+ Añadir gateway" → "Crear un contenedor nuevo": pide al lanzador crear
+ * el contenedor y persiste el enlace como container_managed (ADR 0028). */
+export const createGateway = (body: CreateGatewayIn) => send<GatewayOut>("POST", "/gateways", body);
 
 export const discoverDevices = (gatewayId: string) =>
   send<DeviceOut[]>("POST", `/gateways/${encodeURIComponent(gatewayId)}/discover`);
