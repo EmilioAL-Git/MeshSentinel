@@ -94,6 +94,72 @@ services:
   #       condition: service_healthy
   #   restart: unless-stopped
 
+  # ── Piscina de gateways de repuesto (M6.3) ─────────────────────────────
+  # Arrancan con transporte "idle": no conectan a nada, solo laten como
+  # "unassigned" hasta que se reclaman desde "+ Añadir gateway" en la
+  # interfaz — el asistente los reconfigura (USB/TCP) en caliente por
+  # comando, sin tocar este archivo ni reconstruir nada. Ajusta la cantidad
+  # de bloques si necesitas más o menos repuestos disponibles.
+  gateway-spare-1:
+    build: ./gateway
+    environment:
+      GATEWAY_ID: gw-spare-1
+      GATEWAY_TRANSPORT: idle
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway-spare-2:
+    build: ./gateway
+    environment:
+      GATEWAY_ID: gw-spare-2
+      GATEWAY_TRANSPORT: idle
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway-spare-3:
+    build: ./gateway
+    environment:
+      GATEWAY_ID: gw-spare-3
+      GATEWAY_TRANSPORT: idle
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway-spare-4:
+    build: ./gateway
+    environment:
+      GATEWAY_ID: gw-spare-4
+      GATEWAY_TRANSPORT: idle
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway-spare-5:
+    build: ./gateway
+    environment:
+      GATEWAY_ID: gw-spare-5
+      GATEWAY_TRANSPORT: idle
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     build: ./frontend
     ports:

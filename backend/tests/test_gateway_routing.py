@@ -57,9 +57,10 @@ async def heartbeat(session_factory, gateway_id: str, status: str = "connected",
     now = datetime.now(timezone.utc)
     async with session_factory() as session:
         repo = SqlGatewayRepository(session)
-        await repo.upsert(
-            GatewayInfo(gateway_id=gateway_id, status=status, transport="simulated", updated_at=now)
-        )
+        # configure() ANTES del heartbeat, como en producción (ADR 0021 §3):
+        # (re)configurar limpia el runtime de la fila a la espera de que el
+        # próximo heartbeat real la rellene — si se llamara después, borraría
+        # el status/detail que el propio heartbeat acaba de fijar.
         if config:
             await repo.configure(
                 gateway_id,
@@ -70,6 +71,9 @@ async def heartbeat(session_factory, gateway_id: str, status: str = "connected",
                 priority=config.get("priority", 0),
                 desired_status="connected",
             )
+        await repo.upsert(
+            GatewayInfo(gateway_id=gateway_id, status=status, transport="simulated", updated_at=now)
+        )
         await session.commit()
 
 

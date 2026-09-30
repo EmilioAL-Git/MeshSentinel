@@ -557,6 +557,24 @@ class SqlGatewayRepository:
         row.priority = priority
         row.desired_status = desired_status
         row.deleted_at = None
+        # (Re)configurar es adoptar un dispositivo, potencialmente distinto del
+        # que dejó su rastro en esta fila (borrado y vuelto a crear con el
+        # mismo gateway_id, o transporte reasignado a otro nodo físico): el
+        # runtime/historial de la fila anterior no debe verse como si fuera de
+        # este. Se deja únicamente lo que el próximo heartbeat/upsert() vuelve
+        # a rellenar por sí solo.
+        row.status = "unassigned"
+        row.detail = None
+        row.local_node_id = None
+        row.local_short_name = None
+        row.local_long_name = None
+        row.local_hw_model = None
+        row.local_firmware_version = None
+        row.channels = []
+        row.last_connected_at = None
+        row.last_disconnected_at = None
+        row.last_error = None
+        row.last_error_at = None
         await self._session.flush()
         return _to_entity(row, GatewayInfo, {"gateway_id": "id"})
 
@@ -575,6 +593,22 @@ class SqlGatewayRepository:
             return None
         if name is not None:
             row.name = name
+        if transport_type is not None or connection_params is not None:
+            # Mismo criterio que configure(): cambiar de transporte o de
+            # parámetros de conexión es apuntar a un dispositivo distinto, el
+            # historial de la fila anterior no le pertenece.
+            row.status = "unassigned"
+            row.detail = None
+            row.local_node_id = None
+            row.local_short_name = None
+            row.local_long_name = None
+            row.local_hw_model = None
+            row.local_firmware_version = None
+            row.channels = []
+            row.last_connected_at = None
+            row.last_disconnected_at = None
+            row.last_error = None
+            row.last_error_at = None
         if transport_type is not None:
             row.transport_type = transport_type
         if connection_params is not None:

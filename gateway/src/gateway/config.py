@@ -15,7 +15,11 @@ class Settings(BaseSettings):
     gateway_id: str = Field(default="gw-01", validation_alias=AliasChoices("GATEWAY_ID"))
     log_level: str = "INFO"
 
-    transport: Literal["usb", "tcp", "http", "simulated"] = "simulated"
+    # "idle": repuesto de la piscina M6.3 — no conecta a nada, solo late como
+    # "unassigned" hasta que "+ Añadir gateway" lo reclama con un
+    # command.gateway_connect real (mismo mecanismo que M5, sin código nuevo
+    # en TransportManager/CommandConsumer).
+    transport: Literal["usb", "tcp", "http", "simulated", "idle"] = "simulated"
     tcp_host: str = ""
     tcp_port: int = 4403
     http_url: str = ""

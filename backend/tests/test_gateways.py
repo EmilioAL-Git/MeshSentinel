@@ -93,6 +93,37 @@ async def test_update_partial_edit_reconnects_with_new_params(session_factory):
     assert last["payload"]["connection_params"] == {"device": "/dev/cu.b"}
 
 
+async def test_configure_clears_stale_error_from_previous_device(session_factory):
+    """Reconfigurar un gateway_id (borrado y vuelto a crear, o reasignado a
+    otro dispositivo) no debe arrastrar el error/estado del anterior."""
+    from noc.adapters.persistence.repositories import SqlGatewayRepository
+    from noc.domain.nodes.entities import GatewayInfo
+
+    async with session_factory() as session:
+        repo = SqlGatewayRepository(session)
+        await repo.configure(GW, "Casa", "tcp", {"host": "10.0.0.1"}, True, 0, "connected")
+        await repo.upsert(
+            GatewayInfo(
+                gateway_id=GW,
+                status="error",
+                transport="tcp",
+                detail="connect failed: Connection refused",
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    service = GatewayService(session_factory, FakeQueue())
+    stale = await service.get(GW)
+    assert stale is not None and stale.last_error is not None
+
+    info = await service.configure(GW, "Casa", "tcp", {"host": "10.0.0.2"}, True, 0)
+    assert info.last_error is None
+    assert info.last_error_at is None
+    assert info.last_connected_at is None
+    assert info.status == "unassigned"
+
+
 async def test_update_unmanaged_gateway_returns_none(session_factory):
     service = GatewayService(session_factory, FakeQueue())
     assert await service.update(GW, name="X") is None

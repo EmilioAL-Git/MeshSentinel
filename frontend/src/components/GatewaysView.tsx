@@ -62,6 +62,7 @@ const TRANSPORT_LABEL: Record<string, string> = {
   tcp: "TCP",
   http: "HTTP",
   simulated: "SIM",
+  idle: "Repuesto",
 };
 
 /** Par clave/valor en mono, la unidad de lectura de los módulos del rack. */
@@ -414,7 +415,14 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
           </div>
         )}
 
-        {!gateway.managed && (
+        {!gateway.managed && gateway.transport === "idle" && (
+          <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
+            Repuesto libre de la piscina (M6.3) — resérvalo desde «+ Añadir gateway» escribiendo{" "}
+            <span className="mono">{gateway.gateway_id}</span> y el transporte real (USB/TCP).
+          </p>
+        )}
+
+        {!gateway.managed && gateway.transport !== "idle" && (
           <div>
             <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
               Pasarela detectada por heartbeat (configuración de <span className="mono">.env</span>), aún sin
