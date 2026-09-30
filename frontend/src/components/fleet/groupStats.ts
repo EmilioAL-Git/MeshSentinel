@@ -17,6 +17,16 @@ import type {
  * y sencillamente no se pinta — nunca se inventa un valor.
  */
 
+/**
+ * Repuesto de la piscina (M6.3) sin reclamar: late "idle" pero no es un
+ * enlace real todavía. Compartido por cualquier selector/listado de
+ * gateways para no repetir el criterio (GatewaysView, GatewaySelect,
+ * scopeGatewaysToGroup).
+ */
+export function isUnclaimedSpare(g: GatewayOut): boolean {
+  return g.transport === "idle" && !g.managed;
+}
+
 function avg(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((a, b) => a + b, 0) / values.length;
@@ -151,12 +161,7 @@ export function scopeGatewaysToGroup(
   groupNodeIds: Set<string> | null,
   groupGwStats: MultiGatewayStatsOut | undefined,
 ): GatewayOut[] {
-  // Repuestos de la piscina (M6.3) sin reclamar: laten "idle" pero no son un
-  // enlace real — no deben contar en "conectadas/habilitadas" ni aparecer
-  // como "caída" en HUD/StatusBar.
-  const enabled = gateways.filter(
-    (g) => g.enabled && g.deleted_at == null && !(g.transport === "idle" && !g.managed),
-  );
+  const enabled = gateways.filter((g) => g.enabled && g.deleted_at == null && !isUnclaimedSpare(g));
   if (groupNodeIds == null) return enabled;
   const statsById = new Map((groupGwStats?.gateways ?? []).map((g) => [g.gateway_id, g]));
   return enabled.filter((g) => (statsById.get(g.gateway_id)?.nodes_visible ?? 0) > 0);

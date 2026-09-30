@@ -17,6 +17,7 @@ import {
   type GatewayStatus,
   type TestConnectionResultOut,
 } from "../api/client";
+import { isUnclaimedSpare } from "./fleet/groupStats";
 import { relativeTime } from "../time";
 
 /**
@@ -533,7 +534,7 @@ export function GatewaysView() {
   // Repuestos de la piscina (M6.3) sin reclamar: laten "idle" pero no son un
   // enlace real todavía — solo deben verse como candidatos del asistente,
   // nunca como una tarjeta más en el listado (serían 5 tarjetas vacías).
-  const list = all.filter((g) => g.deleted_at == null && !(g.transport === "idle" && !g.managed));
+  const list = all.filter((g) => g.deleted_at == null && !isUnclaimedSpare(g));
   const deleted = all.filter((g) => g.deleted_at != null);
   // M6.2: con varios procesos sin configurar a la vez, el asistente ofrece
   // un selector explícito en vez de auto-elegir el primero.
