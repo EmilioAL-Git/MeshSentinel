@@ -8,12 +8,13 @@ import {
   setUserPassword,
   updateUser,
   type AuthUserOut,
+  type UserRole,
 } from "../api/client";
 import { toast } from "./shell/Toast";
 import { t } from "../tokens";
 
 /**
- * Gestión de usuarios (autenticación): sin RBAC — is_admin solo gatea ESTA
+ * Gestión de usuarios (autenticación): roles admin|gestor|usuario (ADR 0029); solo admin gatea ESTA
  * pantalla (crear/editar/activar-desactivar/cambiar contraseña de otros/
  * eliminar). Cualquier usuario autenticado, admin o no, puede hacer
  * exactamente las mismas operaciones sobre la red en el resto de la app.
@@ -25,18 +26,18 @@ export function UsersView() {
   const [newUsername, setNewUsername] = useState("");
   const [newDisplayName, setNewDisplayName] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [newIsAdmin, setNewIsAdmin] = useState(false);
+  const [newRole, setNewRole] = useState<UserRole>("manager");
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["auth"] });
 
   const createMutation = useMutation({
-    mutationFn: () => createUser({ username: newUsername, display_name: newDisplayName, password: newPassword, is_admin: newIsAdmin }),
+    mutationFn: () => createUser({ username: newUsername, display_name: newDisplayName, password: newPassword, role: newRole }),
     onSuccess: () => {
       toast(`Usuario «${newUsername}» creado`);
       setNewUsername("");
       setNewDisplayName("");
       setNewPassword("");
-      setNewIsAdmin(false);
+      setNewRole("manager");
       invalidate();
     },
     onError: (err) => toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo crear el usuario", { kind: "error" }),
@@ -63,10 +64,7 @@ export function UsersView() {
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
           />
-          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: t.textDim }}>
-            <input type="checkbox" checked={newIsAdmin} onChange={(e) => setNewIsAdmin(e.target.checked)} />
-            Administrador
-          </label>
+          <RoleSelect value={newRole} onChange={setNewRole} />
           <button type="submit" className="btn primary" disabled={createMutation.isPending}>
             Crear
           </button>
@@ -85,7 +83,7 @@ export function UsersView() {
               <tr style={{ textAlign: "left", color: t.textDim, borderBottom: `1px solid ${t.border}` }}>
                 <th style={{ padding: "4px 8px" }}>Usuario</th>
                 <th style={{ padding: "4px 8px" }}>Nombre</th>
-                <th style={{ padding: "4px 8px" }}>Admin</th>
+                <th style={{ padding: "4px 8px" }}>Rol</th>
                 <th style={{ padding: "4px 8px" }}>Estado</th>
                 <th style={{ padding: "4px 8px" }}>Último acceso</th>
                 <th style={{ padding: "4px 8px" }}></th>
@@ -103,6 +101,29 @@ export function UsersView() {
   );
 }
 
+const ROLE_LABELS: Record<UserRole, string> = {
+  admin: "Administrador",
+  manager: "Gestor",
+  user: "Usuario",
+};
+const ROLE_HINTS: Record<UserRole, string> = {
+  admin: "Controla todo, incluidos usuarios y ajustes de gateways",
+  manager: "Controla la red, pero no gestiona usuarios ni ajustes de gateways",
+  user: "Solo lectura; puede tener sus favoritos y su Grupo del usuario",
+};
+
+function RoleSelect({ value, onChange, disabled }: { value: UserRole; onChange: (r: UserRole) => void; disabled?: boolean }) {
+  return (
+    <select value={value} disabled={disabled} title={ROLE_HINTS[value]} onChange={(e) => onChange(e.target.value as UserRole)}>
+      {(Object.keys(ROLE_LABELS) as UserRole[]).map((r) => (
+        <option key={r} value={r} title={ROLE_HINTS[r]}>
+          {ROLE_LABELS[r]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function UserRow({ user, onChanged }: { user: AuthUserOut; onChanged: () => void }) {
   const [editingName, setEditingName] = useState(false);
   const [displayName, setDisplayName] = useState(user.display_name);
@@ -116,7 +137,7 @@ function UserRow({ user, onChanged }: { user: AuthUserOut; onChanged: () => void
     onError: (err) => toast(err instanceof Error ? err.message : "No se pudo cambiar el estado", { kind: "error" }),
   });
   const adminMutation = useMutation({
-    mutationFn: (isAdmin: boolean) => updateUser(user.id, { is_admin: isAdmin }),
+    mutationFn: (role: UserRole) => updateUser(user.id, { role }),
     onSuccess: onChanged,
     onError: (err) => toast(err instanceof Error ? err.message : "No se pudo cambiar el privilegio", { kind: "error" }),
   });
@@ -167,7 +188,7 @@ function UserRow({ user, onChanged }: { user: AuthUserOut; onChanged: () => void
         )}
       </td>
       <td style={{ padding: "4px 8px" }}>
-        <input type="checkbox" checked={user.is_admin} onChange={(e) => adminMutation.mutate(e.target.checked)} />
+        <RoleSelect value={user.role} onChange={(r) => adminMutation.mutate(r)} disabled={adminMutation.isPending} />
       </td>
       <td style={{ padding: "4px 8px", color: user.enabled ? t.ok : t.textFaint }}>
         {user.enabled ? "Activo" : "Deshabilitado"}

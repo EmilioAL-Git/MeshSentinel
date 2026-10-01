@@ -48,6 +48,31 @@ async def require_auth(request: Request, current_user: CurrentUserDep) -> AuthUs
 RequireAuthDep = Annotated[AuthUser | None, Depends(require_auth)]
 
 
+async def require_manager(request: Request, current_user: RequireAuthDep) -> AuthUser | None:
+    """Acciones sobre la red (ADR 0029): gestor o admin. Rol `user` = solo
+    lectura + sus favoritos/grupo personal. Modo abierto: pasa todo (igual que
+    antes de que existieran usuarios)."""
+    if not await _auth_service(request).is_protected_mode():
+        return current_user
+    if current_user is None or not current_user.can_manage:
+        raise HTTPException(status_code=403, detail="Requiere rol de gestor o administrador")
+    return current_user
+
+
+RequireManagerDep = Annotated[AuthUser | None, Depends(require_manager)]
+
+
+async def require_user(current_user: CurrentUserDep) -> AuthUser:
+    """Funciones personales (favoritos, grupo del usuario): exigen una cuenta
+    real incluso en modo abierto — no hay a quién atribuirlas sin sesión."""
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return current_user
+
+
+RequireUserDep = Annotated[AuthUser, Depends(require_user)]
+
+
 async def require_admin(request: Request, current_user: RequireAuthDep) -> AuthUser | None:
     """Gestión de usuarios (CAMBIO 7): en modo protegido exige is_admin. En
     modo abierto deja pasar a TODO el mundo — es como se hace el bootstrap del

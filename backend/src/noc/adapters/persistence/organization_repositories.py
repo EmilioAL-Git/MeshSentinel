@@ -6,7 +6,13 @@ Metadatos exclusivos del NOC: nunca generan tráfico hacia la malla.
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from noc.adapters.persistence.models import GroupMemberModel, GroupModel, NodeTagModel, TagModel
+from noc.adapters.persistence.models import (
+    GroupMemberModel,
+    GroupModel,
+    NodeTagModel,
+    TagModel,
+    UserFavoriteModel,
+)
 from noc.domain.nodes.entities import Group, Tag
 
 
@@ -96,7 +102,17 @@ class SqlGroupRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def list_with_counts(self) -> list[Group]:
+    @staticmethod
+    def _entity(g: GroupModel, count: int) -> Group:
+        return Group(
+            id=g.id, name=g.name, kind=g.kind, is_critical=g.is_critical,
+            member_count=count, preferred_gateway_id=g.preferred_gateway_id,
+            owner_user_id=g.owner_user_id,
+        )
+
+    async def list_with_counts(self, viewer_id: int | None = None) -> list[Group]:
+        """Grupos compartidos + (si hay `viewer_id`) el grupo personal de ESE
+        usuario. Los personales ajenos nunca se listan (ADR 0029)."""
         counts = dict(
             (
                 await self._session.execute(
@@ -104,14 +120,11 @@ class SqlGroupRepository:
                 )
             ).all()
         )
-        rows = await self._session.scalars(select(GroupModel).order_by(GroupModel.name))
-        return [
-            Group(
-                id=g.id, name=g.name, kind=g.kind, is_critical=g.is_critical,
-                member_count=int(counts.get(g.id, 0)), preferred_gateway_id=g.preferred_gateway_id,
-            )
-            for g in rows
-        ]
+        visible = GroupModel.owner_user_id.is_(None)
+        if viewer_id is not None:
+            visible = visible | (GroupModel.owner_user_id == viewer_id)
+        rows = await self._session.scalars(select(GroupModel).where(visible).order_by(GroupModel.name))
+        return [self._entity(g, int(counts.get(g.id, 0))) for g in rows]
 
     async def get(self, group_id: int) -> Group | None:
         g = await self._session.get(GroupModel, group_id)
@@ -120,10 +133,22 @@ class SqlGroupRepository:
         count = await self._session.scalar(
             select(func.count()).select_from(GroupMemberModel).where(GroupMemberModel.group_id == group_id)
         )
-        return Group(
-            id=g.id, name=g.name, kind=g.kind, is_critical=g.is_critical,
-            member_count=int(count or 0), preferred_gateway_id=g.preferred_gateway_id,
-        )
+        return self._entity(g, int(count or 0))
+
+    async def get_personal(self, user_id: int) -> Group | None:
+        g = await self._session.scalar(select(GroupModel).where(GroupModel.owner_user_id == user_id))
+        if g is None:
+            return None
+        return await self.get(g.id)
+
+    async def create_personal(self, user_id: int, username: str) -> Group:
+        """Grupo del usuario (uno por cuenta). El nombre interno incluye el
+        username porque `groups.name` es UNIQUE; la UI lo muestra como
+        «Grupo del usuario» usando `owner_user_id`."""
+        m = GroupModel(name=f"Grupo del usuario (@{username})", kind="static", owner_user_id=user_id)
+        self._session.add(m)
+        await self._session.flush()
+        return self._entity(m, 0)
 
     async def members(self, group_id: int) -> list[str]:
         rows = await self._session.scalars(
@@ -239,3 +264,40 @@ class SqlGroupRepository:
             )
             await self._session.flush()
         return len(existing), len(requested) - len(existing)
+
+
+class SqlUserFavoriteRepository:
+    """Favoritos personales (ADR 0029)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def ids_for_user(self, user_id: int) -> set[str]:
+        rows = await self._session.scalars(
+            select(UserFavoriteModel.node_id).where(UserFavoriteModel.user_id == user_id)
+        )
+        return set(rows)
+
+    async def set_bulk(self, user_id: int, node_ids: list[str], value: bool) -> tuple[int, int]:
+        """Devuelve (changed, unchanged). Ignora ids de nodos que no existen."""
+        from noc.adapters.persistence.models import NodeModel
+
+        requested = list(dict.fromkeys(node_ids))
+        valid = set(
+            await self._session.scalars(select(NodeModel.id).where(NodeModel.id.in_(requested)))
+        )
+        current = await self.ids_for_user(user_id)
+        if value:
+            to_change = [n for n in requested if n in valid and n not in current]
+            for n in to_change:
+                self._session.add(UserFavoriteModel(user_id=user_id, node_id=n))
+        else:
+            to_change = [n for n in requested if n in current]
+            if to_change:
+                await self._session.execute(
+                    delete(UserFavoriteModel).where(
+                        UserFavoriteModel.user_id == user_id, UserFavoriteModel.node_id.in_(to_change)
+                    )
+                )
+        await self._session.flush()
+        return len(to_change), len(requested) - len(to_change)

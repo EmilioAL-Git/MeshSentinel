@@ -82,6 +82,8 @@ export interface GroupOut {
   is_critical: boolean;
   member_count: number;
   preferred_gateway_id: string | null;
+  /** Grupo del usuario (ADR 0029): privado, uno por cuenta, nunca predeterminado. */
+  is_personal: boolean;
 }
 
 /** Observación de un nodo por una pasarela concreta (node_gateway_links, M6.1/M6.2). */
@@ -331,6 +333,7 @@ export const createTag = (name: string, color?: string) =>
   send<TagOut>("POST", "/tags", { name, color });
 export const deleteTag = (id: number) => send<void>("DELETE", `/tags/${id}`);
 export const fetchGroups = () => get<GroupOut[]>("/groups");
+export const ensureMyGroup = () => send<GroupOut>("POST", "/groups/mine");
 export const createGroup = (name: string) => send<GroupOut>("POST", "/groups", { name });
 export const deleteGroup = (id: number) => send<void>("DELETE", `/groups/${id}`);
 
@@ -1174,10 +1177,13 @@ export function openEventsSocket(
 // Monitorización siempre abierta; estos endpoints son los únicos que exigen
 // sesión (login/gestión de usuarios) o la usan si existe (me/login-log).
 
+export type UserRole = "admin" | "manager" | "user";
+
 export interface AuthUserOut {
   id: number;
   username: string;
   display_name: string;
+  role: UserRole;
   is_admin: boolean;
   enabled: boolean;
   created_at: string | null;
@@ -1202,9 +1208,9 @@ export const changeMyPassword = (password: string) => send<void>("PUT", "/auth/m
 // ── Gestión de usuarios (solo is_admin en el backend; sin más RBAC) ─────────
 
 export const fetchUsers = () => get<AuthUserOut[]>("/auth/users");
-export const createUser = (body: { username: string; display_name: string; password: string; is_admin: boolean }) =>
+export const createUser = (body: { username: string; display_name: string; password: string; role: UserRole }) =>
   send<AuthUserOut>("POST", "/auth/users", body);
-export const updateUser = (id: number, body: { display_name?: string; is_admin?: boolean }) =>
+export const updateUser = (id: number, body: { display_name?: string; role?: UserRole }) =>
   send<AuthUserOut>("PUT", `/auth/users/${id}`, body);
 export const setUserEnabled = (id: number, enabled: boolean) =>
   send<AuthUserOut>("PUT", `/auth/users/${id}/enabled`, { enabled });

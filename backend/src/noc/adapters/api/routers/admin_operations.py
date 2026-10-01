@@ -13,7 +13,7 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import RequireAuthDep, SessionDep
+from noc.adapters.api.deps import RequireManagerDep, SessionDep
 from noc.adapters.api.schemas import GatewaySelectionIn
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
@@ -108,7 +108,7 @@ async def capabilities() -> list[CapabilityOut]:
 
 
 @router.post("/operations", response_model=OperationOut, status_code=201)
-async def create_operation(body: OperationIn, session: SessionDep, current_user: RequireAuthDep) -> OperationOut:
+async def create_operation(body: OperationIn, session: SessionDep, current_user: RequireManagerDep) -> OperationOut:
     settings = get_settings()
     actor = ActorContext.for_user(current_user)
     try:
@@ -191,7 +191,7 @@ async def get_operation(op_id: int, session: SessionDep) -> OperationOut:
 
 
 @router.post("/operations/{op_id}/cancel", response_model=OperationOut)
-async def cancel_operation(op_id: int, session: SessionDep, _user: RequireAuthDep) -> OperationOut:
+async def cancel_operation(op_id: int, session: SessionDep, _user: RequireManagerDep) -> OperationOut:
     async with session.begin():
         repo = SqlAdminOperationRepository(session)
         op = await repo.get(op_id)
@@ -208,7 +208,7 @@ async def cancel_operation(op_id: int, session: SessionDep, _user: RequireAuthDe
 
 
 @router.post("/operations/{op_id}/retry", response_model=OperationOut)
-async def retry_operation(op_id: int, session: SessionDep, _user: RequireAuthDep) -> OperationOut:
+async def retry_operation(op_id: int, session: SessionDep, _user: RequireManagerDep) -> OperationOut:
     async with session.begin():
         repo = SqlAdminOperationRepository(session)
         op = await repo.get(op_id)

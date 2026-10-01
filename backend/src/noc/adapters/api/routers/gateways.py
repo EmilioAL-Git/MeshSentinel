@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SecretsVisibleDep, SessionDep
+from noc.adapters.api.deps import RequireAdminDep, SecretsVisibleDep, SessionDep
 from noc.adapters.api.schemas import GatewayOut
 from noc.adapters.persistence.organization_repositories import SqlGroupRepository
 from noc.adapters.persistence.repositories import (
@@ -115,7 +115,7 @@ async def list_gateways(
 
 
 @router.post("", response_model=GatewayOut)
-async def create_gateway(body: GatewayCreateIn, request: Request, current_user: RequireAuthDep) -> GatewayOut:
+async def create_gateway(body: GatewayCreateIn, request: Request, current_user: RequireAdminDep) -> GatewayOut:
     try:
         info = await _service(request).provision(
             body.gateway_id, body.name, body.transport_type, body.connection_params
@@ -130,7 +130,7 @@ async def create_gateway(body: GatewayCreateIn, request: Request, current_user: 
 
 # Registrado ANTES de GET /gateways/{gateway_id}: "devices" no es un gateway_id.
 @router.get("/devices", response_model=list[DeviceOut])
-async def launcher_devices(request: Request, _user: RequireAuthDep) -> list[DeviceOut]:
+async def launcher_devices(request: Request, _user: RequireAdminDep) -> list[DeviceOut]:
     """Dispositivos USB del host vía gateway-launcher, para el paso 1 de
     "Crear un contenedor nuevo" — antes de que exista ningún proceso al que
     correlacionar (a diferencia de POST /{gateway_id}/discover)."""
@@ -205,14 +205,14 @@ async def get_gateway(gateway_id: str, session: SessionDep, reveal: SecretsVisib
 
 
 @router.post("/{gateway_id}/discover", response_model=list[DeviceOut])
-async def discover_devices(gateway_id: str, request: Request, _user: RequireAuthDep) -> list[DeviceOut]:
+async def discover_devices(gateway_id: str, request: Request, _user: RequireAdminDep) -> list[DeviceOut]:
     devices = await _service(request).discover(gateway_id)
     return [DeviceOut(**d) for d in devices]
 
 
 @router.post("/{gateway_id}/test-connection", response_model=TestConnectionOut)
 async def test_connection(
-    gateway_id: str, body: TestConnectionIn, request: Request, _user: RequireAuthDep
+    gateway_id: str, body: TestConnectionIn, request: Request, _user: RequireAdminDep
 ) -> TestConnectionOut:
     result = await _service(request).test_connection(gateway_id, body.transport_type, body.connection_params)
     return TestConnectionOut(**{f: result.get(f) for f in TestConnectionOut.model_fields})
@@ -220,7 +220,7 @@ async def test_connection(
 
 @router.post("/{gateway_id}/configure", response_model=GatewayOut)
 async def configure_gateway(
-    gateway_id: str, body: GatewayConfigureIn, request: Request, current_user: RequireAuthDep
+    gateway_id: str, body: GatewayConfigureIn, request: Request, current_user: RequireAdminDep
 ) -> GatewayOut:
     info = await _service(request).configure(
         gateway_id, body.name, body.transport_type, body.connection_params, body.enabled, body.priority
@@ -230,7 +230,7 @@ async def configure_gateway(
 
 
 @router.post("/{gateway_id}/import", response_model=GatewayOut)
-async def import_gateway(gateway_id: str, request: Request, current_user: RequireAuthDep) -> GatewayOut:
+async def import_gateway(gateway_id: str, request: Request, current_user: RequireAdminDep) -> GatewayOut:
     info = await _service(request).import_legacy(gateway_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Gateway not found")
@@ -240,7 +240,7 @@ async def import_gateway(gateway_id: str, request: Request, current_user: Requir
 
 @router.put("/{gateway_id}", response_model=GatewayOut)
 async def update_gateway(
-    gateway_id: str, body: GatewayUpdateIn, request: Request, current_user: RequireAuthDep
+    gateway_id: str, body: GatewayUpdateIn, request: Request, current_user: RequireAdminDep
 ) -> GatewayOut:
     info = await _service(request).update(
         gateway_id, body.name, body.transport_type, body.connection_params, body.enabled, body.priority
@@ -252,7 +252,7 @@ async def update_gateway(
 
 
 @router.post("/{gateway_id}/connect", response_model=GatewayOut)
-async def connect_gateway(gateway_id: str, request: Request, current_user: RequireAuthDep) -> GatewayOut:
+async def connect_gateway(gateway_id: str, request: Request, current_user: RequireAdminDep) -> GatewayOut:
     info = await _service(request).connect(gateway_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")
@@ -261,7 +261,7 @@ async def connect_gateway(gateway_id: str, request: Request, current_user: Requi
 
 
 @router.post("/{gateway_id}/disconnect", response_model=GatewayOut)
-async def disconnect_gateway(gateway_id: str, request: Request, current_user: RequireAuthDep) -> GatewayOut:
+async def disconnect_gateway(gateway_id: str, request: Request, current_user: RequireAdminDep) -> GatewayOut:
     info = await _service(request).disconnect(gateway_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")

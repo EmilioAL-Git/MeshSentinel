@@ -3,10 +3,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addGroupMembersBulk,
   createGroup,
+  ensureMyGroup,
   removeGroupMembersBulk,
   type GroupOut,
   type NodeSummaryOut,
 } from "../../api/client";
+import { useAuth } from "../../context/AuthContext";
 import { useActiveGroup } from "../../context/GroupContext";
 import { t } from "../../tokens";
 import { toast } from "../shell/Toast";
@@ -30,6 +32,10 @@ export function AddToGroupMenu({
 }) {
   const queryClient = useQueryClient();
   const { activeGroup } = useActiveGroup();
+  const { canOperate } = useAuth();
+  // Rol «usuario»: solo su Grupo del usuario (se crea bajo demanda).
+  const hasMine = groups.some((g) => g.is_personal);
+  const visibleGroups = canOperate ? groups : groups.filter((g) => g.is_personal);
   const [open, setOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
@@ -80,6 +86,20 @@ export function AddToGroupMenu({
     onError: (e: Error) => toast(`No se pudo quitar del grupo: ${e.message}`, { kind: "error" }),
   });
 
+  const doAddToMine = useMutation({
+    mutationFn: async () => {
+      const g = await ensureMyGroup();
+      const res = await addGroupMembersBulk(g.id, selectedIds);
+      return { g, res };
+    },
+    onSuccess: ({ res }) => {
+      toast(`${res.added} nodos añadidos a tu Grupo del usuario`);
+      invalidate();
+      setOpen(false);
+    },
+    onError: (e: Error) => toast(`No se pudo añadir al grupo: ${e.message}`, { kind: "error" }),
+  });
+
   const doCreateAndAdd = useMutation({
     mutationFn: async (name: string) => {
       const group = await createGroup(name);
@@ -110,7 +130,7 @@ export function AddToGroupMenu({
     return list;
   }, [selectedIds, allSummaries, groups, activeGroup]);
 
-  const pending = doAdd.isPending || doRemove.isPending || doCreateAndAdd.isPending;
+  const pending = doAddToMine.isPending || doAdd.isPending || doRemove.isPending || doCreateAndAdd.isPending;
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
@@ -138,10 +158,15 @@ export function AddToGroupMenu({
           }}
         >
           <div className="microlabel">Añadir a grupo</div>
-          {groups.length === 0 && (
+          {!hasMine && (
+            <button className="btn ghost" disabled={pending} onClick={() => doAddToMine.mutate()} style={{ textAlign: "left" }}>
+              ◆ Mi Grupo del usuario (crear)
+            </button>
+          )}
+          {visibleGroups.length === 0 && hasMine && (
             <span style={{ color: t.textFaint, fontSize: 12 }}>Sin grupos todavía.</span>
           )}
-          {groups.map((g) => (
+          {visibleGroups.map((g) => (
             <button
               key={g.id}
               className="btn ghost"
@@ -153,7 +178,7 @@ export function AddToGroupMenu({
               <span style={{ color: t.textFaint, fontSize: 11 }}>{g.member_count}</span>
             </button>
           ))}
-          <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+          {canOperate && <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
             <input
               className="input"
               style={{ flex: 1, minWidth: 0 }}
@@ -168,7 +193,7 @@ export function AddToGroupMenu({
             >
               Crear
             </button>
-          </div>
+          </div>}
 
           {removableGroups.length > 0 && (
             <>

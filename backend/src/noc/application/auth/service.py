@@ -22,9 +22,15 @@ from noc.adapters.persistence.auth_repositories import (
     SqlAuthSessionRepository,
     SqlAuthUserRepository,
 )
-from noc.adapters.persistence.models import AdminBatchModel, AdminOperationModel
+from noc.adapters.persistence.models import (
+    AdminBatchModel,
+    AdminOperationModel,
+    GroupMemberModel,
+    GroupModel,
+    UserFavoriteModel,
+)
 from noc.config import Settings
-from noc.domain.auth.entities import AuthSession, AuthUser, LoginLogEntry
+from noc.domain.auth.entities import ROLE_ADMIN, ROLE_MANAGER, ROLES, AuthSession, AuthUser, LoginLogEntry
 
 logger = logging.getLogger("noc.auth")
 
@@ -276,7 +282,9 @@ class AuthService:
 
     # ── Gestión de usuarios ──────────────────────────────────────────────
 
-    async def create_user(self, username: str, display_name: str, password: str, is_admin: bool) -> AuthUser:
+    async def create_user(
+        self, username: str, display_name: str, password: str, is_admin: bool = False, role: str | None = None
+    ) -> AuthUser:
         self.validate_password_policy(password)
         async with self._session_factory() as session:
             users = SqlAuthUserRepository(session)
@@ -286,12 +294,16 @@ class AuthService:
             # admin, sin que el creador lo pida — de lo contrario nadie podría
             # gestionar usuarios nunca (modo protegido exige un admin habilitado).
             first_user = await users.count_all() == 0
+            # `is_admin` se conserva como atajo (compatibilidad); `role` manda.
+            resolved = role or (ROLE_ADMIN if is_admin else ROLE_MANAGER)
+            if resolved not in ROLES:
+                raise AuthError("invalid_role", "Rol no válido")
             user = await users.create(
                 AuthUser(
                     username=username,
                     display_name=display_name,
                     password_hash=self.hash_password(password),
-                    is_admin=is_admin or first_user,
+                    role=ROLE_ADMIN if first_user else resolved,
                     enabled=True,
                 )
             )
@@ -326,8 +338,13 @@ class AuthService:
         return user
 
     async def set_admin(self, user_id: int, is_admin: bool) -> AuthUser | None:
+        return await self.set_role(user_id, ROLE_ADMIN if is_admin else ROLE_MANAGER)
+
+    async def set_role(self, user_id: int, role: str) -> AuthUser | None:
+        if role not in ROLES:
+            raise AuthError("invalid_role", "Rol no válido")
         async with self._session_factory() as session:
-            user = await SqlAuthUserRepository(session).update_fields(user_id, {"is_admin": is_admin})
+            user = await SqlAuthUserRepository(session).update_fields(user_id, {"role": role})
             await session.commit()
         self.invalidate_protected_cache()
         return user
@@ -346,6 +363,13 @@ class AuthService:
             await session.execute(
                 sa_update(AdminBatchModel).where(AdminBatchModel.actor_id == user_id).values(actor_id=None)
             )
+            # Datos personales (ADR 0029): SQLite no cascada, borrado explícito.
+            from sqlalchemy import delete as sa_delete, select as sa_select
+
+            await session.execute(sa_delete(UserFavoriteModel).where(UserFavoriteModel.user_id == user_id))
+            personal = sa_select(GroupModel.id).where(GroupModel.owner_user_id == user_id)
+            await session.execute(sa_delete(GroupMemberModel).where(GroupMemberModel.group_id.in_(personal)))
+            await session.execute(sa_delete(GroupModel).where(GroupModel.owner_user_id == user_id))
             deleted = await SqlAuthUserRepository(session).delete(user_id)
             await session.commit()
         self.invalidate_protected_cache()

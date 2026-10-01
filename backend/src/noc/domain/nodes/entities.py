@@ -167,6 +167,8 @@ class Group:
     # Selección inteligente de gateway (Nivel 3): preferencia heredada por
     # todos los nodos del grupo salvo que tengan la suya propia (Nivel 2).
     preferred_gateway_id: str | None = None
+    # ADR 0029: dueño de un grupo personal (None = grupo compartido).
+    owner_user_id: int | None = None
 
 
 @dataclass(slots=True)

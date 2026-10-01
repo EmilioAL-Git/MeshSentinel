@@ -17,7 +17,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import RequireAuthDep, SessionDep
+from noc.adapters.api.deps import RequireManagerDep, SessionDep
 from noc.adapters.api.schemas import GatewaySelectionIn
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
@@ -157,7 +157,7 @@ async def _create_operation(
 
 @router.post("/nodes/{node_id}/config/refresh", response_model=ApplyOut)
 async def refresh_node_config(
-    node_id: str, body: RefreshIn, session: SessionDep, current_user: RequireAuthDep
+    node_id: str, body: RefreshIn, session: SessionDep, current_user: RequireManagerDep
 ) -> ApplyOut:
     actor = ActorContext.for_user(current_user)
     node = await SqlNodeRepository(session).get(node_id)
@@ -208,7 +208,7 @@ def _sorted_apply_sections(sections: dict[str, Any]) -> list[str]:
 
 @router.post("/nodes/{node_id}/config/apply", response_model=ApplyOut, status_code=201)
 async def apply_node_config(
-    node_id: str, body: ApplyIn, session: SessionDep, current_user: RequireAuthDep
+    node_id: str, body: ApplyIn, session: SessionDep, current_user: RequireManagerDep
 ) -> ApplyOut:
     actor = ActorContext.for_user(current_user)
     node = await SqlNodeRepository(session).get(node_id)

@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SessionDep
+from noc.adapters.api.deps import RequireManagerDep, SessionDep
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.nexus.builder import NexusCommandError
 from noc.application.nexus.catalog import COMMANDS, CommandSpec, describe
@@ -65,7 +65,7 @@ class CatalogEntryOut(BaseModel):
 
 
 @router.get("/catalog", response_model=list[CatalogEntryOut])
-async def get_catalog(request: Request, current_user: RequireAuthDep) -> list[CatalogEntryOut]:
+async def get_catalog(request: Request, current_user: RequireManagerDep) -> list[CatalogEntryOut]:
     """Catálogo COMPLETO del módulo (`application/nexus/catalog.py`), para
     que la UI ofrezca un explorador por categorías en vez de un campo de
     texto libre — pedido explícito del usuario. Puro (sin red/BD), pero
@@ -100,7 +100,7 @@ async def get_mode(request: Request) -> ModeOut:
 
 
 @router.put("/mode", response_model=ModeOut)
-async def set_mode(body: ModePatchIn, request: Request, current_user: RequireAdminDep) -> ModeOut:
+async def set_mode(body: ModePatchIn, request: Request, current_user: RequireManagerDep) -> ModeOut:
     actor = current_user.username if current_user else None
     await _service(request).set_mode_enabled(body.enabled, actor)
     return ModeOut(enabled=body.enabled)
@@ -123,7 +123,7 @@ class SettingsOut(BaseModel):
 
 
 @router.get("/settings", response_model=SettingsOut)
-async def get_nexus_settings(request: Request, session: SessionDep, current_user: RequireAuthDep) -> SettingsOut:
+async def get_nexus_settings(request: Request, session: SessionDep, current_user: RequireManagerDep) -> SettingsOut:
     """Ajustes del módulo (ADR 0027 §13) — bajo la pestaña JenTastic-Nexus
     de Ajustes. Solo lectura para cualquier autenticado; PATCH admin-only,
     mismo criterio que /mode."""
@@ -135,7 +135,7 @@ async def get_nexus_settings(request: Request, session: SessionDep, current_user
 
 @router.patch("/settings", response_model=SettingsOut)
 async def patch_nexus_settings(
-    changes: dict[str, Any], request: Request, session: SessionDep, admin: RequireAdminDep
+    changes: dict[str, Any], request: Request, session: SessionDep, admin: RequireManagerDep
 ) -> SettingsOut:
     if not await _service(request).is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
@@ -153,7 +153,7 @@ async def patch_nexus_settings(
 
 
 @router.post("/scan", response_model=ScanOut)
-async def scan(body: ScanIn, request: Request, current_user: RequireAuthDep) -> ScanOut:
+async def scan(body: ScanIn, request: Request, current_user: RequireManagerDep) -> ScanOut:
     service = _service(request)
     if not await service.is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
@@ -192,7 +192,7 @@ class PassiveCandidateOut(BaseModel):
 
 
 @router.get("/passive-candidates", response_model=list[PassiveCandidateOut])
-async def list_passive_candidates(request: Request, current_user: RequireAuthDep) -> list[PassiveCandidateOut]:
+async def list_passive_candidates(request: Request, current_user: RequireManagerDep) -> list[PassiveCandidateOut]:
     """Sugerencias de la detección PASIVA (sin enviar nada): nodos cuyo
     tráfico ya observado tiene forma de respuesta Nexus. Complementa a
     `POST /scan` (activo) — ambas vías comparten el mismo destino final:
@@ -204,7 +204,7 @@ async def list_passive_candidates(request: Request, current_user: RequireAuthDep
 
 
 @router.post("/passive-candidates/{node_id}/dismiss", status_code=204)
-async def dismiss_passive_candidate(node_id: str, request: Request, current_user: RequireAuthDep) -> None:
+async def dismiss_passive_candidate(node_id: str, request: Request, current_user: RequireManagerDep) -> None:
     service = _service(request)
     if not await service.is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
@@ -259,7 +259,7 @@ class PreviewOut(BaseModel):
 
 
 @router.post("/operations/preview", response_model=PreviewOut)
-async def preview_operation(body: OperationIn, request: Request, current_user: RequireAuthDep) -> PreviewOut:
+async def preview_operation(body: OperationIn, request: Request, current_user: RequireManagerDep) -> PreviewOut:
     """Construye con el núcleo puro SIN persistir (dry-run, mismo patrón que
     M2 "simular→CONFIRMAR") — para avisar de comandos destructivos antes de
     encolar de verdad."""
@@ -278,7 +278,7 @@ async def preview_operation(body: OperationIn, request: Request, current_user: R
 
 @router.post("/operations", response_model=OperationOut)
 async def create_operation(
-    body: OperationIn, request: Request, current_user: RequireAuthDep
+    body: OperationIn, request: Request, current_user: RequireManagerDep
 ) -> OperationOut:
     service = _service(request)
     if not await service.is_mode_enabled():
@@ -304,7 +304,7 @@ class BatchOperationIn(BaseModel):
 
 @router.post("/operations/batch", response_model=list[OperationOut])
 async def create_operation_batch(
-    body: BatchOperationIn, request: Request, current_user: RequireAuthDep
+    body: BatchOperationIn, request: Request, current_user: RequireManagerDep
 ) -> list[OperationOut]:
     """Lote: una operación `-node <shortname>` por cada nodo seleccionado en
     Flota, espaciadas entre sí por `interval_seconds` (ADR 0027 §14) — para
@@ -326,7 +326,7 @@ async def create_operation_batch(
 @router.get("/operations", response_model=list[OperationOut])
 async def list_operations(
     request: Request,
-    current_user: RequireAuthDep,
+    current_user: RequireManagerDep,
     gateway_id: str | None = None,
     status: str | None = None,
     limit: int = Query(default=200, ge=1, le=500),
@@ -338,7 +338,7 @@ async def list_operations(
 
 
 @router.get("/operations/{op_id}", response_model=OperationOut)
-async def get_operation(op_id: int, request: Request, current_user: RequireAuthDep) -> OperationOut:
+async def get_operation(op_id: int, request: Request, current_user: RequireManagerDep) -> OperationOut:
     if not await _service(request).is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
     op = await _operations(request).get(op_id)
@@ -362,7 +362,7 @@ class OperationResponseOut(BaseModel):
 
 @router.get("/operations/{op_id}/responses", response_model=list[OperationResponseOut])
 async def list_operation_responses(
-    op_id: int, request: Request, current_user: RequireAuthDep
+    op_id: int, request: Request, current_user: RequireManagerDep
 ) -> list[OperationResponseOut]:
     """Respuestas individuales de una operación de destino múltiple
     (broadcast/group, ADR 0027 §11) — lista vacía para destinos dirigidos

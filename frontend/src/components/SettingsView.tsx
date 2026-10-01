@@ -68,11 +68,9 @@ export function SettingsView() {
     items: settings.filter((s) => s.category === cat),
   })).filter((g) => g.items.length > 0);
 
-  const canManageUsers = !authState.protectedMode || authState.isAdmin;
+  const canManageUsers = authState.canAdmin;
   const tabs = [
-    "general",
-    "mantenimiento",
-    "nexus",
+    ...(authState.canOperate ? ["general", "mantenimiento", "nexus"] : []),
     ...(canManageUsers ? ["users"] : []),
     ...(authState.isAuthenticated ? ["login-log"] : []),
   ];

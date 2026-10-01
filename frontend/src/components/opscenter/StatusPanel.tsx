@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, type CSSProperties, type ReactNode } from "react";
+import { useAuth } from "../../context/AuthContext";
 import {
   ackAlert,
   resolveAlert,
@@ -208,6 +209,7 @@ export function StatusPanel({
   onGoTo: (view: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const { canOperate } = useAuth();
   const doAck = useMutation({
     mutationFn: (id: number) => ackAlert(id),
     onSettled: () => {
@@ -456,7 +458,7 @@ export function StatusPanel({
                     </span>
                   )}
                 </span>
-                {a.status === "firing" && (
+                {a.status === "firing" && canOperate && (
                   <button style={smallBtn} title="Reconocer la alerta" disabled={doAck.isPending} onClick={() => doAck.mutate(a.id)}>
                     ACK
                   </button>

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { useAuth } from "../context/AuthContext";
 import {
   ackAlert,
   createAlertRule,
@@ -795,6 +796,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
     return node ? displayName(node.node) : id;
   };
 
+  const { canOperate } = useAuth();
   const doAck = useMutation({ mutationFn: ackAlert, onSettled: invalidate });
   const doResolve = useMutation({ mutationFn: resolveAlert, onSettled: invalidate });
   const toggleRule = useMutation({
@@ -908,7 +910,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                 <AlertRow
                   key={a.id}
                   alert={a}
-                  onAck={(id) => doAck.mutate(id)}
+                  onAck={canOperate ? (id) => doAck.mutate(id) : undefined}
                   onResolve={(id) => doResolve.mutate(id)}
                   onOpenNode={onOpenNode}
                   outOfGroup={isOutOfGroupCritical(a)}

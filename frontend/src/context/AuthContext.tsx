@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchMe, login as apiLogin, logout as apiLogout, onUnauthorized, type MeOut } from "../api/client";
+import { fetchMe, login as apiLogin, logout as apiLogout, onUnauthorized, type MeOut, type UserRole } from "../api/client";
 
 /**
  * Sesión de MeshSentinel: monitorización siempre abierta (`protectedMode`
@@ -14,9 +14,16 @@ interface AuthContextValue {
   me: MeOut | null;
   isAuthenticated: boolean;
   isAdmin: boolean;
-  /** Puede operar/editar: modo abierto o sesión iniciada. Sin esto, la UI
-   *  muestra en solo lectura (el backend lo exige igualmente: RequireAuthDep). */
+  /** Rol de la sesión (null sin sesión). */
+  role: UserRole | null;
+  /** Puede operar/editar la red: modo abierto, gestor o admin. El rol
+   *  «usuario» y sin sesión en modo protegido ven solo lectura (el backend lo
+   *  exige igualmente: RequireManagerDep). */
   canOperate: boolean;
+  /** Ajustes de gateways y usuarios: modo abierto o admin. */
+  canAdmin: boolean;
+  /** Puede crear su Grupo del usuario y tener favoritos propios (cualquier cuenta). */
+  hasPersonalSpace: boolean;
   protectedMode: boolean;
   loading: boolean;
   loginModalOpen: boolean;
@@ -57,7 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     me,
     isAuthenticated: me?.authenticated ?? false,
     isAdmin: me?.user?.is_admin ?? false,
-    canOperate: !(me?.protected_mode ?? false) || (me?.authenticated ?? false),
+    role: me?.user?.role ?? null,
+    canOperate: !(me?.protected_mode ?? false) || (me?.user?.role === "admin" || me?.user?.role === "manager"),
+    canAdmin: !(me?.protected_mode ?? false) || me?.user?.role === "admin",
+    hasPersonalSpace: me?.authenticated ?? false,
     protectedMode: me?.protected_mode ?? false,
     loading: meQuery.isLoading,
     loginModalOpen,

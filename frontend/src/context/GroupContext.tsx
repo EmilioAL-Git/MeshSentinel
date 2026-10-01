@@ -46,9 +46,15 @@ export function GroupProvider({ children }: { children: ReactNode }) {
       : typeof startupValue === "number" && (groups.data ?? []).some((g) => g.id === startupValue)
         ? startupValue
         : storedGroupId;
-  const activeGroupId = urlGroupId ?? (sessionGroupId === undefined ? startupGroupId : sessionGroupId);
+  const rawActiveGroupId = urlGroupId ?? (sessionGroupId === undefined ? startupGroupId : sessionGroupId);
 
   const list = groups.data ?? [];
+  // Un grupo que ya no está en la lista (p. ej. el Grupo del usuario tras
+  // cerrar sesión o de otra cuenta) no puede seguir filtrando la vista.
+  const activeGroupId =
+    rawActiveGroupId != null && !groups.isPending && !list.some((g) => g.id === rawActiveGroupId)
+      ? null
+      : rawActiveGroupId;
   const activeGroup = useMemo(
     () => (activeGroupId != null ? (list.find((g) => g.id === activeGroupId) ?? null) : null),
     [list, activeGroupId],
@@ -56,11 +62,13 @@ export function GroupProvider({ children }: { children: ReactNode }) {
 
   const setActiveGroup = useCallback(
     (groupId: number | null) => {
-      setStoredGroupId(groupId);
+      // El Grupo del usuario NUNCA es predeterminado (ADR 0029): no se recuerda
+      // entre sesiones, así que al volver siempre se arranca sin él.
+      setStoredGroupId(list.find((g) => g.id === groupId)?.is_personal ? null : groupId);
       setSessionGroupId(groupId);
       setUrlGroupId(groupId);
     },
-    [setStoredGroupId, setUrlGroupId],
+    [setStoredGroupId, setUrlGroupId, list],
   );
   const clearActiveGroup = useCallback(() => setActiveGroup(null), [setActiveGroup]);
 

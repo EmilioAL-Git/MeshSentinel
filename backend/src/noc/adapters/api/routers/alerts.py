@@ -4,7 +4,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, model_validator
 
-from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SecretsVisibleDep, SessionDep
+from noc.adapters.api.deps import RequireManagerDep, SecretsVisibleDep, SessionDep
 from noc.application.alerting.evaluators import GROUP_SCOPE_UNSUPPORTED
 from noc.adapters.notifications import PROVIDERS, build_provider
 from noc.adapters.persistence.alert_repositories import (
@@ -196,7 +196,9 @@ async def list_active_alerts(session: SessionDep) -> list[AlertOut]:
 
 
 @router.post("/alerts/{alert_id}/ack", response_model=AlertOut)
-async def acknowledge_alert(alert_id: int, session: SessionDep, body: AckIn | None = None) -> AlertOut:
+async def acknowledge_alert(
+    alert_id: int, session: SessionDep, _user: RequireManagerDep, body: AckIn | None = None
+) -> AlertOut:
     async with session.begin():
         alert = await SqlAlertRepository(session).acknowledge(
             alert_id, (body or AckIn()).acknowledged_by
@@ -207,8 +209,8 @@ async def acknowledge_alert(alert_id: int, session: SessionDep, body: AckIn | No
 
 
 @router.post("/alerts/{alert_id}/resolve", response_model=AlertOut)
-async def resolve_alert(alert_id: int, session: SessionDep, _user: RequireAuthDep) -> AlertOut:
-    """Cierre manual (exige sesión: puede ocultar un problema real; /ack sí queda abierto, es triaje): vía de
+async def resolve_alert(alert_id: int, session: SessionDep, _user: RequireManagerDep) -> AlertOut:
+    """Cierre manual (exige sesión: puede ocultar un problema real; el ack exige rol de gestor desde ADR 0029): vía de
     escape para alertas huérfanas (regla desactivada/borrada/reajustada tras
     el disparo) que de otro modo no tienen forma de dejar de estar activas.
     Si la condición sigue siendo cierta y la regla sigue habilitada, el
@@ -230,7 +232,7 @@ async def list_rules(session: SessionDep) -> list[RuleOut]:
 
 
 @router.post("/alert-rules", response_model=RuleOut, status_code=201)
-async def create_rule(body: RuleIn, session: SessionDep, _user: RequireAuthDep) -> RuleOut:
+async def create_rule(body: RuleIn, session: SessionDep, _user: RequireManagerDep) -> RuleOut:
     async with session.begin():
         rule = await SqlAlertRuleRepository(session).create(AlertRule(**body.model_dump()))
     return RuleOut.from_entity(rule)
@@ -238,7 +240,7 @@ async def create_rule(body: RuleIn, session: SessionDep, _user: RequireAuthDep) 
 
 @router.patch("/alert-rules/{rule_id}", response_model=RuleOut)
 async def update_rule(
-    rule_id: int, body: RulePatch, request: Request, session: SessionDep, _user: RequireAuthDep
+    rule_id: int, body: RulePatch, request: Request, session: SessionDep, _user: RequireManagerDep
 ) -> RuleOut:
     changes = body.model_dump(exclude_unset=True)
     async with session.begin():
@@ -254,7 +256,7 @@ async def update_rule(
 
 
 @router.delete("/alert-rules/{rule_id}", status_code=204)
-async def delete_rule(rule_id: int, request: Request, session: SessionDep, _user: RequireAuthDep) -> None:
+async def delete_rule(rule_id: int, request: Request, session: SessionDep, _user: RequireManagerDep) -> None:
     async with session.begin():
         rule = await SqlAlertRuleRepository(session).get(rule_id)
         deleted = await SqlAlertRuleRepository(session).delete(rule_id) if rule else False
@@ -292,7 +294,7 @@ async def list_providers(session: SessionDep, reveal: SecretsVisibleDep) -> list
 
 
 @router.post("/notification-providers", response_model=ProviderOut, status_code=201)
-async def create_provider(body: ProviderIn, session: SessionDep, _admin: RequireAdminDep) -> ProviderOut:
+async def create_provider(body: ProviderIn, session: SessionDep, _admin: RequireManagerDep) -> ProviderOut:
     if body.provider not in PROVIDERS:
         raise HTTPException(status_code=422, detail=f"Unknown provider: {body.provider}")
     errors = build_provider(NotificationProviderConfig(**body.model_dump())).validate()
@@ -307,7 +309,7 @@ async def create_provider(body: ProviderIn, session: SessionDep, _admin: Require
 
 @router.patch("/notification-providers/{provider_id}", response_model=ProviderOut)
 async def update_provider(
-    provider_id: int, body: ProviderPatch, session: SessionDep, _admin: RequireAdminDep
+    provider_id: int, body: ProviderPatch, session: SessionDep, _admin: RequireManagerDep
 ) -> ProviderOut:
     # El SELECT previo (validar configuration) ya abre la transacción implícita
     # de la sesión, por lo que aquí NO puede usarse session.begin(): se cierra
@@ -331,7 +333,7 @@ async def update_provider(
 
 
 @router.delete("/notification-providers/{provider_id}", status_code=204)
-async def delete_provider(provider_id: int, session: SessionDep, _admin: RequireAdminDep) -> None:
+async def delete_provider(provider_id: int, session: SessionDep, _admin: RequireManagerDep) -> None:
     async with session.begin():
         deleted = await SqlNotificationProviderRepository(session).delete(provider_id)
     if not deleted:
@@ -339,7 +341,7 @@ async def delete_provider(provider_id: int, session: SessionDep, _admin: Require
 
 
 @router.post("/notification-providers/{provider_id}/test")
-async def test_provider(provider_id: int, session: SessionDep, _admin: RequireAdminDep) -> dict[str, str]:
+async def test_provider(provider_id: int, session: SessionDep, _admin: RequireManagerDep) -> dict[str, str]:
     config = await SqlNotificationProviderRepository(session).get(provider_id)
     if config is None:
         raise HTTPException(status_code=404, detail="Provider not found")
@@ -363,7 +365,7 @@ def _unique_copy_name(taken: set[str], base: str) -> str:
 
 
 @router.post("/notification-providers/{provider_id}/duplicate", response_model=ProviderOut, status_code=201)
-async def duplicate_provider(provider_id: int, session: SessionDep, _admin: RequireAdminDep) -> ProviderOut:
+async def duplicate_provider(provider_id: int, session: SessionDep, _admin: RequireManagerDep) -> ProviderOut:
     async with session.begin():
         repo = SqlNotificationProviderRepository(session)
         source = await repo.get(provider_id)
@@ -391,7 +393,7 @@ async def list_channels(session: SessionDep) -> list[ChannelOut]:
 
 
 @router.post("/notification-channels", response_model=ChannelOut, status_code=201)
-async def create_channel(body: ChannelIn, session: SessionDep, _admin: RequireAdminDep) -> ChannelOut:
+async def create_channel(body: ChannelIn, session: SessionDep, _admin: RequireManagerDep) -> ChannelOut:
     async with session.begin():
         channel = await SqlNotificationChannelRepository(session).create(NotificationChannel(**body.model_dump()))
     return ChannelOut.from_entity(channel)
@@ -399,7 +401,7 @@ async def create_channel(body: ChannelIn, session: SessionDep, _admin: RequireAd
 
 @router.patch("/notification-channels/{channel_id}", response_model=ChannelOut)
 async def update_channel(
-    channel_id: int, body: ChannelPatch, session: SessionDep, _admin: RequireAdminDep
+    channel_id: int, body: ChannelPatch, session: SessionDep, _admin: RequireManagerDep
 ) -> ChannelOut:
     async with session.begin():
         channel = await SqlNotificationChannelRepository(session).update(
@@ -411,7 +413,7 @@ async def update_channel(
 
 
 @router.delete("/notification-channels/{channel_id}", status_code=204)
-async def delete_channel(channel_id: int, session: SessionDep, _admin: RequireAdminDep) -> None:
+async def delete_channel(channel_id: int, session: SessionDep, _admin: RequireManagerDep) -> None:
     async with session.begin():
         deleted = await SqlNotificationChannelRepository(session).delete(channel_id)
     if not deleted:

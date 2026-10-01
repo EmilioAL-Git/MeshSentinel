@@ -1,13 +1,18 @@
 """Entidades del sistema de autenticación de MeshSentinel.
 
-Sin RBAC: `AuthUser.is_admin` es el único privilegio especial (gestión de
-usuarios). Cualquier usuario autenticado puede realizar cualquier operación
-sobre la red — la única diferencia entre usuarios es de identidad, no de
-permisos.
+Roles (ADR 0029): `admin` (todo), `manager` (todo salvo gestión de usuarios y
+ajustes de gateways) y `user` (solo lectura + sus favoritos y su grupo
+personal). Sin sesión: comportamiento previo (modo abierto/solo lectura).
 """
 
 from dataclasses import dataclass
 from datetime import datetime
+
+
+ROLE_ADMIN = "admin"
+ROLE_MANAGER = "manager"
+ROLE_USER = "user"
+ROLES = (ROLE_ADMIN, ROLE_MANAGER, ROLE_USER)
 
 
 @dataclass(slots=True)
@@ -15,12 +20,21 @@ class AuthUser:
     username: str
     display_name: str
     password_hash: str
-    is_admin: bool = False
+    role: str = ROLE_MANAGER
     enabled: bool = True
     id: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     last_login_at: datetime | None = None
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == ROLE_ADMIN
+
+    @property
+    def can_manage(self) -> bool:
+        """Gestor o admin: puede actuar sobre la red."""
+        return self.role in (ROLE_ADMIN, ROLE_MANAGER)
 
 
 @dataclass(slots=True)

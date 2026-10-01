@@ -40,6 +40,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     display_name: str
+    role: str
     is_admin: bool
     enabled: bool
     created_at: datetime | None
@@ -48,7 +49,8 @@ class UserOut(BaseModel):
 
     @classmethod
     def from_entity(cls, u: AuthUser) -> "UserOut":
-        return cls(**{f.name: getattr(u, f.name) for f in fields(AuthUser) if f.name != "password_hash"})
+        data = {f.name: getattr(u, f.name) for f in fields(AuthUser) if f.name != "password_hash"}
+        return cls(**data, is_admin=u.is_admin)
 
 
 class MeOut(BaseModel):
@@ -67,11 +69,13 @@ class UserCreateIn(BaseModel):
     display_name: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
     is_admin: bool = False
+    role: str | None = None
 
 
 class UserUpdateIn(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=64)
     is_admin: bool | None = None
+    role: str | None = None
 
 
 class DisplayNameIn(BaseModel):
@@ -174,7 +178,7 @@ async def list_users(request: Request, _admin: RequireAdminDep) -> list[UserOut]
 @router.post("/users", response_model=UserOut, status_code=201)
 async def create_user(body: UserCreateIn, request: Request, _admin: RequireAdminDep) -> UserOut:
     try:
-        user = await _service(request).create_user(body.username, body.display_name, body.password, body.is_admin)
+        user = await _service(request).create_user(body.username, body.display_name, body.password, body.is_admin, body.role)
     except AuthError as exc:
         raise HTTPException(status_code=422, detail=exc.message) from exc
     return UserOut.from_entity(user)
@@ -188,8 +192,13 @@ async def update_user(user_id: int, body: UserUpdateIn, request: Request, _admin
         raise HTTPException(status_code=404, detail="User not found")
     if body.display_name is not None:
         user = await service.update_display_name(user_id, body.display_name)
-    if body.is_admin is not None:
-        user = await service.set_admin(user_id, body.is_admin)
+    try:
+        if body.role is not None:
+            user = await service.set_role(user_id, body.role)
+        elif body.is_admin is not None:
+            user = await service.set_admin(user_id, body.is_admin)
+    except AuthError as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
     assert user is not None
     return UserOut.from_entity(user)
 

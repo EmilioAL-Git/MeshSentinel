@@ -13,6 +13,7 @@ import {
   type TagOut,
 } from "../../api/client";
 import { toast } from "../shell/Toast";
+import { useAuth } from "../../context/AuthContext";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { useNexusMode } from "../nexus/useNexusMode";
 import { AddToGroupMenu } from "./AddToGroupMenu";
@@ -95,6 +96,7 @@ export function FleetView({
   const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; label?: string } | null>(null);
   const [nexusOpsOpen, setNexusOpsOpen] = useState(false);
   const nexusModeOn = useNexusMode();
+  const { canOperate } = useAuth();
   const set = (patch: NodeFilterParams) => onFiltersChange({ ...filters, ...patch });
   const hasFilters = Object.values(filters).some((v) => v !== undefined && v !== "" && v !== false);
   const isGrouped = activeGroup != null;
@@ -196,6 +198,10 @@ export function FleetView({
   // Ignorar pide confirmación; dejar de ignorar (reversión) va directo.
   const requestToggleIgnored = useCallback(
     (id: string, value: boolean) => {
+      if (!canOperate) {
+        toast("Ignorar nodos requiere rol de gestor o administrador", { kind: "error" });
+        return;
+      }
       if (!value) {
         onToggleIgnored(id, false);
         return;
@@ -203,7 +209,7 @@ export function FleetView({
       const summary = allSummaries.find((s) => s.node.node_id === id);
       setIgnoreTarget({ id, label: summary ? displayName(summary.node) : id });
     },
-    [allSummaries, onToggleIgnored],
+    [allSummaries, onToggleIgnored, canOperate],
   );
 
   return (
@@ -483,26 +489,30 @@ export function FleetView({
               disabled={bulkFavorite.isPending}
               title={
                 allCheckedFavorite
-                  ? "Quita el favorito (local) a todos los nodos seleccionados"
-                  : "Marca como favorito (local) todos los nodos seleccionados"
+                  ? "Quita de tus favoritos todos los nodos seleccionados"
+                  : "Añade a tus favoritos todos los nodos seleccionados"
               }
               onClick={() => bulkFavorite.mutate(!allCheckedFavorite)}
             >
               {allCheckedFavorite ? "Quitar favoritos" : "Añadir favoritos"}
             </button>
             <AddToGroupMenu selectedIds={[...checkedIds]} groups={groups} allSummaries={allSummaries} />
-            <TagBulkMenu selectedIds={[...checkedIds]} allSummaries={allSummaries} />
-            <AssignNodeTypeMenu selectedIds={[...checkedIds]} />
-            <button
-              className="btn danger"
-              onClick={() => setDeleteTarget({ ids: [...checkedIds] })}
-            >
-              🗑 Borrar ({checkedIds.size})
-            </button>
-            <span style={{ marginLeft: "auto" }} />
-            <button className="btn primary" onClick={onCreateBatch}>
-              ▶ Crear lote ({checkedIds.size})
-            </button>
+            {canOperate && (
+              <>
+                <TagBulkMenu selectedIds={[...checkedIds]} allSummaries={allSummaries} />
+                <AssignNodeTypeMenu selectedIds={[...checkedIds]} />
+                <button
+                  className="btn danger"
+                  onClick={() => setDeleteTarget({ ids: [...checkedIds] })}
+                >
+                  🗑 Borrar ({checkedIds.size})
+                </button>
+                <span style={{ marginLeft: "auto" }} />
+                <button className="btn primary" onClick={onCreateBatch}>
+                  ▶ Crear lote ({checkedIds.size})
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

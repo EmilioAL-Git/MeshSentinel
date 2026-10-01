@@ -30,7 +30,8 @@ class SqlAuthUserRepository:
             username=user.username,
             display_name=user.display_name,
             password_hash=user.password_hash,
-            is_admin=user.is_admin,
+            role=user.role,
+            is_admin=user.role == "admin",
             enabled=user.enabled,
             created_at=user.created_at or now,
             updated_at=user.updated_at or now,
@@ -70,6 +71,8 @@ class SqlAuthUserRepository:
             return None
         for key, value in changes.items():
             setattr(m, key, value)
+            if key == "role":
+                m.is_admin = value == "admin"
         m.updated_at = datetime.now(timezone.utc)
         await self._session.flush()
         return _user(m)

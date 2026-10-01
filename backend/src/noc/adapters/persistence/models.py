@@ -131,6 +131,20 @@ class GroupModel(Base):
     is_critical: Mapped[bool] = mapped_column(Boolean, default=False)
     # Selección inteligente de gateway (Nivel 3), sin FK (mismo criterio que nodes.gateway_id).
     preferred_gateway_id: Mapped[str | None] = mapped_column(String(64))
+    # ADR 0029: grupo personal (uno por usuario, índice único). NULL = grupo
+    # compartido normal. Sin FK dura (SQLite no cascada): borrado explícito.
+    owner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), unique=True, nullable=True
+    )
+
+
+class UserFavoriteModel(Base):
+    """Favoritos personales (ADR 0029): sustituyen a `nodes.is_favorite`."""
+
+    __tablename__ = "user_favorites"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), primary_key=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), primary_key=True)
 
 
 class GroupMemberModel(Base):
@@ -451,6 +465,9 @@ class AuthUserModel(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(64))
     password_hash: Mapped[str] = mapped_column(String(128))
+    # Fuente de verdad del permiso (ADR 0029); `is_admin` se conserva derivada
+    # (role == "admin") para consultas existentes sin migrar su semántica.
+    role: Mapped[str] = mapped_column(String(16), default="manager")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

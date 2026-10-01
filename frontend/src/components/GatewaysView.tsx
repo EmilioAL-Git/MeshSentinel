@@ -543,7 +543,7 @@ function AddGatewayWizard({
 // ── Módulo del rack: un gateway ya reportado (gestionado o no) ───────────────
 
 function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayStatsOut }) {
-  const { canOperate } = useAuth();
+  const { canAdmin: canOperate } = useAuth();
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [editName, setEditName] = useState(gateway.name ?? "");
@@ -702,7 +702,7 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
 // ── Workspace ────────────────────────────────────────────────────────────────
 
 export function GatewaysView() {
-  const { canOperate } = useAuth();
+  const { canAdmin: canOperate } = useAuth();
   // include_deleted: una pasarela eliminada (borrado lógico) sigue siendo un
   // candidato válido para "+ Añadir enlace" — el proceso puede seguir vivo,
   // solo se retiró de la gestión activa (ver ADR 0021 §6).

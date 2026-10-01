@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { fetchGateways, setGroupPreferredGateway } from "../../api/client";
+import { ensureMyGroup, fetchGateways, setGroupPreferredGateway } from "../../api/client";
+import { useAuth } from "../../context/AuthContext";
 import { useActiveGroup } from "../../context/GroupContext";
 import { t } from "../../tokens";
 import { PreferredGatewaySelect } from "./GatewaySelect";
@@ -19,6 +20,15 @@ export function GroupSelector() {
   const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+  const { canOperate, hasPersonalSpace } = useAuth();
+  const createMine = useMutation({
+    mutationFn: ensureMyGroup,
+    onSuccess: (g) => {
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      setActiveGroup(g.id);
+      setOpen(false);
+    },
+  });
   const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
   const setPreferred = useMutation({
     mutationFn: ({ groupId, gatewayId }: { groupId: number; gatewayId: string | null }) =>
@@ -88,6 +98,11 @@ export function GroupSelector() {
             flexDirection: "column",
           }}
         >
+          {hasPersonalSpace && !groups.some((g) => g.is_personal) && (
+            <button className="btn ghost" onClick={() => createMine.mutate()} disabled={createMine.isPending} style={{ textAlign: "left" }}>
+              ◆ Crear mi Grupo del usuario
+            </button>
+          )}
           {groups.length === 0 && (
             <span style={{ padding: "0.4rem 0.5rem", color: t.textFaint, fontSize: 12 }}>
               Sin grupos todavía
@@ -113,16 +128,16 @@ export function GroupSelector() {
                   <span>{g.name}</span>
                   <span style={{ color: t.textFaint, fontSize: 11 }}>{g.member_count}</span>
                 </button>
-                <button
+                {canOperate && !g.is_personal && <button
                   className="btn ghost"
                   title="Gateway preferido del grupo"
                   onClick={() => setEditingGroupId(editingGroupId === g.id ? null : g.id)}
                   style={{ padding: "0.2rem 0.4rem", color: g.preferred_gateway_id ? t.accent : t.textFaint }}
                 >
                   ⚙
-                </button>
+                </button>}
               </div>
-              {editingGroupId === g.id && (
+              {canOperate && editingGroupId === g.id && (
                 <div
                   style={{
                     display: "flex",

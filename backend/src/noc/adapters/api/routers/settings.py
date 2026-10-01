@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from noc.adapters.api.deps import RequireAdminDep, SessionDep
+from noc.adapters.api.deps import RequireManagerDep, SessionDep
 from noc.adapters.persistence.organization_repositories import SqlGroupRepository
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.settings_registry import (
@@ -86,11 +86,14 @@ async def get_startup_group(session: SessionDep) -> StartupGroupOut:
 
 
 @router.put("/startup-group", response_model=StartupGroupOut)
-async def set_startup_group(body: StartupGroupIn, session: SessionDep, admin: RequireAdminDep) -> StartupGroupOut:
+async def set_startup_group(body: StartupGroupIn, session: SessionDep, admin: RequireManagerDep) -> StartupGroupOut:
     v = body.value
     if isinstance(v, int) and not isinstance(v, bool):
-        if await SqlGroupRepository(session).get(v) is None:
+        group = await SqlGroupRepository(session).get(v)
+        if group is None:
             raise HTTPException(status_code=422, detail="El grupo no existe")
+        if group.owner_user_id is not None:
+            raise HTTPException(status_code=422, detail="El grupo del usuario no puede ser el predeterminado")
     elif v not in ("last", "none"):
         raise HTTPException(status_code=422, detail="Valor no válido")
     actor = admin.username if admin is not None else None
@@ -100,7 +103,7 @@ async def set_startup_group(body: StartupGroupIn, session: SessionDep, admin: Re
 
 
 @router.get("", response_model=list[SettingOut])
-async def list_settings(session: SessionDep, _admin: RequireAdminDep) -> list[SettingOut]:
+async def list_settings(session: SessionDep, _admin: RequireManagerDep) -> list[SettingOut]:
     overrides = await SqlSystemSettingsRepository(session).list_all()
     defaults = get_settings().__class__()  # instancia limpia: solo defaults de env, sin overrides aplicados
     return [
@@ -115,7 +118,7 @@ async def list_settings(session: SessionDep, _admin: RequireAdminDep) -> list[Se
 
 
 @router.patch("/{key}", response_model=SettingOut)
-async def patch_setting(key: str, body: SettingPatchIn, session: SessionDep, admin: RequireAdminDep) -> SettingOut:
+async def patch_setting(key: str, body: SettingPatchIn, session: SessionDep, admin: RequireManagerDep) -> SettingOut:
     spec = _spec_or_404(key)
     try:
         value = coerce_value(spec, body.value)
@@ -130,7 +133,7 @@ async def patch_setting(key: str, body: SettingPatchIn, session: SessionDep, adm
 
 
 @router.delete("/{key}", response_model=SettingOut)
-async def reset_setting(key: str, session: SessionDep, _admin: RequireAdminDep) -> SettingOut:
+async def reset_setting(key: str, session: SessionDep, _admin: RequireManagerDep) -> SettingOut:
     spec = _spec_or_404(key)
     await SqlSystemSettingsRepository(session).reset(key)
     await session.commit()

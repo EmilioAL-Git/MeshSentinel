@@ -13,7 +13,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import RequireAuthDep, SessionDep
+from noc.adapters.api.deps import RequireManagerDep, SessionDep
 from noc.adapters.persistence.repositories import SqlNodeRepository
 from noc.application.admin.batches import PlannedOperation
 from noc.application.admin.gateway_routing import resolve_gateway
@@ -100,7 +100,7 @@ async def remote_flags_known(
 
 @router.post("/remote-flags/{node_id}/queue", response_model=RemoteFlagQueueOut, status_code=201)
 async def queue_remote_flag(
-    node_id: str, body: RemoteFlagQueueIn, request: Request, session: SessionDep, current_user: RequireAuthDep
+    node_id: str, body: RemoteFlagQueueIn, request: Request, session: SessionDep, current_user: RequireManagerDep
 ) -> RemoteFlagQueueOut:
     if body.subject_node_id == node_id:
         raise HTTPException(status_code=422, detail="subject_node_id must differ from node_id")
@@ -188,7 +188,7 @@ async def _contact_data_for_plan(session: SessionDep, plan: RemoteFlagSyncPlan) 
 
 @router.post("/remote-flags/{node_id}/sync", response_model=RemoteFlagSyncOut, status_code=201)
 async def sync_remote_flags(
-    node_id: str, body: RemoteFlagSyncIn, request: Request, session: SessionDep, current_user: RequireAuthDep
+    node_id: str, body: RemoteFlagSyncIn, request: Request, session: SessionDep, current_user: RequireManagerDep
 ) -> RemoteFlagSyncOut:
     """Reconciliación completa (M4.2): compara el estado deseado (última
     acción pedida por sujeto) contra el último estado CONFIRMADO conocido y
@@ -218,7 +218,7 @@ async def sync_remote_flags(
 
 @router.post("/remote-flags/{node_id}/resend-pending", response_model=RemoteFlagSyncOut, status_code=201)
 async def resend_pending_remote_flags(
-    node_id: str, body: RemoteFlagSyncIn, request: Request, session: SessionDep, current_user: RequireAuthDep
+    node_id: str, body: RemoteFlagSyncIn, request: Request, session: SessionDep, current_user: RequireManagerDep
 ) -> RemoteFlagSyncOut:
     """Reenvío mecánico (M4.2): reemite exclusivamente lo Pendiente o en Error,
     tal cual la última acción pedida — nunca toca lo Confirmado."""

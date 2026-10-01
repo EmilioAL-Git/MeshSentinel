@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SessionDep
+from noc.adapters.api.deps import CurrentUserDep, RequireManagerDep, RequireUserDep, SessionDep
 from noc.adapters.api.schemas import (
     NeighborOut,
     NodeGatewayLinkOut,
@@ -14,7 +14,7 @@ from noc.adapters.api.schemas import (
     TelemetryOut,
 )
 from noc.adapters.persistence.maintenance import reset_node_db
-from noc.adapters.persistence.organization_repositories import SqlTagRepository
+from noc.adapters.persistence.organization_repositories import SqlTagRepository, SqlUserFavoriteRepository
 from noc.adapters.persistence.repositories import (
     SqlNeighborRepository,
     SqlNodeGatewayLinkRepository,
@@ -53,6 +53,12 @@ class WipeNodesOut(BaseModel):
     activity_log_deleted: int
 
 
+async def _user_favorites(session, user) -> set[str]:
+    if user is None or user.id is None:
+        return set()
+    return await SqlUserFavoriteRepository(session).ids_for_user(user.id)
+
+
 @router.get("", response_model=list[NodeSummaryOut])
 async def list_nodes(
     session: SessionDep,
@@ -67,9 +73,15 @@ async def list_nodes(
     include_ignored: bool = False,
     only_ignored: bool = False,
     nexus: bool | None = None,
+    current_user: CurrentUserDep = None,
 ) -> list[NodeSummaryOut]:
     threshold = get_settings().node_offline_after_seconds
     summaries = await SqlNodeRepository(session).list_summaries()
+    # Favoritos PERSONALES (ADR 0029): `is_favorite` se rellena por usuario; sin
+    # sesión nadie tiene favoritos. Antes del filtro, para que ?favorite= valga.
+    favs = await _user_favorites(session, current_user)
+    for s in summaries:
+        s.node.is_favorite = s.node.node_id in favs
     # M6.2: observaciones por pasarela adjuntas al resumen (una sola consulta)
     links_by_node = await SqlNodeGatewayLinkRepository(session).list_for_nodes(
         [s.node.node_id for s in summaries]
@@ -99,7 +111,7 @@ async def list_nodes(
 
 @router.delete("", response_model=WipeNodesOut)
 async def wipe_all_nodes(
-    body: WipeNodesIn, session: SessionDep, _admin: RequireAdminDep
+    body: WipeNodesIn, session: SessionDep, _admin: RequireManagerDep
 ) -> WipeNodesOut:
     """Reinicio de fábrica de la NodeDB (mantenimiento, no config): nodos +
     su historia propia + TODO rastro histórico que dependía de ellos
@@ -135,7 +147,7 @@ class NodeBulkDeleteOut(BaseModel):
 
 @router.delete("/bulk", response_model=NodeBulkDeleteOut)
 async def delete_nodes_bulk(
-    body: NodeBulkDeleteIn, session: SessionDep, current_user: RequireAdminDep
+    body: NodeBulkDeleteIn, session: SessionDep, current_user: RequireManagerDep
 ) -> NodeBulkDeleteOut:
     """Borrado real de varios nodos a la vez (selección de Flota) — distinto
     de `DELETE /nodes` (borrado TOTAL de la NodeDB, solo admin)."""
@@ -145,7 +157,7 @@ async def delete_nodes_bulk(
 
 
 @router.delete("/{node_id}", status_code=204)
-async def delete_node(node_id: str, session: SessionDep, current_user: RequireAdminDep) -> None:
+async def delete_node(node_id: str, session: SessionDep, current_user: RequireManagerDep) -> None:
     """Borrado real e irreversible de un nodo: fila + su historial propio
     (posiciones/telemetría/vecinos/tags/grupos/enlaces con pasarela/chat
     enviado). Distinto de `is_ignored` (M1.2), que solo lo oculta sin
@@ -157,11 +169,14 @@ async def delete_node(node_id: str, session: SessionDep, current_user: RequireAd
 
 
 @router.put("/{node_id}/favorite", response_model=NodeOut)
-async def set_favorite(node_id: str, body: FlagIn, session: SessionDep, _user: RequireAuthDep) -> NodeOut:
-    node = await SqlNodeRepository(session).set_flag(node_id, "is_favorite", body.value)
+async def set_favorite(node_id: str, body: FlagIn, session: SessionDep, user: RequireUserDep) -> NodeOut:
+    """Favorito PERSONAL del usuario con sesión (ADR 0029)."""
+    node = await SqlNodeRepository(session).get(node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
+    await SqlUserFavoriteRepository(session).set_bulk(user.id or 0, [node_id], body.value)
     await session.commit()
+    node.is_favorite = body.value
     return NodeOut.from_entity(node, get_settings().node_offline_after_seconds)
 
 
@@ -179,17 +194,17 @@ class FavoriteBulkOut(BaseModel):
 # /{node_id}/favorite.
 @router.post("/bulk-favorite", response_model=FavoriteBulkOut)
 async def set_favorite_bulk(
-    body: FavoriteBulkIn, session: SessionDep, _user: RequireAuthDep
+    body: FavoriteBulkIn, session: SessionDep, user: RequireUserDep
 ) -> FavoriteBulkOut:
-    changed, unchanged = await SqlNodeRepository(session).set_flag_bulk(
-        body.node_ids, "is_favorite", body.value
+    changed, unchanged = await SqlUserFavoriteRepository(session).set_bulk(
+        user.id or 0, body.node_ids, body.value
     )
     await session.commit()
     return FavoriteBulkOut(changed=changed, unchanged=unchanged)
 
 
 @router.put("/{node_id}/ignored", response_model=NodeOut)
-async def set_ignored(node_id: str, body: FlagIn, session: SessionDep, _user: RequireAuthDep) -> NodeOut:
+async def set_ignored(node_id: str, body: FlagIn, session: SessionDep, _user: RequireManagerDep) -> NodeOut:
     node = await SqlNodeRepository(session).set_flag(node_id, "is_ignored", body.value)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
@@ -199,7 +214,7 @@ async def set_ignored(node_id: str, body: FlagIn, session: SessionDep, _user: Re
 
 @router.put("/{node_id}/nexus", response_model=NodeOut)
 async def set_nexus(
-    node_id: str, body: FlagIn, session: SessionDep, current_user: RequireAuthDep
+    node_id: str, body: FlagIn, session: SessionDep, current_user: RequireManagerDep
 ) -> NodeOut:
     """Marcado manual de nodo JenTastic-Nexus (ADR 0027 §8) — enteramente
     manual, el operador confirma cada nodo (aceptando una sugerencia de
@@ -213,7 +228,7 @@ async def set_nexus(
 
 @router.put("/{node_id}/preferred-gateway", response_model=NodeOut)
 async def set_node_preferred_gateway(
-    node_id: str, body: PreferredGatewayIn, session: SessionDep, _user: RequireAuthDep
+    node_id: str, body: PreferredGatewayIn, session: SessionDep, _user: RequireManagerDep
 ) -> NodeOut:
     """Nivel 2 de la selección inteligente de gateway (Inspector, sección Organización)."""
     node = await SqlNodeRepository(session).set_preferred_gateway(node_id, body.gateway_id)
@@ -224,7 +239,7 @@ async def set_node_preferred_gateway(
 
 
 @router.put("/{node_id}/node-type", response_model=NodeOut)
-async def set_node_type(node_id: str, body: NodeTypeIn, session: SessionDep, _user: RequireAuthDep) -> NodeOut:
+async def set_node_type(node_id: str, body: NodeTypeIn, session: SessionDep, _user: RequireManagerDep) -> NodeOut:
     """Clasificación manual (Inspector, Organización): null = "Automático",
     con prioridad absoluta sobre la clasificación derivada del role de
     firmware en cualquier otro caso (Flota, bloques, estadísticas de grupo)."""
@@ -240,7 +255,7 @@ class NodeTypeBulkOut(BaseModel):
 
 
 @router.put("/node-type/bulk", response_model=NodeTypeBulkOut)
-async def set_node_type_bulk(body: NodeTypeBulkIn, session: SessionDep, _user: RequireAuthDep) -> NodeTypeBulkOut:
+async def set_node_type_bulk(body: NodeTypeBulkIn, session: SessionDep, _user: RequireManagerDep) -> NodeTypeBulkOut:
     """Igual que set_node_type pero para la barra de selección de Flota."""
     updated = await SqlNodeRepository(session).set_node_type_override_bulk(
         body.node_ids, body.node_type
@@ -250,7 +265,7 @@ async def set_node_type_bulk(body: NodeTypeBulkIn, session: SessionDep, _user: R
 
 
 @router.put("/{node_id}/tags", status_code=204)
-async def set_node_tags(node_id: str, body: NodeTagsIn, session: SessionDep, _user: RequireAuthDep) -> None:
+async def set_node_tags(node_id: str, body: NodeTagsIn, session: SessionDep, _user: RequireManagerDep) -> None:
     if await SqlNodeRepository(session).get(node_id) is None:
         raise HTTPException(status_code=404, detail="Node not found")
     await SqlTagRepository(session).set_node_tags(node_id, body.tag_ids)
@@ -258,10 +273,11 @@ async def set_node_tags(node_id: str, body: NodeTagsIn, session: SessionDep, _us
 
 
 @router.get("/{node_id}", response_model=NodeOut)
-async def get_node(node_id: str, session: SessionDep) -> NodeOut:
+async def get_node(node_id: str, session: SessionDep, current_user: CurrentUserDep) -> NodeOut:
     node = await SqlNodeRepository(session).get(node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
+    node.is_favorite = node_id in await _user_favorites(session, current_user)
     return NodeOut.from_entity(node, get_settings().node_offline_after_seconds)
 
 

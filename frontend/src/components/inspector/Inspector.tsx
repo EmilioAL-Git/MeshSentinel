@@ -9,6 +9,7 @@ import {
   addGroupMember,
   createGroup,
   createOperation,
+  ensureMyGroup,
   createTag,
   deleteNode,
   fetchDashboardSummary,
@@ -357,6 +358,21 @@ export function Inspector({
     mutationFn: (value: boolean) => setNodeFavorite(nodeId, value),
     onSettled: invalidate,
   });
+  // Grupo del usuario (ADR 0029): alta/baja del nodo en el grupo personal de
+  // la cuenta; lo crea bajo demanda. Disponible para cualquier rol con sesión.
+  const myGroup = (allGroups.data ?? []).find((g) => g.is_personal);
+  const inMyGroup = myGroup != null && (summary?.group_ids ?? []).includes(myGroup.id);
+  const toggleMyGroup = useMutation({
+    mutationFn: async () => {
+      const g = myGroup ?? (await ensureMyGroup());
+      if (inMyGroup) await removeGroupMember(g.id, nodeId);
+      else await addGroupMember(g.id, nodeId);
+    },
+    onSettled: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+    },
+  });
   const ignored = useMutation({
     mutationFn: (value: boolean) => setNodeIgnored(nodeId, value),
     onSettled: invalidate,
@@ -454,7 +470,7 @@ export function Inspector({
   const visibleTabs = showNexusTab ? TABS : TABS.filter((id) => id !== "nexus");
   // Pestañas que escriben (organización, operaciones, Nexus): visibles pero
   // bloqueadas sin sesión — el backend las rechaza igualmente con 401.
-  const { canOperate } = useAuth();
+  const { canOperate, hasPersonalSpace } = useAuth();
   const effectiveTab: TabId = (visibleTabs as readonly TabId[]).includes(tab) ? tab : "resumen";
   const locked = !canOperate && LOCKED_TABS.has(effectiveTab);
   const lastTel = telemetry.data?.[0];
@@ -619,11 +635,22 @@ export function Inspector({
           </button>
           <button
             style={{ ...iconBtn, color: n?.is_favorite ? t.warn : t.textFaint }}
-            title={n?.is_favorite ? "Quitar de favoritos (local)" : "Marcar favorito (local)"}
+            title={n?.is_favorite ? "Quitar de mis favoritos" : "Añadir a mis favoritos"}
             onClick={() => favorite.mutate(!n?.is_favorite)}
           >
             {n?.is_favorite ? "★" : "☆"}
           </button>
+          {hasPersonalSpace && (
+            <button
+              style={{ ...iconBtn, color: inMyGroup ? t.accent : t.textFaint }}
+              title={inMyGroup ? "Quitar de mi Grupo del usuario" : "Añadir a mi Grupo del usuario"}
+              onClick={() => toggleMyGroup.mutate()}
+              disabled={toggleMyGroup.isPending}
+            >
+              {inMyGroup ? "◆" : "◇"}
+            </button>
+          )}
+          {canOperate && (
           <button
             style={{ ...iconBtn, color: n?.is_ignored ? t.crit : t.textFaint }}
             title={n?.is_ignored ? "Dejar de ignorar (local)" : "Ignorar (local)"}
@@ -631,6 +658,7 @@ export function Inspector({
           >
             👁
           </button>
+          )}
           {confirmIgnore && (
             <IgnoreNodeModal
               nodeLabel={n ? displayName(n) : nodeId}
@@ -1109,7 +1137,7 @@ export function Inspector({
                   >
                     <div style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem" }}>
                       <span style={{ flex: 1, minWidth: 0, color: t.text }}>{a.message}</span>
-                      {a.status === "firing" && (
+                      {a.status === "firing" && canOperate && (
                         <button style={iconBtn} title="Reconocer la alerta" disabled={ack.isPending} onClick={() => ack.mutate(a.id)}>
                           ACK
                         </button>

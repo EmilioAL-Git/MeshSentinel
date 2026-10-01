@@ -13,9 +13,9 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from noc.adapters.api.deps import RequireAuthDep, SessionDep
+from noc.adapters.api.deps import RequireManagerDep, SessionDep
 from noc.adapters.api.routers.admin_operations import OperationOut
 from noc.adapters.api.schemas import GatewaySelectionIn
 from noc.adapters.persistence.admin_repositories import (
@@ -44,6 +44,14 @@ class ScopeIn(BaseModel):
     battery_below: int | None = None
     gateway_id: str | None = None
     include_ignored: bool = False
+
+    @model_validator(mode="after")
+    def _no_favorite_filter(self) -> "ScopeIn":
+        # Los favoritos son personales (ADR 0029): un filtro global sería
+        # ambiguo (¿de quién?). Se selecciona por node_ids desde Flota.
+        if self.favorite is not None:
+            raise ValueError("El filtro 'favorite' no está soportado en lotes; use node_ids")
+        return self
 
     def to_scope(self) -> BatchScope:
         filters = NodeFilters(
@@ -186,7 +194,7 @@ async def preview_batch(body: PreviewIn, request: Request) -> PreviewOut:
 
 
 @router.post("", response_model=BatchOut, status_code=201)
-async def create_batch(body: BatchCreateIn, request: Request, current_user: RequireAuthDep) -> BatchOut:
+async def create_batch(body: BatchCreateIn, request: Request, current_user: RequireManagerDep) -> BatchOut:
     try:
         batch = await _service(request).create(
             name=body.name,
@@ -256,7 +264,7 @@ async def batch_operations(
 
 
 @router.post("/{batch_id}/pause", response_model=BatchOut)
-async def pause_batch(batch_id: int, request: Request, _user: RequireAuthDep) -> BatchOut:
+async def pause_batch(batch_id: int, request: Request, _user: RequireManagerDep) -> BatchOut:
     batch = await _service(request).pause(batch_id)
     if batch is None:
         raise HTTPException(status_code=409, detail="Batch not found or not running")
@@ -264,7 +272,7 @@ async def pause_batch(batch_id: int, request: Request, _user: RequireAuthDep) ->
 
 
 @router.post("/{batch_id}/resume", response_model=BatchOut)
-async def resume_batch(batch_id: int, request: Request, _user: RequireAuthDep) -> BatchOut:
+async def resume_batch(batch_id: int, request: Request, _user: RequireManagerDep) -> BatchOut:
     batch = await _service(request).resume(batch_id)
     if batch is None:
         raise HTTPException(status_code=409, detail="Batch not found or not paused")
@@ -272,7 +280,7 @@ async def resume_batch(batch_id: int, request: Request, _user: RequireAuthDep) -
 
 
 @router.post("/{batch_id}/cancel", response_model=BatchOut)
-async def cancel_batch(batch_id: int, request: Request, _user: RequireAuthDep) -> BatchOut:
+async def cancel_batch(batch_id: int, request: Request, _user: RequireManagerDep) -> BatchOut:
     batch = await _service(request).cancel(batch_id)
     if batch is None:
         raise HTTPException(status_code=409, detail="Batch not found or already terminal")

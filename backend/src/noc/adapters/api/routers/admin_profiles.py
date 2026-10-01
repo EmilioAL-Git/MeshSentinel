@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import RequireAuthDep, SessionDep
+from noc.adapters.api.deps import RequireManagerDep, SessionDep
 from noc.adapters.api.routers.admin_batches import BatchOut
 from noc.adapters.persistence.profile_repositories import SqlConfigProfileRepository
 from noc.application.auth.actor import ActorContext
@@ -147,7 +147,7 @@ async def list_profiles(session: SessionDep) -> list[ProfileOut]:
 
 
 @router.post("", response_model=ProfileDetailOut, status_code=201)
-async def create_profile(body: ProfileCreateIn, request: Request, _user: RequireAuthDep) -> ProfileDetailOut:
+async def create_profile(body: ProfileCreateIn, request: Request, _user: RequireManagerDep) -> ProfileDetailOut:
     try:
         profile, version = await _service(request).create(
             body.name, body.description, body.sections
@@ -169,7 +169,7 @@ async def get_profile(profile_id: int, session: SessionDep) -> ProfileDetailOut:
 
 @router.patch("/{profile_id}", response_model=ProfileOut)
 async def patch_profile(
-    profile_id: int, body: ProfilePatchIn, session: SessionDep, _user: RequireAuthDep
+    profile_id: int, body: ProfilePatchIn, session: SessionDep, _user: RequireManagerDep
 ) -> ProfileOut:
     repo = SqlConfigProfileRepository(session)
     changes: dict[str, Any] = {}
@@ -190,7 +190,7 @@ async def patch_profile(
 
 
 @router.delete("/{profile_id}", status_code=204)
-async def delete_profile(profile_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
+async def delete_profile(profile_id: int, session: SessionDep, _user: RequireManagerDep) -> None:
     if not await SqlConfigProfileRepository(session).delete(profile_id):
         raise HTTPException(status_code=404, detail="Profile not found")
     await session.commit()
@@ -217,7 +217,7 @@ async def get_version(profile_id: int, version: int, session: SessionDep) -> Pro
 
 @router.post("/{profile_id}/versions", response_model=ProfileVersionOut, status_code=201)
 async def create_version(
-    profile_id: int, body: VersionCreateIn, request: Request, _user: RequireAuthDep
+    profile_id: int, body: VersionCreateIn, request: Request, _user: RequireManagerDep
 ) -> ProfileVersionOut:
     try:
         version = await _service(request).add_version(profile_id, body.sections, body.comment)
@@ -277,7 +277,7 @@ async def sync_preview(profile_id: int, body: SyncIn, request: Request) -> SyncP
 
 @router.post("/{profile_id}/sync", response_model=BatchOut, status_code=201)
 async def sync_profile(
-    profile_id: int, body: SyncIn, request: Request, current_user: RequireAuthDep
+    profile_id: int, body: SyncIn, request: Request, current_user: RequireManagerDep
 ) -> BatchOut:
     try:
         batch = await _service(request).sync(
