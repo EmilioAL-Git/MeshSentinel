@@ -194,10 +194,8 @@ export function FloatingWindow({
     touchAction: "none",
   });
 
-  // Velo de fondo (solo visual, NUNCA modal): la ventana sigue sin bloquear
-  // el mapa/resto de la UI — `pointer-events: none` deja pasar todos los
-  // clics/drags al contenido de detrás. Más oscuro + difuminado (pedido del
-  // usuario) para que la ventana se distinga claramente del fondo.
+  // Velo de fondo: captura los clics de fuera (el contenido de detrás NO
+  // debe recibirlos) y los usa para cerrar la ventana.
   const backdropStyle: CSSProperties = {
     position: "fixed",
     inset: 0,
@@ -205,12 +203,11 @@ export function FloatingWindow({
     background: "rgba(0, 0, 0, 0.6)",
     backdropFilter: "blur(3px)",
     WebkitBackdropFilter: "blur(3px)",
-    pointerEvents: "none",
   };
 
   return createPortal(
     <>
-      <div style={backdropStyle} />
+      <div style={backdropStyle} onMouseDown={onClose} />
       <div ref={panelRef} className="panel" style={windowStyle}>
       <div
         className="panel-head"

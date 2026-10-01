@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { LockedNotice } from "../shell/LockedNotice";
-import { usePersistedState } from "../../hooks/usePersistedState";
 import { useUrlString } from "../../hooks/useUrlState";
 import {
   ackAlert,
@@ -273,16 +272,20 @@ export function Inspector({
   // `tab=` la sobrescriba — "cómo tengo montado el puesto" (localStorage)
   // cede ante "qué le estoy enseñando a alguien" (URL) cuando esta última
   // está presente.
-  const [storedTab, setStoredTab] = usePersistedState<TabId>("window.inspector.tab", "resumen");
+  // Abrir un nodo SIEMPRE arranca en «Resumen», salvo que la URL traiga un
+  // `tab=` (enlace compartido en la primera carga). Al cambiar de nodo o
+  // cerrar el Inspector se limpia `tab` para que no sobreviva al siguiente.
   const [urlTab, setUrlTab] = useUrlString("tab", null, { replace: true });
-  const tab: TabId = urlTab != null && (TABS as readonly string[]).includes(urlTab) ? (urlTab as TabId) : storedTab;
-  const setTab = useCallback(
-    (next: TabId) => {
-      setStoredTab(next);
-      setUrlTab(next);
-    },
-    [setStoredTab, setUrlTab],
-  );
+  const tab: TabId = urlTab != null && (TABS as readonly string[]).includes(urlTab) ? (urlTab as TabId) : "resumen";
+  const setTab = useCallback((next: TabId) => setUrlTab(next), [setUrlTab]);
+  const prevNodeId = useRef(nodeId);
+  useEffect(() => {
+    if (prevNodeId.current !== nodeId) {
+      prevNodeId.current = nodeId;
+      setUrlTab(null);
+    }
+  }, [nodeId, setUrlTab]);
+  useEffect(() => () => setUrlTab(null), [setUrlTab]);
 
   const node = useQuery({ queryKey: ["node", nodeId], queryFn: () => fetchNode(nodeId), refetchInterval: 10_000 });
   const telemetry = useQuery({
