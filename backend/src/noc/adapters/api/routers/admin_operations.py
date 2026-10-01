@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import RequireManagerDep, SessionDep
@@ -191,18 +191,26 @@ async def get_operation(op_id: int, session: SessionDep) -> OperationOut:
 
 
 @router.post("/operations/{op_id}/cancel", response_model=OperationOut)
-async def cancel_operation(op_id: int, session: SessionDep, _user: RequireManagerDep) -> OperationOut:
+async def cancel_operation(
+    op_id: int, request: Request, session: SessionDep, _user: RequireManagerDep
+) -> OperationOut:
     async with session.begin():
         repo = SqlAdminOperationRepository(session)
         op = await repo.get(op_id)
         if op is None:
             raise HTTPException(status_code=404, detail="Operation not found")
-        if op.status not in ("pending", "queued"):
-            # Lo ya enviado a LoRa no se puede retirar (diseño §4.3)
+        if op.status not in ("pending", "queued", "running"):
+            # Lo ya enviado a LoRa no se puede retirar del aire: cancelar una
+            # en vuelo solo detiene su seguimiento y reintentos (el resultado
+            # tardío del gateway se ignora porque la op ya es terminal)
             raise HTTPException(status_code=409, detail=f"Cannot cancel operation in status '{op.status}'")
         from datetime import timezone
 
         op = await repo.update_fields(op_id, {"status": "cancelled", "finished_at": datetime.now(timezone.utc)})
+        if op is not None and op.batch_id is not None:
+            batches = getattr(request.app.state, "batches", None)
+            if batches is not None:
+                await batches.maybe_complete(session, op.batch_id)
     assert op is not None
     return OperationOut.from_entity(op)
 

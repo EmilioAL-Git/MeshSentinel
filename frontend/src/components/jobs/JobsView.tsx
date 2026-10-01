@@ -179,8 +179,12 @@ function OpRow({
           ↻
         </button>
       )}
-      {onCancel && op.status === "pending" && (
-        <button style={smallBtn} title="Cancelar" onClick={() => onCancel(op.id)}>
+      {onCancel && (op.status === "pending" || op.status === "queued" || op.status === "running") && (
+        <button
+          style={smallBtn}
+          title={op.status === "pending" ? "Cancelar" : "Cancelar seguimiento (lo ya enviado por radio no se puede retirar)"}
+          onClick={() => onCancel(op.id)}
+        >
           ✕
         </button>
       )}
@@ -200,6 +204,7 @@ function ActiveBatchCard({
   onOpenNode,
   onLocate,
   onRetry,
+  onCancelOp,
 }: {
   batch: BatchOut;
   batchOps: OperationOut[];
@@ -211,6 +216,7 @@ function ActiveBatchCard({
   onOpenNode: (id: string) => void;
   onLocate: (id: string) => void;
   onRetry: (id: number) => void;
+  onCancelOp: (id: number) => void;
 }) {
   const queryClient = useQueryClient();
   const detail = useQuery({
@@ -338,6 +344,7 @@ function ActiveBatchCard({
               onOpenNode={onOpenNode}
               onLocate={onLocate}
               onRetry={onRetry}
+              onCancel={onCancelOp}
             />
           ))}
         </div>
@@ -703,6 +710,7 @@ export function JobsView({
                 onOpenNode={onOpenNode}
                 onLocate={onLocate}
                 onRetry={(id) => doRetryOp.mutate(id)}
+                onCancelOp={(id) => doCancelOp.mutate(id)}
               />
             ))}
             {runningOps.map((op) => (
@@ -714,6 +722,7 @@ export function JobsView({
                 focusId={focusId}
                 onOpenNode={onOpenNode}
                 onLocate={onLocate}
+                onCancel={(id) => doCancelOp.mutate(id)}
                 showTime="created"
               />
             ))}
