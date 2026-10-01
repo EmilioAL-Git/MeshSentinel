@@ -400,6 +400,11 @@ export const addGroupMembersBulk = (groupId: number, nodeIds: string[]) =>
 export const removeGroupMembersBulk = (groupId: number, nodeIds: string[]) =>
   send<BulkRemoveOut>("POST", `/groups/${groupId}/members/bulk-remove`, { node_ids: nodeIds });
 
+export const addTagBulk = (tagId: number, nodeIds: string[]) =>
+  send<BulkMembersOut>("POST", `/tags/${tagId}/nodes/bulk`, { node_ids: nodeIds });
+export const removeTagBulk = (tagId: number, nodeIds: string[]) =>
+  send<BulkRemoveOut>("POST", `/tags/${tagId}/nodes/bulk-remove`, { node_ids: nodeIds });
+
 export interface ThresholdsOut {
   low_battery_percent: number;
   offline_minutes_warning: number;
@@ -466,14 +471,17 @@ export interface StatsSummaryOut {
   nodes_total: number;
   nodes_online: number;
   network_age_days: number | null;
-  events_last_24h: number;
+  window_hours: number;
+  events_in_window: number;
   records: StatRecordOut[];
 }
 
-export const fetchStatsSummary = () => get<StatsSummaryOut>("/stats/summary");
+/** `hours`: ventana del Top, 1..168 (máximo 1 semana). */
+export const fetchStatsSummary = (hours = 24) => get<StatsSummaryOut>(`/stats/summary?hours=${hours}`);
 /** Ranking completo de un récord (todos los nodos con dato, mejor primero) —
  * "nodos por debajo del top" al desplegar una tarjeta de Estadísticas. */
-export const fetchStatsRanking = (key: string) => get<StatRecordOut[]>(`/stats/ranking/${encodeURIComponent(key)}`);
+export const fetchStatsRanking = (key: string, hours = 24) =>
+  get<StatRecordOut[]>(`/stats/ranking/${encodeURIComponent(key)}?hours=${hours}`);
 
 export type Severity = "INFO" | "WARNING" | "CRITICAL";
 

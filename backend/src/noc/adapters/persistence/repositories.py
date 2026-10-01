@@ -9,7 +9,7 @@ from dataclasses import fields
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -309,6 +309,15 @@ class SqlPositionRepository:
         )
         return [_to_entity(r, Position) for r in rows]
 
+    async def max_altitude_since(self, since: datetime) -> dict[str, int]:
+        """Altitud máxima por nodo entre las posiciones recibidas desde `since`."""
+        rows = await self._session.execute(
+            select(PositionModel.node_id, func.max(PositionModel.altitude_m))
+            .where(PositionModel.received_at >= since, PositionModel.altitude_m.is_not(None))
+            .group_by(PositionModel.node_id)
+        )
+        return {r[0]: r[1] for r in rows}
+
     async def count_since(self, since: datetime) -> int:
         result = await self._session.scalar(
             select(func.count()).select_from(PositionModel).where(PositionModel.received_at >= since)
@@ -348,6 +357,34 @@ class SqlTelemetryRepository:
             select(func.count()).select_from(TelemetryModel).where(TelemetryModel.received_at >= since)
         )
         return int(result or 0)
+
+    async def extremes_since(self, kind: str, since: datetime) -> dict[str, dict[str, float | int | None]]:
+        """Extremos por nodo de las muestras de un `kind` desde `since` (Top
+        con ventana temporal): máximos de uso/uptime/temperatura/humedad/
+        presión, mínimos de batería (sin el centinela 101 = alimentación
+        externa) y temperatura. Un solo GROUP BY, portable PG/SQLite."""
+        m = TelemetryModel
+        battery = case((m.battery_level < 101, m.battery_level))
+        rows = await self._session.execute(
+            select(
+                m.node_id,
+                func.max(m.channel_utilization),
+                func.max(m.air_util_tx),
+                func.max(m.uptime_seconds),
+                func.min(battery),
+                func.max(m.temperature_c),
+                func.min(m.temperature_c),
+                func.max(m.relative_humidity),
+                func.max(m.barometric_pressure_hpa),
+            )
+            .where(m.kind == kind, m.received_at >= since)
+            .group_by(m.node_id)
+        )
+        keys = (
+            "channel_utilization", "air_util_tx", "uptime_seconds", "min_battery",
+            "max_temperature", "min_temperature", "relative_humidity", "pressure",
+        )
+        return {r[0]: dict(zip(keys, r[1:])) for r in rows}
 
     async def latest_per_node(self, kind: str) -> list[Telemetry]:
         """Último registro de un `kind` por nodo (paralelo a

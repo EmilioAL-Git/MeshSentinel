@@ -153,3 +153,26 @@ async def test_stats_empty_network(session_factory):
     assert s.nodes_total == 0
     assert s.records == []
     assert s.network_age_days is None
+
+
+async def test_stats_window_excludes_old_samples(session_factory):
+    from datetime import timedelta
+
+    from noc.adapters.persistence.repositories import SqlTelemetryRepository
+    from noc.domain.nodes.entities import Telemetry
+
+    await seed(session_factory)
+    await ignore_node(session_factory, "!00000005")
+    old = datetime.now(timezone.utc) - timedelta(hours=30)
+    async with session_factory() as session:
+        await SqlTelemetryRepository(session).add(
+            Telemetry(node_id="!00000002", kind="device", air_util_tx=77.0, received_at=old)
+        )
+        await session.commit()
+
+    service = StatsService(session_factory, make_settings())
+    day = {r.key: r for r in (await service.get_summary(24)).records}
+    week = {r.key: r for r in (await service.get_summary(168)).records}
+    assert day["air_tx"].node_id == "!00000001"  # la muestra de hace 30 h queda fuera
+    assert week["air_tx"].node_id == "!00000002" and week["air_tx"].value == 77.0
+    assert (await service.get_summary(9999)).window_hours == 168  # tope: 1 semana

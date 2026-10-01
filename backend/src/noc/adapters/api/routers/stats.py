@@ -1,11 +1,21 @@
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from noc.application.stats import StatRecord, StatsSummary
+from noc.application.stats import (
+    DEFAULT_WINDOW_HOURS,
+    MAX_WINDOW_HOURS,
+    MIN_WINDOW_HOURS,
+    StatRecord,
+    StatsSummary,
+)
 
 router = APIRouter(prefix="/stats", tags=["stats"])
+
+# Ventana del Top: de 1 hora a 1 semana (168 h).
+WindowHours = Annotated[int, Query(ge=MIN_WINDOW_HOURS, le=MAX_WINDOW_HOURS)]
 
 
 class StatRecordOut(BaseModel):
@@ -28,7 +38,8 @@ class StatsSummaryOut(BaseModel):
     nodes_total: int
     nodes_online: int
     network_age_days: int | None
-    events_last_24h: int
+    window_hours: int
+    events_in_window: int
     records: list[StatRecordOut]
 
     @classmethod
@@ -38,22 +49,25 @@ class StatsSummaryOut(BaseModel):
             nodes_total=s.nodes_total,
             nodes_online=s.nodes_online,
             network_age_days=s.network_age_days,
-            events_last_24h=s.events_last_24h,
+            window_hours=s.window_hours,
+            events_in_window=s.events_in_window,
             records=[StatRecordOut.from_entity(r) for r in s.records],
         )
 
 
 @router.get("/summary", response_model=StatsSummaryOut)
-async def stats_summary(request: Request) -> StatsSummaryOut:
-    summary = await request.app.state.stats.get_summary()
+async def stats_summary(request: Request, hours: WindowHours = DEFAULT_WINDOW_HOURS) -> StatsSummaryOut:
+    summary = await request.app.state.stats.get_summary(hours)
     return StatsSummaryOut.from_entity(summary)
 
 
 @router.get("/ranking/{key}", response_model=list[StatRecordOut])
-async def stats_ranking(key: str, request: Request) -> list[StatRecordOut]:
+async def stats_ranking(
+    key: str, request: Request, hours: WindowHours = DEFAULT_WINDOW_HOURS
+) -> list[StatRecordOut]:
     """Todos los nodos con dato para el récord `key`, ordenados (mejor
     primero) — "nodos por debajo del top" al desplegar una tarjeta."""
-    ranking = await request.app.state.stats.get_ranking(key)
+    ranking = await request.app.state.stats.get_ranking(key, hours)
     if ranking is None:
         raise HTTPException(status_code=404, detail="Récord desconocido")
     return [StatRecordOut.from_entity(r) for r in ranking]

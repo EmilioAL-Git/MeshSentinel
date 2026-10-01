@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useUrlNumber } from "../../hooks/useUrlState";
 import { displayName, fetchStatsRanking, fetchStatsSummary, type StatRecordOut } from "../../api/client";
 import { Modal } from "../shell/Modal";
 import { fmtDuration } from "../../time";
@@ -14,6 +15,25 @@ import { fmtDuration } from "../../time";
  * despliega la lista entera de nodos por debajo del top (`GET
  * /stats/ranking/{key}`), mejor primero.
  */
+
+const MAX_HOURS = 168; // 1 semana
+const PRESETS = [
+  { h: 1, label: "1 h" },
+  { h: 6, label: "6 h" },
+  { h: 24, label: "24 h" },
+  { h: 72, label: "3 d" },
+  { h: 168, label: "7 d" },
+];
+
+function clampHours(h: number): number {
+  return Math.max(1, Math.min(MAX_HOURS, Math.round(h) || 1));
+}
+
+function windowLabel(h: number): string {
+  const d = Math.floor(h / 24);
+  const r = h % 24;
+  return [d ? `${d} d` : "", r ? `${r} h` : ""].filter(Boolean).join(" ") || "1 h";
+}
 
 function formatValue(r: StatRecordOut): string {
   if (r.unit === "s") return fmtDuration(r.value);
@@ -51,21 +71,23 @@ function RecordCard({ r, onOpen }: { r: StatRecordOut; onOpen: (r: StatRecordOut
 
 function RankingModal({
   record,
+  hours,
   onClose,
   onOpenNode,
 }: {
   record: StatRecordOut;
+  hours: number;
   onClose: () => void;
   onOpenNode: (nodeId: string) => void;
 }) {
   const ranking = useQuery({
-    queryKey: ["stats", "ranking", record.key],
-    queryFn: () => fetchStatsRanking(record.key),
+    queryKey: ["stats", "ranking", record.key, hours],
+    queryFn: () => fetchStatsRanking(record.key, hours),
   });
   const rows = ranking.data ?? [];
 
   return (
-    <Modal title={`${record.icon} ${record.label}`} onClose={onClose}>
+    <Modal title={`${record.icon} ${record.label} · ${windowLabel(hours)}`} onClose={onClose}>
       {ranking.isLoading && <div className="empty">Cargando…</div>}
       {!ranking.isLoading && rows.length === 0 && <div className="empty">Sin nodos con este dato.</div>}
       <div style={{ display: "flex", flexDirection: "column" }}>
@@ -106,9 +128,13 @@ function RankingModal({
 }
 
 export function StatsView({ onOpenNode }: { onOpenNode: (nodeId: string) => void }) {
+  const [hoursParam, setHours] = useUrlNumber("stats.h", 24);
+  const hours = clampHours(hoursParam ?? 24);
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
   const stats = useQuery({
-    queryKey: ["stats", "summary"],
-    queryFn: fetchStatsSummary,
+    queryKey: ["stats", "summary", hours],
+    queryFn: () => fetchStatsSummary(hours),
     refetchInterval: 20_000,
   });
   const [openRecord, setOpenRecord] = useState<StatRecordOut | null>(null);
@@ -119,7 +145,39 @@ export function StatsView({ onOpenNode }: { onOpenNode: (nodeId: string) => void
   return (
     <div className="ws">
       <div className="toolbar">
-        <span className="microlabel">Datos curiosos de la malla</span>
+        <span className="microlabel">Datos curiosos de la malla · últimos {windowLabel(hours)}</span>
+        <span style={{ flex: 1 }} />
+        <div className="seg">
+          {PRESETS.map((p) => (
+            <button key={p.h} className={hours === p.h ? "on" : ""} onClick={() => setHours(p.h)}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <label className="microlabel" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          Días
+          <input
+            className="input mono"
+            type="number"
+            min={0}
+            max={7}
+            value={days}
+            style={{ width: 52 }}
+            onChange={(e) => setHours(clampHours(Number(e.target.value) * 24 + restHours))}
+          />
+        </label>
+        <label className="microlabel" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          Horas
+          <input
+            className="input mono"
+            type="number"
+            min={0}
+            max={23}
+            value={restHours}
+            style={{ width: 52 }}
+            onChange={(e) => setHours(clampHours(days * 24 + Math.max(0, Math.min(23, Number(e.target.value)))))}
+          />
+        </label>
       </div>
 
       <div className="kpis">
@@ -136,8 +194,8 @@ export function StatsView({ onOpenNode }: { onOpenNode: (nodeId: string) => void
           <div className="k">Días de malla</div>
         </div>
         <div className="kpi">
-          <div className="v">{s?.events_last_24h ?? "—"}</div>
-          <div className="k">Eventos 24 h</div>
+          <div className="v">{s?.events_in_window ?? "—"}</div>
+          <div className="k">Eventos {windowLabel(hours)}</div>
         </div>
       </div>
 
@@ -160,7 +218,7 @@ export function StatsView({ onOpenNode }: { onOpenNode: (nodeId: string) => void
       </div>
 
       {openRecord && (
-        <RankingModal record={openRecord} onClose={() => setOpenRecord(null)} onOpenNode={onOpenNode} />
+        <RankingModal record={openRecord} hours={hours} onClose={() => setOpenRecord(null)} onOpenNode={onOpenNode} />
       )}
     </div>
   );
