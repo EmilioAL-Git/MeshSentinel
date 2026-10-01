@@ -105,6 +105,47 @@ class SqlChatRepository:
             for r in rows
         ]
 
+    async def list_channels_by_gateway(self) -> list[dict[str, Any]]:
+        """Igual que `list_channels` pero separado por pasarela: cada gateway
+        tiene su propia malla/canales, la UI pinta una fila por pasarela."""
+        stmt = (
+            select(
+                ChatMessageModel.gateway_id,
+                ChatMessageModel.channel_index,
+                ChatMessageModel.channel_name,
+                func.count().label("message_count"),
+                func.max(ChatMessageModel.received_at).label("last_message_at"),
+            )
+            .where(ChatMessageModel.to_node_id.is_(None), ChatMessageModel.gateway_id.is_not(None))
+            .group_by(
+                ChatMessageModel.gateway_id,
+                ChatMessageModel.channel_index,
+                ChatMessageModel.channel_name,
+            )
+            .order_by(ChatMessageModel.gateway_id, ChatMessageModel.channel_index)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            {
+                "gateway_id": r.gateway_id,
+                "channel_index": r.channel_index,
+                "channel_name": r.channel_name,
+                "message_count": r.message_count,
+                "last_message_at": r.last_message_at,
+            }
+            for r in rows
+        ]
+
+    async def dm_count_by_gateway(self) -> dict[str, int]:
+        rows = (
+            await self._session.execute(
+                select(ChatMessageModel.gateway_id, func.count())
+                .where(ChatMessageModel.to_node_id.is_not(None), ChatMessageModel.gateway_id.is_not(None))
+                .group_by(ChatMessageModel.gateway_id)
+            )
+        ).all()
+        return {gid: int(n) for gid, n in rows}
+
     async def dm_count(self) -> int:
         result = await self._session.scalar(
             select(func.count())

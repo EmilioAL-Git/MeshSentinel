@@ -50,9 +50,16 @@ class ChatChannelOut(BaseModel):
     last_message_at: datetime | None
 
 
+class ChatGatewayChannelsOut(BaseModel):
+    gateway_id: str
+    channels: list[ChatChannelOut]
+    dm_count: int
+
+
 class ChatChannelsOut(BaseModel):
     channels: list[ChatChannelOut]
     dm_count: int
+    by_gateway: list[ChatGatewayChannelsOut] = []
 
 
 @router.get("/messages", response_model=list[ChatMessageOut])
@@ -102,7 +109,26 @@ async def list_channels(session: SessionDep) -> ChatChannelsOut:
     channels: list[dict[str, Any]] = await repo.list_channels()
     dm_count = await repo.dm_count()
     names = await _channel_names(session)
+
+    gateways = {g.gateway_id: g for g in await SqlGatewayRepository(session).list_all()}
+    dm_by_gw = await repo.dm_count_by_gateway()
+    grouped: dict[str, list[ChatChannelOut]] = {}
+    for c in await repo.list_channels_by_gateway():
+        gid = c.pop("gateway_id")
+        # Nombre de ESTA pasarela (no el fusionado): cada una tiene su malla.
+        own = {
+            int(ch["index"]): (ch.get("name") or "").strip()
+            for ch in (gateways[gid].channels if gid in gateways else [])
+            if ch.get("index") is not None
+        }
+        c["channel_name"] = own.get(c["channel_index"]) or c["channel_name"]
+        grouped.setdefault(gid, []).append(ChatChannelOut(**c))
+    by_gateway = [
+        ChatGatewayChannelsOut(gateway_id=gid, channels=chs, dm_count=dm_by_gw.get(gid, 0))
+        for gid, chs in sorted(grouped.items())
+    ]
     return ChatChannelsOut(
+        by_gateway=by_gateway,
         channels=[
             ChatChannelOut(**{**c, "channel_name": names.get(c["channel_index"], c["channel_name"])})
             for c in channels

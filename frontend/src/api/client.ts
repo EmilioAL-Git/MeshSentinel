@@ -1087,9 +1087,16 @@ export interface ChatChannelOut {
   last_message_at: string | null;
 }
 
+export interface ChatGatewayChannelsOut {
+  gateway_id: string;
+  channels: ChatChannelOut[];
+  dm_count: number;
+}
+
 export interface ChatChannelsOut {
   channels: ChatChannelOut[];
   dm_count: number;
+  by_gateway: ChatGatewayChannelsOut[];
 }
 
 export const fetchChatChannels = () => get<ChatChannelsOut>("/chat/channels");

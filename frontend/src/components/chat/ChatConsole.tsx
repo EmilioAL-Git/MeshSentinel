@@ -31,7 +31,7 @@ type ChannelTab = "all" | "dm" | number;
 export function ChatConsole({
   entries,
   summaries,
-  gateways,
+  gateways: _gateways,
 }: {
   entries: ActivityEntry[];
   summaries: NodeSummaryOut[];
@@ -127,8 +127,6 @@ export function ChatConsole({
     return merged;
   }, [liveRows, historyRows, matchesFilters]);
 
-  const gatewayIds = useMemo(() => gateways.map((g) => g.gateway_id).sort(), [gateways]);
-
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const onScroll = () => {
     const el = scrollRef.current;
@@ -142,7 +140,11 @@ export function ChatConsole({
     }
   };
 
-  const channels = channelsQuery.data?.channels ?? [];
+  const byGateway = channelsQuery.data?.by_gateway ?? [];
+  const selectTab = (gateway: string, tab: ChannelTab) => {
+    setGatewayFilter(gateway);
+    setChannelTab(tab);
+  };
   const dmCount = channelsQuery.data?.dm_count ?? 0;
 
   return (
@@ -154,26 +156,58 @@ export function ChatConsole({
         </span>
         <span className="sep" />
         <span className="seg wrap">
-          <button className={channelTab === "all" ? "on" : undefined} onClick={() => setChannelTab("all")}>
-            Todos
+          <button
+            className={channelTab === "all" && !gatewayFilter ? "on" : undefined}
+            onClick={() => selectTab("", "all")}
+            title="Todos los canales de todas las pasarelas"
+          >
+            Todo
           </button>
-          {channels.map((c) => (
-            <button
-              key={c.channel_index}
-              className={channelTab === c.channel_index ? "on" : undefined}
-              onClick={() => setChannelTab(c.channel_index)}
-              title={`${c.message_count} mensajes`}
-            >
-              {c.channel_name ? `${c.channel_index} - ${c.channel_name}` : `Canal ${c.channel_index}`}
-            </button>
-          ))}
           {dmCount > 0 && (
-            <button className={channelTab === "dm" ? "on" : undefined} onClick={() => setChannelTab("dm")}>
+            <button
+              className={channelTab === "dm" && !gatewayFilter ? "on" : undefined}
+              onClick={() => selectTab("", "dm")}
+            >
               Directos
             </button>
           )}
         </span>
       </div>
+
+      {byGateway.map((g) => (
+        <div key={g.gateway_id} className="toolbar" style={{ paddingTop: 0 }}>
+          <span className="microlabel" style={{ minWidth: 70 }}>{g.gateway_id}</span>
+          <span className="seg wrap">
+            <button
+              className={gatewayFilter === g.gateway_id && channelTab === "all" ? "on" : undefined}
+              onClick={() => selectTab(g.gateway_id, "all")}
+              title="Todos los canales de esta pasarela"
+            >
+              Todo
+            </button>
+            {g.channels.map((c) => (
+              <button
+                key={c.channel_index}
+                className={
+                  gatewayFilter === g.gateway_id && channelTab === c.channel_index ? "on" : undefined
+                }
+                onClick={() => selectTab(g.gateway_id, c.channel_index)}
+                title={`${c.message_count} mensajes`}
+              >
+                {c.channel_name ? `${c.channel_index} - ${c.channel_name}` : `Canal ${c.channel_index}`}
+              </button>
+            ))}
+            {g.dm_count > 0 && (
+              <button
+                className={gatewayFilter === g.gateway_id && channelTab === "dm" ? "on" : undefined}
+                onClick={() => selectTab(g.gateway_id, "dm")}
+              >
+                Directos
+              </button>
+            )}
+          </span>
+        </div>
+      ))}
 
       <div className="toolbar" style={{ paddingTop: 0 }}>
         <input
@@ -184,12 +218,6 @@ export function ChatConsole({
           onChange={(e) => setSearch(e.target.value)}
         />
         <NodeSelect value={nodeFilter} onChange={setNodeFilter} options={summaries} placeholder="— todos los nodos —" />
-        <select className="input" value={gatewayFilter} onChange={(e) => setGatewayFilter(e.target.value)}>
-          <option value="">— todas las pasarelas —</option>
-          {gatewayIds.map((g) => (
-            <option key={g} value={g}>{g}</option>
-          ))}
-        </select>
       </div>
 
       <div className="ws-scroll" ref={scrollRef} onScroll={onScroll}>
