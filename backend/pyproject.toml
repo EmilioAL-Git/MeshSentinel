@@ -41,6 +41,12 @@ packages = ["src/noc"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint]
+# Fijo las reglas (las del ruff 0.15): el CI instala siempre el último ruff y
+# 0.16 amplió el conjunto por defecto, rompiendo el lint sin cambios de código.
+select = ["E4", "E7", "E9", "F"]
+
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
