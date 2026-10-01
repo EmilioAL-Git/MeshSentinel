@@ -84,6 +84,32 @@ async def delete_tag(tag_id: int, session: SessionDep, _user: RequireAuthDep) ->
     await session.commit()
 
 
+# Etiquetado masivo desde Flota. Rutas de 3 segmentos fijos: no chocan con
+# DELETE /tags/{tag_id}.
+@router.post("/tags/{tag_id}/nodes/bulk", response_model=BulkMembersOut)
+async def add_tag_bulk(
+    tag_id: int, body: BulkMembersIn, session: SessionDep, _user: RequireAuthDep
+) -> BulkMembersOut:
+    repo = SqlTagRepository(session)
+    if not await repo.exists(tag_id):
+        raise HTTPException(status_code=404, detail="Tag not found")
+    added, already = await repo.add_tag_bulk(tag_id, body.node_ids)
+    await session.commit()
+    return BulkMembersOut(added=added, already_member=already)
+
+
+@router.post("/tags/{tag_id}/nodes/bulk-remove", response_model=BulkRemoveOut)
+async def remove_tag_bulk(
+    tag_id: int, body: BulkMembersIn, session: SessionDep, _user: RequireAuthDep
+) -> BulkRemoveOut:
+    repo = SqlTagRepository(session)
+    if not await repo.exists(tag_id):
+        raise HTTPException(status_code=404, detail="Tag not found")
+    removed, not_tagged = await repo.remove_tag_bulk(tag_id, body.node_ids)
+    await session.commit()
+    return BulkRemoveOut(removed=removed, not_member=not_tagged)
+
+
 # ── Grupos ───────────────────────────────────────────────────────────────────
 
 

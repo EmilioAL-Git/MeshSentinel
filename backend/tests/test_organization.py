@@ -183,6 +183,56 @@ async def test_groups_bulk_membership(session_factory):
         assert await SqlGroupRepository(session).members(g.id) == [NODES[2]]
 
 
+async def test_tags_bulk_add_remove(session_factory):
+    """Etiquetado masivo: añade UNA etiqueta sin pisar las que el nodo ya
+    tiene (a diferencia de set_node_tags), idempotente."""
+    await seed(session_factory)
+    async with session_factory() as session, session.begin():
+        tags = SqlTagRepository(session)
+        a = await tags.create(Tag(name="a"))
+        b = await tags.create(Tag(name="b"))
+        await tags.set_node_tags(NODES[0], [b.id])  # ya tiene "b"
+
+        added, already = await tags.add_tag_bulk(a.id, [NODES[0], NODES[1], NODES[1]])
+        assert (added, already) == (2, 0)
+        added, already = await tags.add_tag_bulk(a.id, [NODES[0], NODES[2]])
+        assert (added, already) == (1, 1)
+
+    async with session_factory() as session:
+        by_id = {s.node.node_id: s for s in await SqlNodeRepository(session).list_summaries()}
+        assert {t.name for t in by_id[NODES[0]].tags} == {"a", "b"}  # "b" intacta
+
+    async with session_factory() as session, session.begin():
+        removed, not_tagged = await SqlTagRepository(session).remove_tag_bulk(
+            a.id, [NODES[0], "!ffffffff"]
+        )
+        assert (removed, not_tagged) == (1, 1)
+
+    async with session_factory() as session:
+        by_id = {s.node.node_id: s for s in await SqlNodeRepository(session).list_summaries()}
+        assert {t.name for t in by_id[NODES[0]].tags} == {"b"}
+        assert not await SqlTagRepository(session).exists(9999)
+
+
+async def test_favorite_bulk(session_factory):
+    await seed(session_factory)
+    async with session_factory() as session, session.begin():
+        repo = SqlNodeRepository(session)
+        await repo.set_flag(NODES[0], "is_favorite", True)
+        changed, unchanged = await repo.set_flag_bulk(
+            [NODES[0], NODES[1], NODES[1], "!ffffffff"], "is_favorite", True
+        )
+        assert (changed, unchanged) == (1, 2)  # NODES[0] ya lo era; el inexistente cuenta como sin cambio
+
+    async with session_factory() as session:
+        favs = {n.node_id for n in await SqlNodeRepository(session).list_all() if n.is_favorite}
+        assert favs == {NODES[0], NODES[1]}
+
+    async with session_factory() as session, session.begin():
+        changed, _ = await SqlNodeRepository(session).set_flag_bulk([NODES[0], NODES[1]], "is_favorite", False)
+        assert changed == 2
+
+
 # ── Búsqueda avanzada (función pura reutilizable) ────────────────────────────
 
 

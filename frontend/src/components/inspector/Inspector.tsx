@@ -24,6 +24,7 @@ import {
   removeGroupMember,
   retryOperation,
   setNodeFavorite,
+  displayName,
   setNodeIgnored,
   setNodePreferredGateway,
   setNodeTags,
@@ -38,6 +39,7 @@ import { trackOperations } from "../../opTracker";
 import { useActiveGroup } from "../../context/GroupContext";
 import { CATEGORY_DEFS, NODE_TYPE_OVERRIDE_OPTIONS, classifyNode } from "../fleet/classify";
 import { Signal } from "../fleet/instruments";
+import { IgnoreNodeModal } from "../fleet/IgnoreNodeModal";
 import { NexusCatIcon } from "../nexus/NexusCatIcon";
 import { NodeNexusPanel } from "../nexus/NodeNexusPanel";
 import { useNexusMode } from "../nexus/useNexusMode";
@@ -396,6 +398,8 @@ export function Inspector({
   // teclear nada, pedido explícito del usuario), mismo patrón que
   // GatewaysView/DeleteNodeModal.
   const [deleteArmed, setDeleteArmed] = useState(false);
+  // Ignorar pide confirmación (reversible, pero oculta el nodo); dejar de ignorar va directo.
+  const [confirmIgnore, setConfirmIgnore] = useState(false);
   const [confirmRefreshConfig, setConfirmRefreshConfig] = useState(false);
   const deleteThisNode = useMutation({
     mutationFn: () => deleteNode(nodeId),
@@ -623,10 +627,20 @@ export function Inspector({
           <button
             style={{ ...iconBtn, color: n?.is_ignored ? t.crit : t.textFaint }}
             title={n?.is_ignored ? "Dejar de ignorar (local)" : "Ignorar (local)"}
-            onClick={() => ignored.mutate(!n?.is_ignored)}
+            onClick={() => (n?.is_ignored ? ignored.mutate(false) : setConfirmIgnore(true))}
           >
             👁
           </button>
+          {confirmIgnore && (
+            <IgnoreNodeModal
+              nodeLabel={n ? displayName(n) : nodeId}
+              onClose={() => setConfirmIgnore(false)}
+              onConfirm={() => {
+                ignored.mutate(true);
+                setConfirmIgnore(false);
+              }}
+            />
+          )}
           {onCenter && lastPos && (
             <button style={iconBtn} title="Centrar en el mapa" onClick={() => onCenter(lastPos.latitude, lastPos.longitude)}>
               ⌖

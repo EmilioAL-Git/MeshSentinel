@@ -310,6 +310,8 @@ export const deleteGateway = (gatewayId: string) =>
 // Nota: estos endpoints usan `send`, definida más abajo en este módulo.
 export const setNodeFavorite = (id: string, value: boolean) =>
   send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/favorite`, { value });
+export const setFavoriteBulk = (nodeIds: string[], value: boolean) =>
+  send<{ changed: number; unchanged: number }>("POST", "/nodes/bulk-favorite", { node_ids: nodeIds, value });
 export const setNodeIgnored = (id: string, value: boolean) =>
   send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/ignored`, { value });
 export const setNodeNexus = (id: string, value: boolean) =>

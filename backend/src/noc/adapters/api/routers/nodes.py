@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SessionDep
 from noc.adapters.api.schemas import (
@@ -163,6 +163,29 @@ async def set_favorite(node_id: str, body: FlagIn, session: SessionDep, _user: R
         raise HTTPException(status_code=404, detail="Node not found")
     await session.commit()
     return NodeOut.from_entity(node, get_settings().node_offline_after_seconds)
+
+
+class FavoriteBulkIn(BaseModel):
+    node_ids: list[str] = Field(min_length=1)
+    value: bool = True
+
+
+class FavoriteBulkOut(BaseModel):
+    changed: int
+    unchanged: int
+
+
+# POST (no PUT /{node_id}/...): ruta de 1 segmento fijo, sin choque con
+# /{node_id}/favorite.
+@router.post("/bulk-favorite", response_model=FavoriteBulkOut)
+async def set_favorite_bulk(
+    body: FavoriteBulkIn, session: SessionDep, _user: RequireAuthDep
+) -> FavoriteBulkOut:
+    changed, unchanged = await SqlNodeRepository(session).set_flag_bulk(
+        body.node_ids, "is_favorite", body.value
+    )
+    await session.commit()
+    return FavoriteBulkOut(changed=changed, unchanged=unchanged)
 
 
 @router.put("/{node_id}/ignored", response_model=NodeOut)

@@ -136,6 +136,24 @@ class SqlNodeRepository:
         await self._session.flush()
         return _node_entity(model)
 
+    async def set_flag_bulk(self, node_ids: list[str], flag: str, value: bool) -> tuple[int, int]:
+        """Fija un flag en bloque (Flota → selección). Devuelve (changed,
+        unchanged): unchanged = ya tenían ese valor o no existen."""
+        assert flag in ("is_favorite", "is_ignored", "is_nexus")
+        requested = list(dict.fromkeys(node_ids))
+        column = getattr(NodeModel, flag)
+        to_change = list(
+            await self._session.scalars(
+                select(NodeModel.id).where(NodeModel.id.in_(requested), column != value)
+            )
+        )
+        if to_change:
+            await self._session.execute(
+                update(NodeModel).where(NodeModel.id.in_(to_change)).values({flag: value})
+            )
+            await self._session.flush()
+        return len(to_change), len(requested) - len(to_change)
+
     async def list_all(self) -> list[Node]:
         rows = await self._session.scalars(select(NodeModel))
         return [_node_entity(r) for r in rows]

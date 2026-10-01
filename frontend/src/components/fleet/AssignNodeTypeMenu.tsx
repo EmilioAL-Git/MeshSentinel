@@ -40,7 +40,7 @@ export function AssignNodeTypeMenu({ selectedIds }: { selectedIds: string[] }) {
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
       <button className="btn ghost" onClick={() => setOpen((o) => !o)} disabled={selectedIds.length === 0}>
-        🏷 Tipo…
+        📻 Tipo…
       </button>
       {open && (
         <div

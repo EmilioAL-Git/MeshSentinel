@@ -18,6 +18,9 @@ class SqlTagRepository:
         rows = await self._session.scalars(select(TagModel).order_by(TagModel.name))
         return [Tag(id=t.id, name=t.name, color=t.color) for t in rows]
 
+    async def exists(self, tag_id: int) -> bool:
+        return await self._session.get(TagModel, tag_id) is not None
+
     async def get_by_name(self, name: str) -> Tag | None:
         t = await self._session.scalar(select(TagModel).where(TagModel.name == name))
         return Tag(id=t.id, name=t.name, color=t.color) if t else None
@@ -45,6 +48,48 @@ class SqlTagRepository:
         for tag_id in set(tag_ids):
             self._session.add(NodeTagModel(node_id=node_id, tag_id=tag_id))
         await self._session.flush()
+
+    async def add_tag_bulk(self, tag_id: int, node_ids: list[str]) -> tuple[int, int]:
+        """Añade UNA etiqueta a varios nodos sin tocar el resto de sus
+        etiquetas (a diferencia de set_node_tags, que reemplaza). Mismo
+        patrón que SqlGroupRepository.add_members_bulk. Devuelve
+        (added, already)."""
+        requested = list(dict.fromkeys(node_ids))
+        existing = set(
+            await self._session.scalars(
+                select(NodeTagModel.node_id).where(
+                    NodeTagModel.tag_id == tag_id,
+                    NodeTagModel.node_id.in_(requested),
+                )
+            )
+        )
+        new_ids = [n for n in requested if n not in existing]
+        for node_id in new_ids:
+            self._session.add(NodeTagModel(node_id=node_id, tag_id=tag_id))
+        if new_ids:
+            await self._session.flush()
+        return len(new_ids), len(requested) - len(new_ids)
+
+    async def remove_tag_bulk(self, tag_id: int, node_ids: list[str]) -> tuple[int, int]:
+        """Quita UNA etiqueta de varios nodos. Devuelve (removed, not_tagged)."""
+        requested = list(dict.fromkeys(node_ids))
+        existing = set(
+            await self._session.scalars(
+                select(NodeTagModel.node_id).where(
+                    NodeTagModel.tag_id == tag_id,
+                    NodeTagModel.node_id.in_(requested),
+                )
+            )
+        )
+        if existing:
+            await self._session.execute(
+                delete(NodeTagModel).where(
+                    NodeTagModel.tag_id == tag_id,
+                    NodeTagModel.node_id.in_(existing),
+                )
+            )
+            await self._session.flush()
+        return len(existing), len(requested) - len(existing)
 
 
 class SqlGroupRepository:

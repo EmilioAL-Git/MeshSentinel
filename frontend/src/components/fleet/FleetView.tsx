@@ -1,7 +1,9 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   displayName,
+  setFavoriteBulk,
   type AlertOut,
   type GatewayOut,
   type GroupOut,
@@ -10,12 +12,15 @@ import {
   type NodeSummaryOut,
   type TagOut,
 } from "../../api/client";
+import { toast } from "../shell/Toast";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { useNexusMode } from "../nexus/useNexusMode";
 import { AddToGroupMenu } from "./AddToGroupMenu";
 import { AssignNodeTypeMenu } from "./AssignNodeTypeMenu";
+import { TagBulkMenu } from "./TagBulkMenu";
 import { ColumnPicker } from "./ColumnPicker";
 import { DeleteNodeModal } from "./DeleteNodeModal";
+import { IgnoreNodeModal } from "./IgnoreNodeModal";
 import { FleetBlocks } from "./FleetBlocks";
 import { GroupBar } from "./GroupBar";
 import { computeFleetGroupMetrics } from "./groupStats";
@@ -86,6 +91,7 @@ export function FleetView({
    * valor hardcodeado aquí (hardening). */
   lowBatteryThreshold: number;
 }) {
+  const [ignoreTarget, setIgnoreTarget] = useState<{ id: string; label: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; label?: string } | null>(null);
   const [nexusOpsOpen, setNexusOpsOpen] = useState(false);
   const nexusModeOn = useNexusMode();
@@ -165,6 +171,41 @@ export function FleetView({
     [allSummaries],
   );
 
+  // Favoritos en bloque: si TODOS los seleccionados ya lo son, el botón quita.
+  const queryClient = useQueryClient();
+  const allCheckedFavorite = useMemo(() => {
+    if (checkedIds.size === 0) return false;
+    const favs = new Set(allSummaries.filter((s) => s.node.is_favorite).map((s) => s.node.node_id));
+    for (const id of checkedIds) if (!favs.has(id)) return false;
+    return true;
+  }, [checkedIds, allSummaries]);
+  const bulkFavorite = useMutation({
+    mutationFn: (value: boolean) => setFavoriteBulk([...checkedIds], value),
+    onSuccess: (res, value) => {
+      toast(
+        value
+          ? `${res.changed} nodos marcados como favoritos${res.unchanged ? ` (${res.unchanged} ya lo eran)` : ""}`
+          : `Favorito quitado a ${res.changed} nodos`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["nodes"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (e: Error) => toast(`No se pudo cambiar el favorito: ${e.message}`, { kind: "error" }),
+  });
+
+  // Ignorar pide confirmación; dejar de ignorar (reversión) va directo.
+  const requestToggleIgnored = useCallback(
+    (id: string, value: boolean) => {
+      if (!value) {
+        onToggleIgnored(id, false);
+        return;
+      }
+      const summary = allSummaries.find((s) => s.node.node_id === id);
+      setIgnoreTarget({ id, label: summary ? displayName(summary.node) : id });
+    },
+    [allSummaries, onToggleIgnored],
+  );
+
   return (
     <div className="ws">
       {isGrouped && activeGroup && (
@@ -204,7 +245,7 @@ export function FleetView({
           <div className="v" style={{ color: checkedIds.size > 0 ? "var(--accent)" : "var(--text-faint)" }}>
             {checkedIds.size}
           </div>
-          <div className="k">Armados p/ lote</div>
+          <div className="k">Seleccionados p/ lote</div>
         </div>
       </div>
 
@@ -345,7 +386,7 @@ export function FleetView({
               checkedIds={checkedIds}
               onSelect={onSelect}
               onToggleFavorite={onToggleFavorite}
-              onToggleIgnored={onToggleIgnored}
+              onToggleIgnored={requestToggleIgnored}
               onRequestDelete={requestDeleteOne}
               onCheckedChange={onCheckedChange}
               lowBatteryThreshold={lowBatteryThreshold}
@@ -389,7 +430,7 @@ export function FleetView({
                         checked={checkedIds.has(summary.node.node_id)}
                         onSelect={onSelect}
                         onToggleFavorite={onToggleFavorite}
-                        onToggleIgnored={onToggleIgnored}
+                        onToggleIgnored={requestToggleIgnored}
                         onRequestDelete={requestDeleteOne}
                         onToggleChecked={toggleChecked}
                         visibleColumns={visibleColumns}
@@ -412,13 +453,17 @@ export function FleetView({
             style={{ borderTop: "1px solid var(--accent)", borderBottom: "none", background: "var(--surface-2)" }}
           >
             <span className="microlabel" style={{ color: "var(--accent)" }}>
-              {checkedIds.size} nodo{checkedIds.size !== 1 ? "s" : ""} armado{checkedIds.size !== 1 ? "s" : ""}
+              {checkedIds.size} nodo{checkedIds.size !== 1 ? "s" : ""} seleccionado{checkedIds.size !== 1 ? "s" : ""}
             </span>
             <button
               className="btn ghost"
+              title="Selecciona todos los nodos que se ven ahora en la lista (respeta los filtros)"
               onClick={() => onCheckedChange(new Set([...checkedIds, ...summaries.map((s) => s.node.node_id)]))}
             >
-              + visibles
+              Seleccionar todos
+            </button>
+            <button className="btn ghost" onClick={() => onCheckedChange(new Set())}>
+              Deseleccionar todos
             </button>
             <button
               className="btn ghost"
@@ -431,25 +476,22 @@ export function FleetView({
                 onCheckedChange(next);
               }}
             >
-              invertir
+              Invertir selección
             </button>
             <button
               className="btn ghost"
-              onClick={() =>
-                onCheckedChange(
-                  new Set([
-                    ...checkedIds,
-                    ...allSummaries.filter((s) => s.node.is_favorite).map((s) => s.node.node_id),
-                  ]),
-                )
+              disabled={bulkFavorite.isPending}
+              title={
+                allCheckedFavorite
+                  ? "Quita el favorito (local) a todos los nodos seleccionados"
+                  : "Marca como favorito (local) todos los nodos seleccionados"
               }
+              onClick={() => bulkFavorite.mutate(!allCheckedFavorite)}
             >
-              + favoritos
-            </button>
-            <button className="btn ghost" onClick={() => onCheckedChange(new Set())}>
-              desarmar todo
+              {allCheckedFavorite ? "Quitar favoritos" : "Añadir favoritos"}
             </button>
             <AddToGroupMenu selectedIds={[...checkedIds]} groups={groups} allSummaries={allSummaries} />
+            <TagBulkMenu selectedIds={[...checkedIds]} allSummaries={allSummaries} />
             <AssignNodeTypeMenu selectedIds={[...checkedIds]} />
             <button
               className="btn danger"
@@ -465,6 +507,16 @@ export function FleetView({
         )}
       </div>
 
+      {ignoreTarget && (
+        <IgnoreNodeModal
+          nodeLabel={ignoreTarget.label}
+          onClose={() => setIgnoreTarget(null)}
+          onConfirm={() => {
+            onToggleIgnored(ignoreTarget.id, true);
+            setIgnoreTarget(null);
+          }}
+        />
+      )}
       {deleteTarget && (
         <DeleteNodeModal
           nodeIds={deleteTarget.ids}
@@ -496,7 +548,7 @@ function RosterHeadWithSelectAll({
   return (
     <div className="roster-head" style={{ gridTemplateColumns: buildFleetGrid(visibleColumns) }}>
       <span>
-        <input type="checkbox" checked={allVisibleChecked} onChange={onToggleAll} title="Armar/desarmar todos los visibles" />
+        <input type="checkbox" checked={allVisibleChecked} onChange={onToggleAll} title="Seleccionar/deseleccionar todos los visibles" />
       </span>
       <span />
       <span />
