@@ -70,7 +70,10 @@ export function SettingsView() {
 
   const canManageUsers = authState.canAdmin;
   const tabs = [
-    ...(authState.canOperate ? ["general", "mantenimiento", "nexus"] : []),
+    ...(authState.canOperate ? ["general"] : []),
+    // Importar/exportar/borrar la BD: solo admin (ADR 0029).
+    ...(authState.canAdmin ? ["mantenimiento"] : []),
+    ...(authState.canOperate ? ["nexus"] : []),
     ...(canManageUsers ? ["users"] : []),
     ...(authState.isAuthenticated ? ["login-log"] : []),
   ];

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import CurrentUserDep, RequireManagerDep, RequireUserDep, SessionDep
+from noc.adapters.api.deps import CurrentUserDep, RequireAdminDep, RequireManagerDep, RequireUserDep, SessionDep
 from noc.adapters.api.schemas import (
     NeighborOut,
     NodeGatewayLinkOut,
@@ -111,7 +111,7 @@ async def list_nodes(
 
 @router.delete("", response_model=WipeNodesOut)
 async def wipe_all_nodes(
-    body: WipeNodesIn, session: SessionDep, _admin: RequireManagerDep
+    body: WipeNodesIn, session: SessionDep, _admin: RequireAdminDep
 ) -> WipeNodesOut:
     """Reinicio de fábrica de la NodeDB (mantenimiento, no config): nodos +
     su historia propia + TODO rastro histórico que dependía de ellos
