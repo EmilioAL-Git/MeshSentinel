@@ -732,7 +732,7 @@ export function JobsView({
             {queuedOps.length === 0 && (
               <p style={{ color: t.textFaint, fontSize: 12.5, margin: "0.2rem 0" }}>Cola vacía.</p>
             )}
-            {queuedOps.slice(0, 15).map((op) => (
+            {queuedOps.map((op) => (
               <OpRow
                 key={op.id}
                 op={op}
@@ -745,9 +745,6 @@ export function JobsView({
                 showTime="created"
               />
             ))}
-            {queuedOps.length > 15 && (
-              <p style={{ color: t.textFaint, fontSize: 12 }}>… y {queuedOps.length - 15} más</p>
-            )}
           </Section>
 
           <Section title="REQUIEREN INTERVENCIÓN" count={needsAttention.length}>
@@ -756,7 +753,7 @@ export function JobsView({
                 Nada pendiente de tu intervención.
               </p>
             )}
-            {needsAttention.slice(0, 15).map((op) => (
+            {needsAttention.map((op) => (
               <OpRow
                 key={op.id}
                 op={op}
