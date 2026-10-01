@@ -1,4 +1,7 @@
-FROM node:22-alpine AS build
+# La etapa de build solo genera ficheros estáticos (independientes de la arquitectura):
+# se ejecuta siempre en la plataforma nativa del builder para evitar la emulación QEMU
+# en el build multi-arch (npm install tardaba >20 min emulando arm64).
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
