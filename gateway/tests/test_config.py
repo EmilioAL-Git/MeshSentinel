@@ -36,4 +36,4 @@ def test_defaults_autodetect():
     s = Settings(_env_file=None)
     assert s.usb_device == ""
     assert s.reconnect_initial_delay == 5
-    assert s.reconnect_max_delay == 300
+    assert s.reconnect_max_delay == 30

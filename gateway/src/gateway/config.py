@@ -36,10 +36,17 @@ class Settings(BaseSettings):
         ),
     )
     reconnect_max_delay: float = Field(
-        default=300.0,
+        default=30.0,
         validation_alias=AliasChoices(
             "MESHTASTIC_RECONNECT_MAX_DELAY", "GATEWAY_RECONNECT_MAX_DELAY"
         ),
+    )
+    # Tope de un intento de conexión TCP (SYN descartado, nodo que acepta pero
+    # no responde): sin él un intento colgado dejaba la pasarela minutos en
+    # "reconnecting" sin error ni log.
+    connect_timeout: float = Field(
+        default=20.0,
+        validation_alias=AliasChoices("MESHTASTIC_CONNECT_TIMEOUT", "GATEWAY_CONNECT_TIMEOUT"),
     )
     # Espera entre enviar un SET y leer la verificación (M1.3)
     set_settle_seconds: float = 3.0

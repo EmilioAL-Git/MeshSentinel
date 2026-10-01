@@ -14,6 +14,7 @@ cliente TCP simultáneo — si la app oficial u otro proceso está conectado, la
 conexión se rechazará o expulsará a la anterior.
 """
 
+import socket
 from typing import Any
 
 from gateway.config import Settings
@@ -32,9 +33,17 @@ class MeshtasticTcpTransport(MeshtasticStreamTransport):
     def _connect_blocking(self) -> Any:
         from meshtastic.tcp_interface import TCPInterface
 
+        timeout = self._settings.connect_timeout
+        # La librería usa create_connection SIN timeout (un SYN descartado
+        # bloquea minutos): se sondea antes con tope propio y se acota también
+        # la espera de configuración. Falla rápido -> error visible + backoff.
+        socket.create_connection(
+            (self._settings.tcp_host, self._settings.tcp_port), timeout=timeout
+        ).close()
         return TCPInterface(
             hostname=self._settings.tcp_host,
             portNumber=self._settings.tcp_port,
+            timeout=int(timeout),
         )
 
     def _endpoint_description(self) -> str:

@@ -47,17 +47,44 @@ def test_http_remains_unimplemented():
 
 def test_connect_blocking_builds_tcp_interface(monkeypatch):
     created: dict = {}
+    probes: list = []
 
     class FakeTCPInterface:
-        def __init__(self, hostname, portNumber):  # noqa: N803
+        def __init__(self, hostname, portNumber, timeout):  # noqa: N803
             created["hostname"] = hostname
             created["portNumber"] = portNumber
+            created["timeout"] = timeout
+
+    class FakeSock:
+        def close(self):
+            pass
+
+    def fake_create_connection(addr, timeout=None):
+        probes.append((addr, timeout))
+        return FakeSock()
 
     monkeypatch.setattr("meshtastic.tcp_interface.TCPInterface", FakeTCPInterface)
-    t = MeshtasticTcpTransport(_noop_emit, make_settings(tcp_port=4404))
+    monkeypatch.setattr("gateway.transports.tcp.socket.create_connection", fake_create_connection)
+    t = MeshtasticTcpTransport(_noop_emit, make_settings(tcp_port=4404, GATEWAY_CONNECT_TIMEOUT=15))
     iface = t._connect_blocking()
     assert isinstance(iface, FakeTCPInterface)
-    assert created == {"hostname": "192.168.1.50", "portNumber": 4404}
+    assert created == {"hostname": "192.168.1.50", "portNumber": 4404, "timeout": 15}
+    # El sondeo previo lleva timeout propio (la librería no lo tiene)
+    assert probes == [(("192.168.1.50", 4404), 15)]
+
+
+def test_connect_blocking_fails_fast_when_unreachable(monkeypatch):
+    def boom(addr, timeout=None):  # noqa: ARG001
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr("gateway.transports.tcp.socket.create_connection", boom)
+    t = MeshtasticTcpTransport(_noop_emit, make_settings())
+    with pytest.raises(TimeoutError):
+        t._connect_blocking()
+
+
+def test_reconnect_backoff_caps_at_30s_by_default():
+    assert make_settings().reconnect_max_delay == 30.0
 
 
 def test_endpoint_description_is_host_port():
