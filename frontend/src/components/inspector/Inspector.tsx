@@ -413,21 +413,21 @@ export function Inspector({
       trackOperations([op.id]); // toast de cierre cuando termine (opTracker)
       toast(`metadata.get añadida a la cola (op #${op.id})`);
     },
-    onError: (e) => toast(`No se pudo encolar: ${e.message}`, { kind: "error" }),
+    onError: (e) => toast(`No se pudo añadir a la cola: ${e.message}`, { kind: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
   });
   const refreshConfig = useMutation({
     mutationFn: () => refreshNodeConfig(nodeId),
     onSuccess: (r) => {
       trackOperations(r.operation_ids);
-      toast(`Lectura de configuración encolada (${r.operation_ids.length} operaciones)`);
+      toast(`Lectura de configuración añadida a la cola (${r.operation_ids.length} operaciones)`);
     },
-    onError: (e) => toast(`No se pudo encolar: ${e.message}`, { kind: "error" }),
+    onError: (e) => toast(`No se pudo añadir a la cola: ${e.message}`, { kind: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
   });
   const doRetry = useMutation({
     mutationFn: (id: number) => retryOperation(id),
-    onSuccess: () => toast("Reintento encolado"),
+    onSuccess: () => toast("Reintento añadido a la cola"),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
   });
 
@@ -1437,21 +1437,21 @@ export function Inspector({
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
-            <button style={{ ...actionBtn, width: "100%" }} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Encola metadata.get (solo lectura)">
+            <button style={{ ...actionBtn, width: "100%" }} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Añade metadata.get a la cola (solo lectura)">
               ⚙ Pedir metadata
             </button>
             <button
               style={{ ...actionBtn, width: "100%" }}
               disabled={refreshConfig.isPending}
               onClick={() => setConfirmRefreshConfig(true)}
-              title="Encola la lectura de todas las secciones de configuración (solo lectura)"
+              title="Añade a la cola la lectura de todas las secciones de configuración (solo lectura)"
             >
               ⟳ Leer configuración
             </button>
             {confirmRefreshConfig && (
               <ConfirmModal
                 title="Leer configuración completa"
-                message="Esto encola 26 lecturas (una por cada sección de configuración más el propietario). Es solo lectura, pero ocupa tiempo de aire de la malla mientras se completan."
+                message="Esto añade 26 lecturas a la cola (una por cada sección de configuración más el propietario). Es solo lectura, pero ocupa tiempo de aire de la malla mientras se completan."
                 confirmLabel="Leer las 26 secciones"
                 onConfirm={() => {
                   setConfirmRefreshConfig(false);

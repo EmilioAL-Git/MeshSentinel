@@ -452,7 +452,7 @@ export function JobsView({
   const doCancelOp = useMutation({ mutationFn: cancelOperation, onSettled: invalidate });
   const doRetryOp = useMutation({
     mutationFn: retryOperation,
-    onSuccess: () => toast("Reintento encolado (re-evalúa la pasarela)"),
+    onSuccess: () => toast("Reintento añadido a la cola (re-evalúa la pasarela)"),
     onSettled: invalidate,
   });
 

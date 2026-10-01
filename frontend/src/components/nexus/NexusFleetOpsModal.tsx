@@ -26,7 +26,7 @@ const INTERVAL_MAX = 60;
 
 /**
  * "Operaciones Nexus" desde Flota: mismo núcleo que `NexusOperationsPanel`
- * de Ajustes (previsualizar→confirmar→encolar), pero con el alcance como
+ * de Ajustes (previsualizar→confirmar→añadir a la cola), pero con el alcance como
  * primera decisión — un nodo, toda la flota (difusión), o los nodos
  * seleccionados en Flota (una operación `-node` por cada uno, espaciadas).
  */
@@ -134,12 +134,12 @@ export function NexusFleetOpsModal({
     },
     onSuccess: (data) => {
       const n = Array.isArray(data) ? data.length : 1;
-      toast(n > 1 ? `${n} operaciones encoladas` : "Operación encolada");
+      toast(n > 1 ? `${n} operaciones añadidas a la cola` : "Operación añadida a la cola");
       queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
       onClose();
     },
     onError: (err) =>
-      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo encolar", {
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo añadir a la cola", {
         kind: "error",
       }),
   });
@@ -305,7 +305,7 @@ export function NexusFleetOpsModal({
               disabled={!canQueue || createMutation.isPending}
               onClick={() => createMutation.mutate()}
             >
-              {scope === "selected" ? `Encolar (${selectedShortNames.names.length})` : "Encolar"}
+              {scope === "selected" ? `Añadir a la cola (${selectedShortNames.names.length})` : "Añadir a la cola"}
             </button>
           </div>
         )}

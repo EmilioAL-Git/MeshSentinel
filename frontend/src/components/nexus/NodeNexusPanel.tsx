@@ -116,14 +116,14 @@ export function NodeNexusPanel({
   const createMutation = useMutation({
     mutationFn: () => createNexusOperation(body),
     onSuccess: () => {
-      toast("Operación encolada");
+      toast("Operación añadida a la cola");
       setPreview(null);
       setConfirmText("");
       setArgsInput("");
       queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
     },
     onError: (err) =>
-      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo encolar", {
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo añadir a la cola", {
         kind: "error",
       }),
   });
@@ -153,7 +153,7 @@ export function NodeNexusPanel({
       <p style={{ color: t.textFaint, fontSize: 11.5, margin: "0.8rem 0 0.6rem" }}>
         Comandos por texto al firmware JenTastic-Nexus de este nodo (
         <code>{targetKind === "device" ? "-device" : "-node"} {targetValue}</code>
-        ), siempre con previsualización antes de encolar.
+        ), siempre con previsualización antes de añadir a la cola.
       </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
         <select style={input} value={gatewayId} onChange={(e) => { setGatewayId(e.target.value); setPreview(null); }}>
@@ -210,7 +210,7 @@ export function NodeNexusPanel({
             disabled={!canQueue || createMutation.isPending}
             onClick={() => createMutation.mutate()}
           >
-            Encolar
+            Añadir a la cola
           </button>
         </div>
       )}
@@ -234,7 +234,7 @@ const SECURITY_BIT_LABEL: Record<string, string> = {
  * `SECURITY` y mostrar el bitmask, avisando si `ALLOW_DM` está OFF. Nunca
  * envía nada por sí sola salvo la propia lectura (consulta, no muta) — la
  * activación de `ALLOW_DM` solo PRECARGA el formulario genérico de abajo,
- * el operador sigue teniendo que previsualizar y encolar como cualquier
+ * el operador sigue teniendo que previsualizar y añadir a la cola como cualquier
  * otro comando (mismo criterio de "nunca automático" del resto del
  * módulo). El estado mostrado es el de la última lectura CONFIRMADA — sin
  * SET remoto, MeshSentinel no puede releer la NodeDB para verificarlo por
@@ -328,7 +328,7 @@ function NodeNexusSecurity({
           <button
             style={{ ...btn, marginTop: 6 }}
             onClick={() => onPrefill("SECURITY", "ALLOW_DM on")}
-            title="Precarga el formulario de abajo — sigues teniendo que previsualizar y encolar tú"
+            title="Precarga el formulario de abajo — sigues teniendo que previsualizar y añadir a la cola tú"
           >
             Preparar activación (+ recuerda SAVE después)
           </button>

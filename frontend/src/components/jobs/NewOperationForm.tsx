@@ -18,7 +18,7 @@ import { NEXUS_SUPERSEDED_OPERATION_TYPES } from "../nexus/nativeOverlap";
 import { useNexusMode } from "../nexus/useNexusMode";
 
 // Creación de una operación individual (M1.1/M1.3), portada de la antigua
-// vista Operaciones al Centro de Trabajos. Los GETs se encolan directos;
+// vista Operaciones al Centro de Trabajos. Los GETs se añaden directos a la cola;
 // los SETs mantienen su confirmación explícita tecleando el node_id.
 
 const input: CSSProperties = {
@@ -50,7 +50,7 @@ export function NewOperationForm({
       if (op.gateway_note) toast(op.gateway_note, { kind: "error" });
       onClose();
     },
-    onError: (e) => toast(`No se pudo encolar: ${e.message}`, { kind: "error" }),
+    onError: (e) => toast(`No se pudo añadir a la cola: ${e.message}`, { kind: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
   });
 

@@ -177,7 +177,7 @@ function SectionEditor({
       </div>
       {snapshot && Object.keys(current).length === 0 && (
         <p style={styles.dim}>
-          Aún no se ha leído esta sección. Pulsa <em>Refrescar</em> para encolar un GET.
+          Aún no se ha leído esta sección. Pulsa <em>Refrescar</em> para añadir un GET a la cola.
         </p>
       )}
       <table style={styles.table}>
@@ -364,7 +364,7 @@ export function ConfigEditor({ summaries }: Props) {
           {confirmRefreshAll && (
             <ConfirmModal
               title="Leer configuración completa"
-              message="Esto encola 26 lecturas (una por cada sección de configuración más el propietario). Es solo lectura, pero ocupa tiempo de aire de la malla mientras se completan."
+              message="Esto añade 26 lecturas a la cola (una por cada sección de configuración más el propietario). Es solo lectura, pero ocupa tiempo de aire de la malla mientras se completan."
               confirmLabel="Leer las 26 secciones"
               onConfirm={() => {
                 setConfirmRefreshAll(false);
@@ -375,14 +375,14 @@ export function ConfigEditor({ summaries }: Props) {
           )}
           {refresh.isSuccess && (
             <span style={styles.dim}>
-              Encoladas {refresh.data.operation_ids.length} lecturas. Se irán completando por la cola.
+              {refresh.data.operation_ids.length} lecturas añadidas a la cola. Se irán completando por la cola.
             </span>
           )}
           {refresh.isError && <span style={styles.bad}>{String(refresh.error)}</span>}
         </div>
         <p style={{ ...styles.dim, fontSize: "0.85rem", marginBottom: 0 }}>
           Modifica varios parámetros en distintas secciones y pulsa <em>Aplicar cambios</em>. El
-          sistema encolará los SETs necesarios en el orden correcto y verificará cada sección con
+          sistema añadirá a la cola los SETs necesarios en el orden correcto y verificará cada sección con
           una lectura posterior.
         </p>
       </div>
@@ -515,7 +515,7 @@ export function ConfigEditor({ summaries }: Props) {
             <div style={{ border: "1px solid var(--warn)", borderRadius: 8, padding: "0.8rem", marginTop: "0.8rem" }}>
               <p style={{ marginTop: 0 }}>
                 Vas a aplicar <strong>{changes.length}</strong> cambio{changes.length === 1 ? "" : "s"} sobre{" "}
-                <strong>{nodeId}</strong>. Se encolará una operación por sección modificada, cada una
+                <strong>{nodeId}</strong>. Se añadirá a la cola una operación por sección modificada, cada una
                 con verificación por lectura posterior. Nivel de riesgo agregado:{" "}
                 <span style={{ ...RISK_STYLE[aggregatedRisk], padding: "0 0.4rem", borderRadius: 6 }}>
                   {aggregatedRisk}

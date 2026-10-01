@@ -82,20 +82,20 @@ function RemoteFlagList({
         send_contact: sendContact,
       }),
     onSuccess: () => toast("Operación añadida a la cola"),
-    onError: () => toast("No se pudo encolar la operación", { kind: "error" }),
+    onError: () => toast("No se pudo añadir a la cola la operación", { kind: "error" }),
     onSettled: invalidateFlag,
   });
 
   const sync = useMutation({
     mutationFn: () => syncRemoteFlags(nodeId, { flag_type: flagType, send_contact: sendContact }),
-    onSuccess: (r) => toast(r.items > 0 ? `Sincronización encolada (${r.items} operaciones)` : "Ya estaba todo al día"),
+    onSuccess: (r) => toast(r.items > 0 ? `Sincronización añadida a la cola (${r.items} operaciones)` : "Ya estaba todo al día"),
     onError: () => toast("No se pudo sincronizar", { kind: "error" }),
     onSettled: invalidateFlag,
   });
 
   const resend = useMutation({
     mutationFn: () => resendPendingRemoteFlags(nodeId, flagType),
-    onSuccess: (r) => toast(r.items > 0 ? `Reenvío encolado (${r.items} operaciones)` : "Nada pendiente de reenviar"),
+    onSuccess: (r) => toast(r.items > 0 ? `Reenvío añadido a la cola (${r.items} operaciones)` : "Nada pendiente de reenviar"),
     onError: () => toast("No se pudo reenviar", { kind: "error" }),
     onSettled: invalidateFlag,
   });

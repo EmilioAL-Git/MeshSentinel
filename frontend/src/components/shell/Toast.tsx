@@ -6,7 +6,7 @@ import { t } from "../../tokens";
  * los errores persisten hasta cerrarse. Emisor a nivel de módulo para poder
  * lanzar un toast desde cualquier componente o mutación sin contexto React:
  *   toast("Operación añadida a la cola");
- *   toast("No se pudo encolar", { kind: "error" });
+ *   toast("No se pudo añadir a la cola", { kind: "error" });
  */
 
 export interface ToastMsg {

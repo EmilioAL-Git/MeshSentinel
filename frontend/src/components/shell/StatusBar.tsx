@@ -145,7 +145,7 @@ export function StatusBar({
       <Segment title="Alertas activas" onClick={() => onGoTo("alerts")}>
         <span style={{ color: alertColor }}>⚠ {activeAlerts}</span>
       </Segment>
-      <Segment title="Operaciones en cola (pendientes + encoladas)" onClick={() => onGoTo("jobs")}>
+      <Segment title="Operaciones en cola (pendientes + en tránsito)" onClick={() => onGoTo("jobs")}>
         ⧗ {queuedCount}
       </Segment>
       <Segment

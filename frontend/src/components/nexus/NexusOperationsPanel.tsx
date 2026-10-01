@@ -55,7 +55,7 @@ const TARGET_KINDS: { value: NexusTargetKind; label: string; needsValue: boolean
 
 /**
  * Formulario de creación + historial de la cola de operaciones (ADR 0027
- * §4). Previsualiza SIEMPRE antes de encolar (dry-run, mismo patrón que M2
+ * §4). Previsualiza SIEMPRE antes de añadir a la cola (dry-run, mismo patrón que M2
  * "simular→CONFIRMAR"): un comando destructivo exige teclear el destino
  * para confirmar, igual que M1.3 con los SETs verificables.
  */
@@ -126,14 +126,14 @@ export function NexusOperationsPanel() {
   const createMutation = useMutation({
     mutationFn: () => createNexusOperation(body),
     onSuccess: () => {
-      toast("Operación encolada");
+      toast("Operación añadida a la cola");
       setPreview(null);
       setConfirmText("");
       setArgs([]);
       queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
     },
     onError: (err) =>
-      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo encolar", {
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo añadir a la cola", {
         kind: "error",
       }),
   });
@@ -158,7 +158,7 @@ export function NexusOperationsPanel() {
       </h3>
       <p style={{ color: t.textFaint, fontSize: 11.5, maxWidth: 620, marginTop: 4 }}>
         Cualquier comando del catálogo, con el mismo espaciado y direccionamiento validados en el
-        núcleo del módulo. Siempre se previsualiza el texto exacto antes de encolar; los comandos
+        núcleo del módulo. Siempre se previsualiza el texto exacto antes de añadir a la cola; los comandos
         destructivos piden teclear el destino para confirmar.
       </p>
 
@@ -302,7 +302,7 @@ export function NexusOperationsPanel() {
             disabled={!canQueue || createMutation.isPending}
             onClick={() => createMutation.mutate()}
           >
-            Encolar
+            Añadir a la cola
           </button>
         </div>
       )}
