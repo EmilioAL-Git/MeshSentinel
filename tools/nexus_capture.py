@@ -122,6 +122,8 @@ def main() -> int:
                         help="segundos sin texto nuevo para dar un comando por respondido")
     parser.add_argument("--max-wait", type=float, default=120.0,
                         help="espera máxima por comando")
+    parser.add_argument("--literal", action="store_true",
+                        help="envía cada comando TAL CUAL (p. ej. \"/nexus IGNORE !id\" para difusión), sin prefijo -node")
     parser.add_argument("--no-extras", action="store_true",
                         help="no mandar las pruebas extra (-local, difusión)")
     args = parser.parse_args()
@@ -195,7 +197,7 @@ def main() -> int:
         # en cualquier momento desde firmware 2.8, así que ni siquiera es
         # estable como identificador. Todo el direccionamiento dirigido usa
         # -node <shortname>.
-        plan = [f"/nexus-node {target_short} {c}" for c in args.commands]
+        plan = list(args.commands) if args.literal else [f"/nexus-node {target_short} {c}" for c in args.commands]
         if not args.no_extras:
             # Difusión: ¿contesta el objetivo? ¿jitter? ¿contesta el emisor a sí mismo?
             plan.append("/nexus VERSION")

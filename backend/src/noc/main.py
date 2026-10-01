@@ -46,6 +46,7 @@ from noc.application.auth.service import AuthService
 from noc.application.dashboard import DashboardService
 from noc.application.envelopes import make_event_envelope
 from noc.application.gateways.service import GatewayService
+from noc.application.nexus_conversation import NexusConversationService
 from noc.application.nexus_gateway import NexusGateway
 from noc.application.nexus_operations import NexusOperationService
 from noc.application.ingest import IngestService
@@ -136,6 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # resultado — la correlación se hace escuchando message.received.
     nexus_ops = NexusOperationService(app.state.db.session_factory, command_queue)
     app.state.nexus_operations = nexus_ops
+    app.state.nexus_conversation = NexusConversationService(app.state.db.session_factory)
     app.state.event_bus.subscribe(nexus_ops.handle_event)
     nexus_ops.start()
 

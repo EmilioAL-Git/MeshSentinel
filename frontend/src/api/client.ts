@@ -1386,7 +1386,78 @@ export interface NexusOperationResponseOut {
 export const fetchNexusOperationResponses = (opId: number) =>
   get<NexusOperationResponseOut[]>(`/nexus/operations/${opId}/responses`);
 
+// ── Consola Nexus: chat del canal con respuestas interpretadas ──────────────
+
+export interface NexusInterpretationOut {
+  outcome: "ok" | "error" | "info";
+  summary: string;
+  flag_type: "favorite" | "ignored" | "nign" | null;
+  flag_present: boolean | null;
+  subject_node_id: string | null;
+  data: Record<string, unknown> | null;
+}
+export interface NexusConversationMessageOut {
+  id: number;
+  from_node_id: string;
+  sender_label: string;
+  text: string;
+  gateway_id: string | null;
+  channel_index: number;
+  received_at: string | null;
+  rssi: number | null;
+  snr: number | null;
+  hops_away: number | null;
+  context_op_id: number | null;
+  interpretation: NexusInterpretationOut | null;
+  /** >0: respuesta paginada reensamblada de N mensajes del nodo. */
+  parts: number;
+}
+export interface NexusConversationOut {
+  messages: NexusConversationMessageOut[];
+  operations: NexusOperationOut[];
+  channels: string[];
+}
+export const fetchNexusConversation = (limit = 200) =>
+  get<NexusConversationOut>(`/nexus/conversation?limit=${limit}`);
+
+/** Favoritos/ignorados conocidos de un nodo Nexus (confirmaciones + lecturas). */
+export interface NexusKnownFlagOut {
+  flag_type: "favorite" | "ignored" | "nign";
+  subject_node_id: string;
+  subject_label: string;
+  subject_short_name: string | null;
+  source: "confirmation" | "read";
+  updated_at: string | null;
+}
+export const fetchNexusKnownFlags = (nodeId: string) =>
+  get<NexusKnownFlagOut[]>(`/nexus/nodes/${encodeURIComponent(nodeId)}/flags`);
+
 // ── Catálogo (ADR 0027 §12): explorador de comandos, no texto libre ────────
+
+export interface NexusSyntaxArg {
+  name: string;
+  label: string;
+  kind: "choice" | "node" | "number" | "onoff" | "text" | "hex";
+  choices: string[];
+  min: number | null;
+  max: number | null;
+  optional: boolean;
+  placeholder: string;
+  hint: string;
+  /** Solo onoff: valores reales enviados (el firmware espera 1/0). */
+  on_value: string;
+  off_value: string;
+}
+
+/** Una forma de invocar el comando: tokens fijos + campos a rellenar. */
+export interface NexusSyntaxVariant {
+  label: string;
+  tokens: string[];
+  args: NexusSyntaxArg[];
+  note: string;
+  /** Probada contra hardware real (prevalece sobre el manual). */
+  verified: boolean;
+}
 
 export interface NexusCatalogEntryOut {
   name: string;
@@ -1397,6 +1468,8 @@ export interface NexusCatalogEntryOut {
   busy_seconds: number;
   broadcast_forbidden: boolean;
   description: string;
+  /** Vacío = sin sintaxis modelada: el asistente cae a texto libre. */
+  syntax: NexusSyntaxVariant[];
 }
 export const fetchNexusCatalog = () => get<NexusCatalogEntryOut[]>("/nexus/catalog");
 

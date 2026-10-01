@@ -1,22 +1,24 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createNexusOperation,
   createNexusOperationBatch,
   displayName,
   fetchGateways,
+  fetchNexusSettings,
   fetchNodes,
   previewNexusOperation,
   type GatewayOut,
   type NexusOperationPreviewOut,
   type NodeSummaryOut,
 } from "../../api/client";
-import { Modal } from "../shell/Modal";
 import { toast } from "../shell/Toast";
 import { t } from "../../tokens";
 import { NexusArgsField } from "./NexusArgsField";
 import { NexusCatalogBrowser } from "./NexusCatalogBrowser";
+import { NexusQuickActions } from "./NexusQuickActions";
 import { NexusCommandHint } from "./NexusCommandHint";
+import { NexusFeed } from "./NexusFeed";
 
 type Scope = "single" | "broadcast" | "selected";
 
@@ -25,10 +27,14 @@ const INTERVAL_MIN = 1;
 const INTERVAL_MAX = 60;
 
 /**
- * "Operaciones Nexus" desde Flota: mismo núcleo que `NexusOperationsPanel`
- * de Ajustes (previsualizar→confirmar→añadir a la cola), pero con el alcance como
- * primera decisión — un nodo, toda la flota (difusión), o los nodos
- * seleccionados en Flota (una operación `-node` por cada uno, espaciadas).
+ * Consola "Operaciones Nexus" (pantalla completa, pensada para quedarse
+ * abierta): arriba el chat del canal Nexus con lo enviado, lo que contestan
+ * los nodos y su interpretación (`NexusFeed`); abajo el compositor, mismo
+ * núcleo que `NexusOperationsPanel` de Ajustes (previsualizar→confirmar→
+ * añadir a la cola) con el alcance como primera decisión — un nodo, toda la
+ * flota (difusión), o los nodos seleccionados en Flota (una operación
+ * `-node` por cada uno, espaciadas). No se cierra al enviar: se queda para
+ * ver las respuestas llegar.
  */
 export function NexusFleetOpsModal({
   onClose,
@@ -63,6 +69,27 @@ export function NexusFleetOpsModal({
   const [intervalSeconds, setIntervalSeconds] = useState(INTERVAL_DEFAULT);
   const [preview, setPreview] = useState<NexusOperationPreviewOut | null>(null);
   const [confirmText, setConfirmText] = useState("");
+  const [showRaw, setShowRaw] = useState(true);
+  const [showNoise, setShowNoise] = useState(true);
+
+  // Pasarela por defecto: la de los ajustes, o la única conectada.
+  const settingsQuery = useQuery({ queryKey: ["nexus-settings"], queryFn: fetchNexusSettings });
+  useEffect(() => {
+    if (gatewayId) return;
+    const preferred = settingsQuery.data?.default_gateway_id;
+    if (preferred && gateways.some((g) => g.gateway_id === preferred)) setGatewayId(preferred);
+    else if (gateways.length === 1) setGatewayId(gateways[0]!.gateway_id);
+  }, [gatewayId, gateways, settingsQuery.data]);
+
+  // Esc cierra la consola.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (e.key === "Escape" && tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   // Sugerencias para los argumentos con forma de id de nodo (FAV/IGNORE/ZH/
   // WATCH, ver NexusArgsField) — toda la flota conocida, no solo la
@@ -93,11 +120,11 @@ export function NexusFleetOpsModal({
       (scope === "selected" && selectedShortNames.names.length > 0));
 
   const previewMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (override?: { command: string; args: string[] }) =>
       previewNexusOperation({
         gateway_id: gatewayId,
-        command: command.trim().toUpperCase(),
-        args,
+        command: (override?.command ?? command).trim().toUpperCase(),
+        args: override?.args ?? args,
         target_kind: previewTargetKind,
         target_value: previewTargetValue,
       }),
@@ -134,9 +161,11 @@ export function NexusFleetOpsModal({
     },
     onSuccess: (data) => {
       const n = Array.isArray(data) ? data.length : 1;
-      toast(n > 1 ? `${n} operaciones añadidas a la cola` : "Operación añadida a la cola");
+      toast(n > 1 ? `${n} comandos en ejecución` : "Comando en ejecución");
       queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
-      onClose();
+      queryClient.invalidateQueries({ queryKey: ["nexus-conversation"] });
+      setPreview(null);
+      setConfirmText("");
     },
     onError: (err) =>
       toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo añadir a la cola", {
@@ -160,8 +189,60 @@ export function NexusFleetOpsModal({
   const resetPreview = () => setPreview(null);
 
   return (
-    <Modal title="Operaciones Nexus" onClose={onClose}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000, background: "var(--chassis)",
+        display: "flex", flexDirection: "column",
+      }}
+    >
+      <div className="panel-head" style={{ gap: 12 }}>
+        <span className="panel-title">🐱 Operaciones Nexus</span>
+        <span style={{ color: t.textFaint, fontSize: 11 }}>canal Nexus en directo</span>
+        <label
+          title="Con el texto crudo apagado, las respuestas interpretadas muestran solo la frase. Las no interpretadas siempre enseñan su texto."
+          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, color: t.textDim, marginLeft: "auto" }}
+        >
+          <input type="checkbox" checked={showRaw} onChange={(e) => setShowRaw(e.target.checked)} />
+          texto crudo
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, color: t.textDim }}>
+          <input type="checkbox" checked={showNoise} onChange={(e) => setShowNoise(e.target.checked)} />
+          otros mensajes del canal
+        </label>
+        <button className="btn ghost" style={{ padding: "0.1rem 0.5rem", fontSize: 11 }} onClick={onClose} title="Cerrar (Esc)">
+          ✕
+        </button>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+      <div
+        style={{
+          flex: 1, minWidth: 0, background: t.surface, padding: "0.8rem 1rem",
+          overflowY: "auto",
+        }}
+      >
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-start" }}>
+      <div style={{ flex: "1.4 1 440px", minWidth: 0 }}>
+        <NexusQuickActions
+          nodeOptions={nodeOptions}
+          disabledReason={
+            gatewayId === "" ? "elige una pasarela"
+            : scope === "single" && singleTarget.trim() === "" ? "indica el nombre corto del nodo"
+            : scope === "selected" && selectedShortNames.names.length === 0 ? "selecciona nodos en Flota"
+            : null
+          }
+          onSelect={(name, nextArgs) => { setCommand(name); setArgs(nextArgs); resetPreview(); }}
+          onRun={(name, nextArgs) => {
+            setCommand(name); setArgs(nextArgs);
+            const ready = gatewayId !== "" && (scope === "broadcast"
+              || (scope === "single" && singleTarget.trim() !== "")
+              || (scope === "selected" && selectedShortNames.names.length > 0));
+            if (ready) previewMutation.mutate({ command: name, args: nextArgs });
+            else { resetPreview(); toast("Elige pasarela y destino y pulsa «Previsualizar»", { kind: "error" }); }
+          }}
+        />
+      </div>
+      <div style={{ flex: "1 1 380px", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
         <div>
           <label className="microlabel">Alcance</label>
           <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
@@ -252,16 +333,18 @@ export function NexusFleetOpsModal({
             onChange={(next) => { setArgs(next); resetPreview(); }}
             nodeOptions={nodeOptions}
           />
-          <button className="btn" disabled={!canBuild || previewMutation.isPending} onClick={() => previewMutation.mutate()}>
+          <button className="btn" disabled={!canBuild || previewMutation.isPending} onClick={() => previewMutation.mutate(undefined)}>
             Previsualizar
           </button>
         </div>
         <NexusCommandHint command={command} />
 
-        <NexusCatalogBrowser
-          defaultOpen
-          onSelect={(name) => { setCommand(name); setArgs([]); resetPreview(); }}
-        />
+        <div>
+          <NexusCatalogBrowser
+            nodeOptions={nodeOptions}
+            onSelect={(name, nextArgs) => { setCommand(name); setArgs(nextArgs); resetPreview(); }}
+          />
+        </div>
 
         {preview && (
           <div className="panel" style={{ padding: "0.6rem 0.8rem" }}>
@@ -305,11 +388,26 @@ export function NexusFleetOpsModal({
               disabled={!canQueue || createMutation.isPending}
               onClick={() => createMutation.mutate()}
             >
-              {scope === "selected" ? `Añadir a la cola (${selectedShortNames.names.length})` : "Añadir a la cola"}
+              {scope === "selected" ? `Ejecutar comando (${selectedShortNames.names.length})` : "Ejecutar comando"}
             </button>
           </div>
         )}
       </div>
-    </Modal>
+      </div>
+      </div>
+      <aside
+        style={{
+          width: "min(440px, 38vw)", minWidth: 280, flexShrink: 0, minHeight: 0,
+          display: "flex", flexDirection: "column", borderLeft: "1px solid var(--border)",
+          background: "var(--chassis)",
+        }}
+      >
+        <div className="panel-head">
+          <span className="panel-title">Canal Nexus</span>
+        </div>
+        <NexusFeed showRaw={showRaw} showNoise={showNoise} />
+      </aside>
+      </div>
+    </div>
   );
 }

@@ -28,10 +28,12 @@ const boxStyle: CSSProperties = {
  * creación/edición de reglas, integraciones y canales de AlertsView —
  * separa la lista (siempre visible) de la edición (siempre en ventana
  * aparte), pedido explícito del usuario. */
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({
+  title, onClose, children, width,
+}: { title: string; onClose: () => void; children: ReactNode; width?: string }) {
   return (
     <div style={overlayStyle} onMouseDown={onClose}>
-      <div style={boxStyle} onMouseDown={(e) => e.stopPropagation()}>
+      <div style={width ? { ...boxStyle, width } : boxStyle} onMouseDown={(e) => e.stopPropagation()}>
         <div className="panel-head">
           <span className="panel-title">{title}</span>
           <button className="btn ghost" style={{ marginLeft: "auto", padding: "0.1rem 0.5rem", fontSize: 11 }} onClick={onClose}>

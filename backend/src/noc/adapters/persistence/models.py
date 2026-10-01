@@ -565,6 +565,28 @@ class NexusOperationModel(Base):
     batch_interval_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class NexusNodeFlagModel(Base):
+    """Listas conocidas de un nodo Nexus (favoritos/ignorados propios del
+    firmware JT, NO los remotos nativos de M4): una fila por (nodo que
+    responde, tipo de lista, nodo sujeto). Se alimenta de las confirmaciones
+    de FAV/UNFAV/IGNORE/UNIGNORE y de lecturas FAVS/IGNORED. Sin FK a
+    nodes: el sujeto puede ser un nodo aún no visto por ninguna pasarela."""
+
+    __tablename__ = "nexus_node_flags"
+    __table_args__ = (
+        UniqueConstraint("node_id", "flag_type", "subject_node_id", name="uq_nexus_node_flag"),
+        Index("ix_nexus_node_flags_node", "node_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[str] = mapped_column(String(16))
+    flag_type: Mapped[str] = mapped_column(String(16))  # favorite | ignored
+    subject_node_id: Mapped[str] = mapped_column(String(16))
+    subject_short_name: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    source: Mapped[str] = mapped_column(String(16))  # confirmation | read
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class NexusOperationResponseModel(Base):
     """Respuestas individuales a una operación de destino múltiple
     (broadcast/group) — una fila por nodo que responde, append-only. Las

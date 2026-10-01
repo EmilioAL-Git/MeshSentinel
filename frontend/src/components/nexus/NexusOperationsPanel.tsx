@@ -213,7 +213,7 @@ export function NexusOperationsPanel() {
       </div>
       <NexusCommandHint command={command} />
       <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-        <NexusCatalogBrowser onSelect={(name) => { setCommand(name); setArgs([]); setPreview(null); }} />
+        <NexusCatalogBrowser onSelect={(name, nextArgs) => { setCommand(name); setArgs(nextArgs); setPreview(null); }} />
         {settings && settings.pinned_nodes.length > 0 && kindDef.needsValue && targetKind === "node" && (
           <>
             <span style={{ color: t.textFaint, fontSize: 10.5 }}>fijados:</span>

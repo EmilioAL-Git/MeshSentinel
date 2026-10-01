@@ -589,3 +589,28 @@ pendiente" salvo: sintaxis de `SET`/`OFF` de `FSIG`, `WATCH STATS` con
 datos reales, si `PRALLOW`/`PRBLOCK` desaparecen, `FIREWALLSTATS`
 estructurado, y el significado de los campos sin etiquetar de `NODES`/
 `CONFIG`.
+
+
+## Errata 2026-10-01 — interruptores: palabras ON/OFF, no 1/0
+
+Se supuso (por indicación del usuario) que el firmware esperaba `1`/`0`.
+Prueba de campo posterior (T1000-E `!215baaee` fw 2.8.005, con lectura del
+estado tras cada cambio; emisor X1, canal Nexus; el nodo se dejó como estaba):
+
+| Comando | `on`/`off` | `1`/`0` |
+|---|---|---|
+| `SECURITY ALLOW_DM` | funciona | **sin efecto** (responde con el estado) |
+| `SECURITY SILENT_LOG` | funciona | **sin efecto** |
+| `TA` | funciona | **sin efecto** |
+| `CLIENTALWAYS` | funciona | funciona |
+| `BASETEXTS` | funciona | funciona |
+| `SETCONFIG SMART` | funciona (`on`) | funciona (`0`) |
+
+Las pruebas prevalecen: el asistente (`syntax.py`) envía palabras `ON`/`OFF`
+en todos los interruptores y «Preparar activación» precarga
+`SECURITY ALLOW_DM on`. Un valor no válido NO da error: el nodo contesta con el
+estado actual sin cambiarlo (de ahí la impresión de «no hace nada»). Un
+`SETCONFIG` aplicado REINICIA el nodo (uptime 33 s al releer): los comandos
+enviados durante ese reinicio se pierden. `REQ_SIG`, `FIXED`, `GPS`,
+`OKTOMQTT`, `IDR` y `PPING` no se probaron (riesgo de bloqueo o de tocar la
+config de LoRa). `TX` conserva palabras y `TX 0` se trata como destructivo.

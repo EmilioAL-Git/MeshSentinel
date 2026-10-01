@@ -20,7 +20,9 @@ from noc.adapters.api.deps import RequireManagerDep, SessionDep
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.nexus.builder import NexusCommandError
 from noc.application.nexus.catalog import COMMANDS, CommandSpec, describe
+from noc.application.nexus.syntax import syntax_for
 from noc.application.nexus_gateway import NexusGateway, NexusScanCooldownError, PassiveCandidate
+from noc.application.nexus_conversation import NexusConversationService
 from noc.application.nexus_operations import NexusOperationService, NexusTargetError
 from noc.application.nexus_settings import NexusSettingError, merge_settings, validate_changes
 from noc.domain.nexus.entities import NexusOperation, NexusOperationResponse
@@ -36,12 +38,38 @@ def _operations(request: Request) -> NexusOperationService:
     return request.app.state.nexus_operations
 
 
+def _conversation(request: Request) -> NexusConversationService:
+    return request.app.state.nexus_conversation
+
+
 class ModeOut(BaseModel):
     enabled: bool
 
 
 class ModePatchIn(BaseModel):
     enabled: bool
+
+
+class SyntaxArgOut(BaseModel):
+    name: str
+    label: str
+    kind: str  # syntax.ArgKind
+    choices: list[str]
+    min: int | None
+    max: int | None
+    optional: bool
+    placeholder: str
+    hint: str
+    on_value: str
+    off_value: str
+
+
+class SyntaxVariantOut(BaseModel):
+    label: str
+    tokens: list[str]
+    args: list[SyntaxArgOut]
+    note: str
+    verified: bool
 
 
 class CatalogEntryOut(BaseModel):
@@ -53,6 +81,8 @@ class CatalogEntryOut(BaseModel):
     busy_seconds: float
     broadcast_forbidden: bool
     description: str  # "" si no hay entrada documentada (nunca inventado)
+    # Ayuda del asistente; vacío = sin sintaxis modelada → texto libre.
+    syntax: list[SyntaxVariantOut]
 
     @classmethod
     def from_spec(cls, spec: CommandSpec) -> "CatalogEntryOut":
@@ -61,6 +91,21 @@ class CatalogEntryOut(BaseModel):
             mutation=spec.mutation.value, destructive=spec.destructive,
             busy_seconds=spec.busy_seconds, broadcast_forbidden=spec.broadcast_forbidden,
             description=describe(spec.name),
+            syntax=[
+                SyntaxVariantOut(
+                    label=v.label, tokens=list(v.tokens), note=v.note, verified=v.verified,
+                    args=[
+                        SyntaxArgOut(
+                            name=a.name, label=a.label, kind=a.kind.value,
+                            choices=list(a.choices), min=a.min, max=a.max,
+                            optional=a.optional, placeholder=a.placeholder, hint=a.hint,
+                            on_value=a.on_value, off_value=a.off_value,
+                        )
+                        for a in v.args
+                    ],
+                )
+                for v in syntax_for(spec.name)
+            ],
         )
 
 
@@ -371,3 +416,89 @@ async def list_operation_responses(
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
     responses = await _operations(request).list_responses(op_id)
     return [OperationResponseOut.from_entity(r) for r in responses]
+
+
+class InterpretationOut(BaseModel):
+    outcome: str  # ok | error | info
+    summary: str
+    flag_type: str | None
+    flag_present: bool | None
+    subject_node_id: str | None
+    data: dict[str, Any] | None
+
+
+class ConversationMessageOut(BaseModel):
+    id: int
+    from_node_id: str
+    sender_label: str
+    text: str
+    gateway_id: str | None
+    channel_index: int
+    received_at: datetime | None
+    rssi: int | None
+    snr: float | None
+    hops_away: int | None
+    context_op_id: int | None
+    interpretation: InterpretationOut | None
+    parts: int  # >0: respuesta paginada reensamblada de N mensajes
+
+
+class ConversationOut(BaseModel):
+    messages: list[ConversationMessageOut]
+    operations: list[OperationOut]
+    channels: list[str]  # "gateway_id#indice" — canales Nexus resueltos por nombre
+
+
+@router.get("/conversation", response_model=ConversationOut)
+async def get_conversation(
+    request: Request,
+    current_user: RequireManagerDep,
+    gateway_id: str | None = None,
+    limit: int = Query(default=150, ge=1, le=500),
+) -> ConversationOut:
+    """Chat del canal Nexus (difusiones persistidas por el monitor de Chat)
+    con la cola de operaciones superpuesta y cada respuesta ya interpretada
+    ("Nodo X ignorado correctamente")."""
+    if not await _service(request).is_mode_enabled():
+        raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    conv = await _conversation(request).conversation(gateway_id, limit)
+    messages = []
+    for cm in conv.messages:
+        m, i = cm.message, cm.interpretation
+        messages.append(
+            ConversationMessageOut(
+                id=m.id or 0, from_node_id=m.from_node_id, sender_label=cm.sender_label, text=m.text,
+                gateway_id=m.gateway_id, channel_index=m.channel_index, received_at=m.received_at,
+                rssi=m.rssi, snr=m.snr, hops_away=m.hops_away, context_op_id=cm.context_op_id,
+                parts=cm.parts,
+                interpretation=None if i is None else InterpretationOut(
+                    outcome=i.outcome, summary=i.summary, flag_type=i.flag_type,
+                    flag_present=i.flag_present, subject_node_id=i.subject_node_id, data=i.data,
+                ),
+            )
+        )
+    return ConversationOut(
+        messages=messages,
+        operations=[OperationOut.from_entity(o) for o in conv.operations],
+        channels=[f"{gw}#{idx}" for gw, idx in conv.channels],
+    )
+
+
+class KnownFlagOut(BaseModel):
+    flag_type: str  # favorite | ignored
+    subject_node_id: str
+    subject_label: str
+    subject_short_name: str | None
+    source: str  # confirmation | read
+    updated_at: datetime | None
+
+
+@router.get("/nodes/{node_id}/flags", response_model=list[KnownFlagOut])
+async def get_known_flags(node_id: str, request: Request, current_user: RequireManagerDep) -> list[KnownFlagOut]:
+    """Favoritos/ignorados CONOCIDOS de un nodo Nexus: lo que sus
+    confirmaciones (FAV/UNFAV/IGNORE/UNIGNORE) y lecturas (FAVS/IGNORED)
+    han ido acumulando."""
+    if not await _service(request).is_mode_enabled():
+        raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    flags = await _conversation(request).known_flags(node_id)
+    return [KnownFlagOut(**{f: getattr(k, f) for f in KnownFlagOut.model_fields}) for k in flags]

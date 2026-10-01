@@ -837,13 +837,14 @@ def test_parse_unfav_updated() -> None:
     assert parsed.data["node_id"] == "!af000001"
 
 
-def test_ignore_unignore_have_no_parser_yet() -> None:
-    # Deliberado: solo FAV/UNFAV se probaron contra hardware real. Asumir
-    # que IGNORE/UNIGNORE comparten formato sin haberlo visto sería
-    # inventar — se quedan como texto crudo hasta confirmarlo.
+def test_ignore_unignore_share_the_fav_updated_format() -> None:
+    # Captura real 2026-10-01 (X1→T1000, fw 2.8.005): mismo formato que FAV.
     for command in ("IGNORE", "UNIGNORE"):
-        parsed = parse_response(command, "JT: Updated node !af000001 (N001)", ("!af000001",))
-        assert parsed.kind == "raw"
+        parsed = parse_response(command, "🟢 JT: Updated node !af000001 (N001)", ("!af000001",))
+        assert parsed.kind == "structured"
+        assert parsed.data["node_id"] == "!af000001" and parsed.data["short_name"] == "N001"
+    # Variantes forzadas: sin parser a propósito (confirman sin garantizar efecto).
+    assert parse_response("FIGNORE", "JT: Updated node !af000001 (N001)", ("!af000001",)).kind == "raw"
 
 
 # --- ZH (Zero Hop) ---------------------------------------------------------
@@ -1028,3 +1029,86 @@ def test_module_is_pure() -> None:
                 ]
                 for name in names:
                     assert not name.startswith(forbidden), f"{path.name} importa {name}"
+
+
+# --- Sintaxis para el asistente de la UI (syntax.py) ---------------------
+
+
+def test_syntax_entries_resolve_to_catalog_commands():
+    from noc.application.nexus import catalog
+    from noc.application.nexus.syntax import SYNTAX
+
+    for name in SYNTAX:
+        assert name in catalog.COMMANDS, f"{name}: sin entrada en el catálogo"
+
+
+def test_syntax_variants_build_valid_commands():
+    """Cada variante, rellenada con valores de ejemplo, debe ser aceptada por
+    el builder real (nunca ofrecer en la UI algo que el backend rechazaría)."""
+    from noc.application.nexus import builder
+    from noc.application.nexus.syntax import SYNTAX, ArgKind
+
+    def sample(arg):
+        if arg.kind is ArgKind.CHOICE:
+            return arg.choices[0]
+        if arg.kind is ArgKind.NODE:
+            return "!e2cb7890"
+        if arg.kind is ArgKind.NUMBER:
+            return str(arg.min if arg.min is not None else 1)
+        if arg.kind is ArgKind.ONOFF:
+            return arg.on_value
+        if arg.kind is ArgKind.HEX:
+            return "0xC3"
+        return "x"
+
+    for name, variants in SYNTAX.items():
+        assert variants, name
+        for v in variants:
+            args = [*v.tokens, *(sample(a) for a in v.args)]
+            builder.build_command(name, args)  # no debe lanzar
+
+
+def test_paging_trailer_is_not_the_response_even_between_pages() -> None:
+    """Captura real (FAVS): el aviso «Paging…» puede llegar DESPUÉS de las
+    páginas o ENTRE P1 y P2. En ningún caso es la respuesta: lo es la lista
+    reensamblada, que se cierra por silencio."""
+    for order in ((0, 1, 2), (0, 2, 1)):  # aviso al final / en medio
+        asm = ResponseAssembler()
+        items = [
+            ("P1: JT Favorites:\n!c9df912c:AB86 !7c5ac2c4:EA", 0.0),
+            ("P2: L1 !0c871e4e:MIKJ", 2.5),
+            ("🟢 JT: Paging favorites to mesh...", 4.8 if order[1] == 2 else 1.0),
+        ]
+        for i in order:
+            assert asm.feed(msg(items[i][0], items[i][1])) == []
+        [resp] = asm.flush_expired(at(60))
+        assert resp.text == "JT Favorites:\n!c9df912c:AB86 !7c5ac2c4:EAL1 !0c871e4e:MIKJ"
+        assert resp.pages == (1, 2)
+        assert asm.flush_expired(at(120)) == []  # el aviso no sale como respuesta aparte
+
+
+def test_paging_trailer_without_pages_is_delivered_after_quiet() -> None:
+    asm = ResponseAssembler()
+    assert asm.feed(msg("🟢 JT: Paging help categories...", 0)) == []
+    assert asm.flush_expired(at(5)) == []
+    [resp] = asm.flush_expired(at(9))
+    assert resp.text.endswith("Paging help categories...")
+
+
+def test_toggles_send_words_not_bits():
+    """Campo (T1000-E fw 2.8.005): SECURITY y TA solo aceptan on/off; con 1/0
+    ignoran el cambio. Los interruptores del asistente envían palabras."""
+    from noc.application.nexus import builder
+    from noc.application.nexus.syntax import SYNTAX, ArgKind
+
+    for name, variants in SYNTAX.items():
+        for v in variants:
+            for a in v.args:
+                if a.kind is ArgKind.ONOFF:
+                    assert (a.on_value, a.off_value) == ("ON", "OFF"), f"{name}/{v.label}"
+    cmd = builder.build_command("SECURITY", ["ALLOW_DM", "ON"])
+    assert cmd.text.endswith("SECURITY ALLOW_DM ON")
+    # TX apagado sigue siendo destructivo en cualquiera de sus formas.
+    assert builder.build_command("TX", ["OFF"]).destructive
+    assert builder.build_command("TX", ["0"]).destructive
+    assert not builder.build_command("TX", ["ON"]).destructive

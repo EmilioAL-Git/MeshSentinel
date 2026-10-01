@@ -1370,7 +1370,7 @@ export function Inspector({
             </div>
 
             <Section label="REMOTO (NODEDB DEL NODO)">
-              <RemoteFlags nodeId={nodeId} subjectOptions={subjectOptions} />
+              <RemoteFlags nodeId={nodeId} subjectOptions={subjectOptions} nexusActive={showNexusTab} />
             </Section>
 
             <Section label="PELIGRO">

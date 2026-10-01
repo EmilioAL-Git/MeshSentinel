@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.persistence.nexus_repositories import (
+    SqlNexusFlagRepository,
     SqlNexusOperationRepository,
     SqlNexusOperationResponseRepository,
 )
@@ -38,6 +39,7 @@ from noc.application.envelopes import make_command_envelope
 from noc.application.nexus.addressing import Broadcast, Device, Group, Local, Mac, ShortName, Target
 from noc.application.nexus.builder import NexusCommand, build_command
 from noc.application.nexus.correlation import ResponseCorrelator
+from noc.application.nexus.interpret import OK, interpret
 from noc.application.nexus.pacing import CommandPacer
 from noc.application.nexus.parsers import parse_response
 from noc.application.nexus.reassembly import AssembledResponse, IncomingText, ResponseAssembler
@@ -382,6 +384,7 @@ class NexusOperationService:
             if op is None or op.status != "sent":
                 return  # ya resuelta (vigilante) o desconocida
             parsed = parse_response(op.command_name, response.text, tuple(op.args))
+            await self._apply_known_lists(session, op, response, parsed, now)
             if op.target_kind in FANOUT_TARGET_KINDS:
                 # Una respuesta MÁS de un nodo, no LA respuesta: se archiva
                 # aparte y la operación sigue "sent" (escuchando) hasta que
@@ -418,3 +421,31 @@ class NexusOperationService:
         # reciente" (ver ResponseCorrelator.discard).
         state.correlator.discard(op_id)
         logger.info("nexus.op confirmed id=%s gateway=%s", op_id, gateway_id)
+
+    @staticmethod
+    async def _apply_known_lists(
+        session: AsyncSession, op: NexusOperation, response: AssembledResponse, parsed: Any, now: datetime
+    ) -> None:
+        """Alimenta `nexus_node_flags` con lo que acaba de confirmar el nodo
+        que respondió: FAV/UNFAV/IGNORE/UNIGNORE añaden o quitan UN sujeto;
+        una lectura FAVS/IGNORED (respuesta completa ya reensamblada)
+        sustituye la lista entera. Respuestas sin interpretar no tocan nada."""
+        repo = SqlNexusFlagRepository(session)
+        holder = response.from_node_id
+        list_flag = {"FAVS": "favorite", "IGNORED": "ignored", "NIGN LIST": "nign"}.get(parsed.command)
+        if list_flag and parsed.kind == "structured":
+            entries = [(e["node_id"], e.get("short_name")) for e in parsed.data.get("entries", [])]
+            await repo.replace_all(holder, list_flag, entries, now)
+            return
+        interp = interpret(op.command_name, tuple(op.args), response.text)
+        if (
+            interp is not None
+            and interp.outcome == OK
+            and interp.flag_type
+            and interp.subject_node_id
+            and interp.flag_present is not None
+        ):
+            await repo.set_present(
+                holder, interp.flag_type, interp.subject_node_id, interp.flag_present, now,
+                interp.subject_short_name,
+            )

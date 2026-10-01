@@ -799,10 +799,15 @@ def parse_fav_updated(text: str) -> dict[str, Any]:
 
 PARSERS["FAV"] = parse_fav_updated
 PARSERS["UNFAV"] = parse_fav_updated
-# IGNORE/UNIGNORE NO están registrados aquí a propósito: solo se probó
-# FAV/UNFAV contra hardware real. Podrían compartir el mismo formato
-# "Updated node..." pero asumirlo sin captura sería inventar — quedan sin
-# parser (texto crudo) hasta confirmarlo.
+# IGNORE/UNIGNORE: captura real 2026-10-01 (X1→T1000, fw 2.8.005): mismo
+# "JT: Updated node !<id> (<SN>)" que FAV/UNFAV, y IGNORED refleja el cambio
+# al instante; con un id que el destino no conoce responde "JT: Node
+# '!<id>' not found" (cae a texto crudo, el parser lo rechaza).
+# Las variantes forzadas (FFAV/FUNFAV/FIGNORE/FUNIGNORE) NO se registran: su
+# respuesta ("Updated node"/"Forced node") no garantiza el efecto — FIGNORE
+# confirmó sin ignorar nada. Ver interpret.FORCED_COMMANDS.
+PARSERS["IGNORE"] = parse_fav_updated
+PARSERS["UNIGNORE"] = parse_fav_updated
 
 
 # --- ZH LIST / ADD / DEL (2026-09-28, captura real) ------------------------
@@ -855,3 +860,75 @@ def parse_zh_action(text: str) -> dict[str, Any]:
 
 PARSERS["ZH ADD"] = parse_zh_action
 PARSERS["ZH DEL"] = parse_zh_action
+
+
+# --- NIGN ADD / REM / LIST (2026-10-01, captura real X1→T1000, fw 2.8.005) --
+# Lista de ignorados PERSISTENTE de Nexus (vault, hasta 64 nodos), distinta
+# de IGNORE (solo RAM). Formatos reales:
+#   ADD:  "🟢 JT: !e7ef4fb4 ADDED to ignores"
+#   REM:  "🟢 JT: !e7ef4fb4 REMOVED"
+#   LIST: "JT JT Ignores:\n[0] !e7ef4fb4 (CALP)\n" (cabecera con "JT" doble,
+#         tal cual la emite el firmware) o "JT JT Ignores:\nList empty.\n".
+
+# Además de ADDED/REMOVED (captura 2026-10-01): repetir ADD responde
+# "already ignored" y quitar un id ausente responde "not in list".
+_NIGN_ACTION_RE = re.compile(
+    r"^JT:\s*(![0-9a-fA-F]{8})\s+(ADDED to ignores|REMOVED|already ignored|not in list)\s*$"
+)
+_NIGN_ACTIONS = {"ADDED": "ADDED", "REMOVED": "REMOVED", "already": "ALREADY", "not in": "NOT_IN_LIST"}
+_NIGN_ENTRY_RE = re.compile(r"\[\d+\]\s*(![0-9a-fA-F]{8})(?:\s*\(([^)]*)\))?")
+
+
+def parse_nign_action(text: str) -> dict[str, Any]:
+    marker, body = _strip_marker(text, "JT:")
+    match = _NIGN_ACTION_RE.match(body)
+    if not match:
+        raise ValueError("formato 'NIGN ADD/REM' no reconocido")
+    data: dict[str, Any] = {
+        "node_id": match.group(1).lower(),
+        "action": next(v for k, v in _NIGN_ACTIONS.items() if match.group(2).startswith(k)),
+    }
+    if marker:
+        data["marker"] = marker
+    return data
+
+
+def parse_nign_list(text: str) -> dict[str, Any]:
+    marker, body = _strip_marker(text, "JT JT Ignores:")
+    entries = [
+        {"node_id": node_id.lower(), "short_name": short_name or ""}
+        for node_id, short_name in _NIGN_ENTRY_RE.findall(body)
+    ]
+    data: dict[str, Any] = {"entries": entries}
+    if marker:
+        data["marker"] = marker
+    return data
+
+
+PARSERS["NIGN ADD"] = parse_nign_action
+PARSERS["NIGN REM"] = parse_nign_action
+PARSERS["NIGN LIST"] = parse_nign_list
+
+
+# --- UPTIME (2026-10-01, respuesta real de campo) ---------------------------
+# "🟢 JT UPTIME: 3d 0h 53m 14s" — una sola línea.
+
+_UPTIME_RE = re.compile(
+    r"^(?:(?P<marker>\S+)\s+)?(?:JT|Nexus) UPTIME:\s*"
+    r"(?:(?P<d>\d+)d)?\s*(?:(?P<h>\d+)h)?\s*(?:(?P<m>\d+)m)?\s*(?:(?P<s>\d+)s)?\s*$"
+)
+
+
+def parse_uptime(text: str) -> dict[str, Any]:
+    match = _UPTIME_RE.match(text.strip())
+    if not match or not any(match.group(k) for k in "dhms"):
+        raise ValueError("formato UPTIME no reconocido")
+    d, h, m, sec = (int(match.group(k) or 0) for k in "dhms")
+    value = text.strip().split("UPTIME:", 1)[1].strip()
+    data: dict[str, Any] = {"uptime": value, "seconds": d * 86400 + h * 3600 + m * 60 + sec}
+    if match.group("marker"):
+        data["marker"] = match.group("marker")
+    return data
+
+
+PARSERS["UPTIME"] = parse_uptime

@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   createNexusOperation,
   fetchGateways,
+  fetchNexusKnownFlags,
   fetchNexusOperations,
   fetchNexusSettings,
   previewNexusOperation,
+  type NexusKnownFlagOut,
   type NexusOperationOut,
   type NexusOperationPreviewOut,
   type NexusTargetKind,
@@ -67,6 +69,20 @@ export function NodeNexusPanel({
   const targetValue = addressingMode === "device_id" ? nodeId : shortName;
 
   const [gatewayId, setGatewayId] = useState(defaultGatewayId ?? "");
+  // `defaultGatewayId` llega a menudo DESPUÉS del primer render (enlaces del
+  // nodo aún cargando): `useState` solo lo lee al montar, y el panel se
+  // quedaba sin pasarela con «Leer estado» y «Preparar…» desactivados sin
+  // explicación. Se adopta en cuanto aparece: la pasarela del nodo si está
+  // conectada, la de los ajustes, o la única conectada.
+  useEffect(() => {
+    if (gatewayId) return;
+    const connected = new Set(gateways.map((g) => g.gateway_id));
+    const preferred = [defaultGatewayId, settingsQuery.data?.default_gateway_id].find(
+      (id): id is string => !!id && connected.has(id),
+    );
+    if (preferred) setGatewayId(preferred);
+    else if (gateways.length === 1) setGatewayId(gateways[0]!.gateway_id);
+  }, [gatewayId, gateways, defaultGatewayId, settingsQuery.data]);
   const [command, setCommand] = useState("");
   const [argsInput, setArgsInput] = useState("");
   const [preview, setPreview] = useState<NexusOperationPreviewOut | null>(null);
@@ -131,20 +147,45 @@ export function NodeNexusPanel({
   const needsTypedConfirm = preview?.destructive ?? false;
   const canQueue = preview != null && (!needsTypedConfirm || confirmText.trim() === targetValue);
 
+  // Precarga el formulario Y previsualiza al instante (si hay pasarela): antes
+  // «Preparar activación» solo rellenaba unos campos más abajo y parecía que
+  // «no hacía nada». Sigue sin enviar: falta «Añadir a la cola».
   const prefill = (cmd: string, argsStr: string) => {
     setCommand(cmd);
     setArgsInput(argsStr);
     setPreview(null);
+    if (!gatewayId) {
+      toast("Elige una pasarela en el formulario de abajo para previsualizar", { kind: "error" });
+      return;
+    }
+    previewNexusOperation({
+      ...body,
+      command: cmd.trim().toUpperCase(),
+      args: argsStr.trim() ? argsStr.trim().split(/\s+/) : [],
+    })
+      .then((data) => {
+        setPreview(data);
+        setConfirmText("");
+        toast(`Preparado: ${data.text} — revisa abajo y pulsa «Añadir a la cola»`);
+      })
+      .catch((err) =>
+        toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo construir", { kind: "error" }),
+      );
   };
 
   return (
     <div>
+      {gatewayId === "" && (
+        <div style={{ color: t.warn, fontSize: 11.5, marginBottom: 6 }}>
+          Elige una pasarela (selector «Pasarela…» más abajo) para poder leer y enviar comandos a este nodo.
+        </div>
+      )}
       <NodeNexusSecurity ops={ops} gatewayId={gatewayId} targetKind={targetKind} targetValue={targetValue} onPrefill={prefill} />
       <div style={{ marginTop: 8 }}>
         <NodeNexusProfile ops={ops} gatewayId={gatewayId} targetKind={targetKind} targetValue={targetValue} onPrefill={prefill} />
       </div>
       <div style={{ marginTop: 8 }}>
-        <NodeNexusFavorites ops={ops} gatewayId={gatewayId} targetKind={targetKind} targetValue={targetValue} onPrefill={prefill} />
+        <NodeNexusFavorites nodeId={nodeId} ops={ops} gatewayId={gatewayId} targetKind={targetKind} targetValue={targetValue} onPrefill={prefill} />
       </div>
       <div style={{ marginTop: 8 }}>
         <NodeNexusZeroHop ops={ops} gatewayId={gatewayId} targetKind={targetKind} targetValue={targetValue} onPrefill={prefill} />
@@ -180,7 +221,7 @@ export function NodeNexusPanel({
       </div>
       <NexusCommandHint command={command} />
       <div style={{ marginTop: 6 }}>
-        <NexusCatalogBrowser onSelect={(name) => { setCommand(name); setPreview(null); }} />
+        <NexusCatalogBrowser onSelect={(name, nextArgs) => { setCommand(name); setArgsInput(nextArgs.join(" ")); setPreview(null); }} />
       </div>
 
       {preview && (
@@ -227,6 +268,7 @@ const SECURITY_BIT_LABEL: Record<string, string> = {
   fav_nx: "Auto-favorito (Nexus)",
   fav_tr: "Auto-favorito (confianza)",
   bypass_rp: "Salta protección de repetición",
+  bypass_rp_extra: "Anti-repetición (ocupación)",
 };
 
 /**
@@ -445,8 +487,8 @@ function NodeNexusProfile({
                       onChange={(e) => setDrafts((d) => ({ ...d, [f.setField]: e.target.value }))}
                     >
                       <option value="">…</option>
-                      <option value="1">1 (on)</option>
-                      <option value="0">0 (off)</option>
+                      <option value="on">ON</option>
+                      <option value="off">OFF</option>
                     </select>
                   ) : (
                     <input
@@ -501,12 +543,14 @@ function NodeNexusProfile({
  * mano desde el catálogo completo, sin atajo dedicado hasta confirmarlo.
  */
 function NodeNexusFavorites({
+  nodeId,
   ops,
   gatewayId,
   targetKind,
   targetValue,
   onPrefill,
 }: {
+  nodeId: string;
   ops: NexusOperationOut[];
   gatewayId: string;
   targetKind: NexusTargetKind;
@@ -515,6 +559,19 @@ function NodeNexusFavorites({
 }) {
   const queryClient = useQueryClient();
   const [newFavId, setNewFavId] = useState("");
+  const [newIgnoredId, setNewIgnoredId] = useState("");
+  const [newNignId, setNewNignId] = useState("");
+
+  // Listas CONOCIDAS: lo que este nodo ha confirmado (FAV/UNFAV/IGNORE/
+  // UNIGNORE, también por difusión desde la consola) y sus lecturas
+  // FAVS/IGNORED — el backend las acumula, ya no dependen de la última
+  // lectura de esta pestaña.
+  const knownQuery = useQuery({
+    queryKey: ["nexus-flags", nodeId],
+    queryFn: () => fetchNexusKnownFlags(nodeId),
+    refetchInterval: 5000,
+  });
+  const knownFlags = knownQuery.data ?? [];
 
   const latestFavs = ops.find(
     (op) => op.command_name === "FAVS" && op.status === "confirmed" && op.response_kind === "structured",
@@ -528,10 +585,10 @@ function NodeNexusFavorites({
   );
 
   const readMutation = useMutation({
-    mutationFn: async (command: "FAVS" | "IGNORED") => {
+    mutationFn: async (command: "FAVS" | "IGNORED" | "NIGN") => {
       if (!gatewayId) throw new Error("Elige antes una pasarela en el formulario de abajo");
       return createNexusOperation({
-        gateway_id: gatewayId, command, args: [], target_kind: targetKind, target_value: targetValue,
+        gateway_id: gatewayId, command, args: command === "NIGN" ? ["LIST"] : [], target_kind: targetKind, target_value: targetValue,
       });
     },
     onSuccess: (_data, command) => {
@@ -541,8 +598,16 @@ function NodeNexusFavorites({
     onError: (err) => toast(err instanceof Error ? err.message : "No se pudo leer", { kind: "error" }),
   });
 
-  const favEntries = (latestFavs?.response_data?.["entries"] as { node_id: string; short_name: string }[] | undefined) ?? null;
-  const ignoredEntries = (latestIgnored?.response_data?.["entries"] as { node_id: string; short_name: string }[] | undefined) ?? null;
+  const toEntry = (f: NexusKnownFlagOut) => ({ node_id: f.subject_node_id, label: f.subject_label });
+  const favEntries = latestFavs || knownFlags.some((f) => f.flag_type === "favorite")
+    ? knownFlags.filter((f) => f.flag_type === "favorite").map(toEntry)
+    : null;
+  const nignEntries = knownFlags.some((f) => f.flag_type === "nign")
+    ? knownFlags.filter((f) => f.flag_type === "nign").map(toEntry)
+    : null;
+  const ignoredEntries = latestIgnored || knownFlags.some((f) => f.flag_type === "ignored")
+    ? knownFlags.filter((f) => f.flag_type === "ignored").map(toEntry)
+    : null;
 
   return (
     <div style={{ padding: "0.5rem 0.6rem", background: t.surface2, border: `1px solid ${t.borderSubtle}`, borderRadius: 6 }}>
@@ -564,6 +629,14 @@ function NodeNexusFavorites({
         >
           {pendingIgnored ? "Leyendo…" : "Leer ignorados"}
         </button>
+        <button
+          style={btn}
+          title="NIGN LIST: lista de ignorados persistente (vault), sobrevive a reinicios"
+          disabled={readMutation.isPending || !gatewayId}
+          onClick={() => readMutation.mutate("NIGN")}
+        >
+          Leer NIGN
+        </button>
       </div>
 
       {favEntries && (
@@ -572,7 +645,7 @@ function NodeNexusFavorites({
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 3, maxHeight: 140, overflowY: "auto" }}>
             {favEntries.map((e) => (
               <div key={e.node_id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5 }}>
-                <span className="mono" style={{ flex: 1 }}>{e.node_id} <span style={{ color: t.textFaint }}>{e.short_name}</span></span>
+                <span className="mono" style={{ flex: 1 }}>{e.label}</span>
                 <button style={btn} onClick={() => onPrefill("UNFAV", e.node_id)}>Quitar</button>
               </div>
             ))}
@@ -593,16 +666,54 @@ function NodeNexusFavorites({
 
       {ignoredEntries && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ color: t.textFaint, fontSize: 10.5 }}>
-            IGNORADOS ({ignoredEntries.length}) — solo lectura, sin atajo (ver catálogo: IGNORE/UNIGNORE)
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 3, maxHeight: 100, overflowY: "auto" }}>
+          <div style={{ color: t.textFaint, fontSize: 10.5 }}>IGNORADOS ({ignoredEntries.length})</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 3, maxHeight: 140, overflowY: "auto" }}>
             {ignoredEntries.length === 0 && <div style={{ color: t.textFaint, fontSize: 11.5 }}>Ninguno.</div>}
             {ignoredEntries.map((e) => (
-              <span key={e.node_id} className="mono" style={{ fontSize: 11.5 }}>
-                {e.node_id} <span style={{ color: t.textFaint }}>{e.short_name}</span>
-              </span>
+              <div key={e.node_id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5 }}>
+                <span className="mono" style={{ flex: 1 }}>{e.label}</span>
+                <button style={btn} onClick={() => onPrefill("UNIGNORE", e.node_id)}>Quitar</button>
+              </div>
             ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <input
+              style={{ ...input, width: 110, fontFamily: t.fontMono }}
+              placeholder="!id"
+              value={newIgnoredId}
+              onChange={(e) => setNewIgnoredId(e.target.value)}
+            />
+            <button style={btn} disabled={!newIgnoredId.trim()} onClick={() => onPrefill("IGNORE", newIgnoredId.trim())}>
+              Añadir
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(nignEntries || newNignId) && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ color: t.textFaint, fontSize: 10.5 }}>
+            IGNORADOS PERSISTENTES — NIGN ({nignEntries?.length ?? 0}) · sobreviven a reinicios, hasta 64
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 3, maxHeight: 140, overflowY: "auto" }}>
+            {(nignEntries ?? []).length === 0 && <div style={{ color: t.textFaint, fontSize: 11.5 }}>Ninguno.</div>}
+            {(nignEntries ?? []).map((e) => (
+              <div key={e.node_id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5 }}>
+                <span className="mono" style={{ flex: 1 }}>{e.label}</span>
+                <button style={btn} onClick={() => onPrefill("NIGN", `REM ${e.node_id}`)}>Quitar</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <input
+              style={{ ...input, width: 110, fontFamily: t.fontMono }}
+              placeholder="!id"
+              value={newNignId}
+              onChange={(e) => setNewNignId(e.target.value)}
+            />
+            <button style={btn} disabled={!newNignId.trim()} onClick={() => onPrefill("NIGN", `ADD ${newNignId.trim()}`)}>
+              Añadir
+            </button>
           </div>
         </div>
       )}

@@ -265,7 +265,8 @@ _SPECS: tuple[CommandSpec, ...] = (
     # §3.15/§5/§14 Críticos
     _m("REBOOT", CR, persistence=Persistence.NONE, busy=20, destructive=True),
     # TX OFF silencia el transmisor: destructivo. TX ON no.
-    _m("TX", CR, persistence=Persistence.NONE, destructive_arg_equals=frozenset({"OFF"})),
+    # "0" por si el firmware acepta 1/0 también aquí: nunca dejar sin marcar un TX apagado.
+    _m("TX", CR, persistence=Persistence.NONE, destructive_arg_equals=frozenset({"OFF", "0"})),
 )  # fmt: skip
 
 # Confirmados ausentes de la build pública (ver docstring del módulo) o

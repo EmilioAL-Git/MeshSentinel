@@ -1,10 +1,14 @@
 from dataclasses import fields
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from noc.adapters.persistence.models import NexusOperationModel, NexusOperationResponseModel
+from noc.adapters.persistence.models import (
+    NexusNodeFlagModel,
+    NexusOperationModel,
+    NexusOperationResponseModel,
+)
 from noc.domain.nexus.entities import NexusOperation, NexusOperationResponse
 
 
@@ -158,3 +162,75 @@ class SqlNexusOperationResponseRepository:
             select(func.count()).where(NexusOperationResponseModel.operation_id == operation_id)
         )
         return int(result or 0)
+
+
+class SqlNexusFlagRepository:
+    """Favoritos/ignorados conocidos por nodo Nexus (`nexus_node_flags`)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def set_present(
+        self,
+        node_id: str,
+        flag_type: str,
+        subject_node_id: str,
+        present: bool,
+        now: datetime,
+        short_name: str | None = None,
+    ) -> None:
+        row = await self._session.scalar(
+            select(NexusNodeFlagModel).where(
+                NexusNodeFlagModel.node_id == node_id,
+                NexusNodeFlagModel.flag_type == flag_type,
+                NexusNodeFlagModel.subject_node_id == subject_node_id,
+            )
+        )
+        if not present:
+            if row is not None:
+                await self._session.delete(row)
+                await self._session.flush()
+            return
+        if row is None:
+            self._session.add(
+                NexusNodeFlagModel(
+                    node_id=node_id, flag_type=flag_type, subject_node_id=subject_node_id,
+                    subject_short_name=short_name, source="confirmation", updated_at=now,
+                )
+            )
+        else:
+            row.updated_at = now
+            row.source = "confirmation"
+            if short_name:
+                row.subject_short_name = short_name
+        await self._session.flush()
+
+    async def replace_all(
+        self, node_id: str, flag_type: str, entries: list[tuple[str, str | None]], now: datetime
+    ) -> None:
+        """Una lectura FAVS/IGNORED es autoritativa: sustituye la lista."""
+        await self._session.execute(
+            delete(NexusNodeFlagModel).where(
+                NexusNodeFlagModel.node_id == node_id, NexusNodeFlagModel.flag_type == flag_type
+            )
+        )
+        seen: set[str] = set()
+        for subject, short_name in entries:
+            if subject in seen:
+                continue
+            seen.add(subject)
+            self._session.add(
+                NexusNodeFlagModel(
+                    node_id=node_id, flag_type=flag_type, subject_node_id=subject,
+                    subject_short_name=short_name or None, source="read", updated_at=now,
+                )
+            )
+        await self._session.flush()
+
+    async def list_for_node(self, node_id: str) -> list[NexusNodeFlagModel]:
+        rows = await self._session.scalars(
+            select(NexusNodeFlagModel)
+            .where(NexusNodeFlagModel.node_id == node_id)
+            .order_by(NexusNodeFlagModel.flag_type, NexusNodeFlagModel.subject_node_id)
+        )
+        return list(rows)

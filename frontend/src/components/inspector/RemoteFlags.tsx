@@ -12,6 +12,8 @@ import {
 import { chipStyle, t } from "../../tokens";
 import { NodeSelect } from "../NodeSelect";
 import { toast } from "../shell/Toast";
+import { fetchNexusKnownFlags } from "../../api/client";
+import { relativeTime } from "../../time";
 
 /**
  * Favoritos/ignorados remotos (M4.2, ADR 0020) dentro del Inspector.
@@ -157,9 +159,52 @@ function RemoteFlagList({
   );
 }
 
-export function RemoteFlags({ nodeId, subjectOptions }: { nodeId: string; subjectOptions: NodeSummaryOut[] }) {
+/** Lo que el nodo REPORTA de verdad (lectura FAVS/IGNORED por Nexus). A
+ * diferencia de la lista de abajo (lo que pedimos por administración nativa,
+ * que no se puede releer), esta es la lista real del firmware. */
+function NexusReadBlock({ nodeId, flagType, label }: { nodeId: string; flagType: "favorite" | "ignored"; label: string }) {
+  const flags = useQuery({
+    queryKey: ["nexus-known-flags", nodeId],
+    queryFn: () => fetchNexusKnownFlags(nodeId),
+    refetchInterval: 10_000,
+  });
+  const rows = (flags.data ?? []).filter((f) => f.flag_type === flagType);
+  const lastRead = rows.filter((f) => f.source === "read").map((f) => f.updated_at).filter(Boolean).sort().pop();
+  return (
+    <div style={{ marginBottom: "0.5rem" }}>
+      <div style={{ color: t.textDim, fontSize: 11.5, fontWeight: 600, marginBottom: 2 }}>
+        {label} <span style={{ color: t.textFaint, fontWeight: 400 }}>
+          — leídos del nodo (Nexus){lastRead ? ` · ${relativeTime(lastRead)}` : ""}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ color: t.textFaint, fontSize: 12 }}>
+          Sin lecturas todavía: pulsa «{flagType === "favorite" ? "Favoritos" : "Ignorados"}» en Operaciones Nexus.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {rows.map((f) => (
+            <span key={f.subject_node_id} style={{ ...chipStyle(t.ok), fontSize: 11 }} title={f.subject_node_id}>
+              {f.subject_label}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function RemoteFlags({
+  nodeId, subjectOptions, nexusActive = false,
+}: { nodeId: string; subjectOptions: NodeSummaryOut[]; nexusActive?: boolean }) {
   return (
     <>
+      {nexusActive && (
+        <>
+          <NexusReadBlock nodeId={nodeId} flagType="favorite" label="Favoritos" />
+          <NexusReadBlock nodeId={nodeId} flagType="ignored" label="Ignorados" />
+        </>
+      )}
       <p style={{ color: t.textFaint, fontSize: 11.5, margin: "0 0 0.6rem" }}>
         Administra la NodeDB del firmware de este nodo (qué otros nodos ve como favoritos o
         ignorados en su pantalla). Sin relación con el ★/ojo locales del NOC.

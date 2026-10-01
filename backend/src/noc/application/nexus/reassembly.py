@@ -26,6 +26,15 @@ from datetime import datetime, timedelta
 from noc.application.nexus.addressing import is_command_text
 
 PAGE_HEADER = re.compile(r"^P(\d+):\s?(.*)$", re.DOTALL)
+# Aviso del firmware que acompaña a una respuesta paginada («JT: Paging
+# favorites to mesh...», con el marcador 🟢/🔴 delante). NO es contenido ni
+# una marca de fin fiable: en capturas reales llegó después de las páginas
+# (FAVS/IGNORED/SENSORS) pero también ENTRE `P1` y `P2` (2026-10-01, FAVS).
+# Por eso solo se descarta: nunca resuelve una operación por sí mismo ni
+# cierra el buffer; el fin sigue siendo el silencio de `quiet`. Si no llega
+# ninguna página, tras `quiet` se entrega como mensaje normal (p. ej. HELP).
+MARKER = re.compile(r"^[\U0001F7E2\U0001F534]\s*")
+PAGING_TRAILER = re.compile(r"^(?:[\U0001F7E2\U0001F534]\s*)?JT:\s*Paging\b", re.I)
 DEFAULT_QUIET = timedelta(seconds=8)
 # Captura real (2026-09-28, nodos X1→T1000): la doble copia (móvil local +
 # malla) de una respuesta idéntica llegó con 5.36 s de diferencia — por
@@ -86,6 +95,8 @@ class ResponseAssembler:
     dedupe_window: timedelta = DEFAULT_DEDUPE_WINDOW
     _buffers: dict[str, _Buffer] = field(default_factory=dict)
     _seen: dict[tuple[str, int | str], datetime] = field(default_factory=dict)
+    # Avisos «Paging…» sin páginas todavía, por nodo: (mensaje, instante).
+    _orphan_trailers: dict[str, IncomingText] = field(default_factory=dict)
 
     def _is_duplicate(self, msg: IncomingText) -> bool:
         horizon = msg.received_at - self.dedupe_window
@@ -103,6 +114,16 @@ class ResponseAssembler:
         if is_command_text(msg.text) or self._is_duplicate(msg):
             return []
 
+        if PAGING_TRAILER.match(msg.text):
+            # Con páginas ya abiertas se descarta (el contenido real está en
+            # ellas); sin ellas se retiene por si las páginas llegan después.
+            buffer = self._buffers.get(msg.from_node_id)
+            if buffer is not None:
+                buffer.last_at = msg.received_at
+            else:
+                self._orphan_trailers[msg.from_node_id] = msg
+            return []
+
         match = PAGE_HEADER.match(msg.text)
         if match is None:
             return [
@@ -110,6 +131,7 @@ class ResponseAssembler:
             ]
 
         number, body = int(match.group(1)), match.group(2)
+        self._orphan_trailers.pop(msg.from_node_id, None)  # las páginas llegaron
         done: list[AssembledResponse] = []
         buffer = self._buffers.get(msg.from_node_id)
         # Cierra la anterior si la página ya estaba (una respuesta nueva vuelve
@@ -129,4 +151,9 @@ class ResponseAssembler:
     def flush_expired(self, now: datetime) -> list[AssembledResponse]:
         """Cierra las respuestas paginadas sin páginas nuevas desde hace `quiet`."""
         expired = [n for n, b in self._buffers.items() if now - b.last_at >= self.quiet]
-        return [self._buffers.pop(n).assemble(n) for n in expired]
+        out = [self._buffers.pop(n).assemble(n) for n in expired]
+        for node, trailer in list(self._orphan_trailers.items()):
+            if now - trailer.received_at >= self.quiet:
+                del self._orphan_trailers[node]
+                out.append(AssembledResponse(node, trailer.text, trailer.received_at, trailer.received_at))
+        return out

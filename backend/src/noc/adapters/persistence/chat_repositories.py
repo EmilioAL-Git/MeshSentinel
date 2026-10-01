@@ -79,6 +79,33 @@ class SqlChatRepository:
         rows = await self._session.scalars(stmt)
         return [_to_entity(r) for r in rows]
 
+    async def list_for_channels(
+        self, pairs: list[tuple[str, int]], limit: int, before_id: int | None = None
+    ) -> list[ChatMessage]:
+        """Difusiones de los pares (gateway_id, channel_index) dados — base
+        de la consola Nexus (el canal Nexus lo conoce cada pasarela por
+        nombre). Más recientes primero."""
+        if not pairs:
+            return []
+        stmt = (
+            select(ChatMessageModel)
+            .where(
+                ChatMessageModel.to_node_id.is_(None),
+                or_(
+                    *[
+                        (ChatMessageModel.gateway_id == gw) & (ChatMessageModel.channel_index == idx)
+                        for gw, idx in pairs
+                    ]
+                ),
+            )
+            .order_by(ChatMessageModel.id.desc())
+            .limit(limit)
+        )
+        if before_id is not None:
+            stmt = stmt.where(ChatMessageModel.id < before_id)
+        rows = await self._session.scalars(stmt)
+        return [_to_entity(r) for r in rows]
+
     async def list_channels(self) -> list[dict[str, Any]]:
         """Canales conocidos (broadcast) por los que ha circulado tráfico:
         base del selector "Todos / Canal 0 / Canal 1 / ...". Los DM no son
