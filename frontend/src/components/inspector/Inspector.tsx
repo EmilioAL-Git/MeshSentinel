@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useAuth } from "../../context/AuthContext";
+import { LockedNotice } from "../shell/LockedNotice";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { useUrlString } from "../../hooks/useUrlState";
 import {
@@ -83,6 +85,7 @@ const TABS = [
   "general",
 ] as const;
 type TabId = (typeof TABS)[number];
+const LOCKED_TABS: ReadonlySet<TabId> = new Set<TabId>(["operations", "nexus", "general"]);
 const TAB_LABEL: Record<TabId, string> = {
   resumen: "Resumen",
   log: "Actividad",
@@ -445,7 +448,11 @@ export function Inspector({
   // fantasma.
   const showNexusTab = nexusModeOn && (n?.is_nexus ?? false);
   const visibleTabs = showNexusTab ? TABS : TABS.filter((id) => id !== "nexus");
+  // Pestañas que escriben (organización, operaciones, Nexus): visibles pero
+  // bloqueadas sin sesión — el backend las rechaza igualmente con 401.
+  const { canOperate } = useAuth();
   const effectiveTab: TabId = (visibleTabs as readonly TabId[]).includes(tab) ? tab : "resumen";
+  const locked = !canOperate && LOCKED_TABS.has(effectiveTab);
   const lastTel = telemetry.data?.[0];
   const deviceLatest = deviceHistory.data?.[0];
   const envLatest = envHistory.data?.[0];
@@ -664,7 +671,7 @@ export function Inspector({
                   whiteSpace: "nowrap",
                 }}
               >
-                {TAB_LABEL[id]}
+                {!canOperate && LOCKED_TABS.has(id) ? "🔒 " : ""}{TAB_LABEL[id]}
                 {id === "operations" && badge(pendingOps.length)}
                 {id === "alerts" && badge(nodeActiveAlerts.length, nodeActiveAlerts.some((a) => a.severity === "CRITICAL") ? t.crit : t.warn)}
                 {id === "gateways" && badge(activeLinks.length, t.textDim)}
@@ -675,6 +682,8 @@ export function Inspector({
           {/* Cuerpo: contenido de la pestaña activa */}
           <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem" }}>
             {node.isError && <p style={{ color: t.crit }}>Error cargando {nodeId}</p>}
+
+        {locked && <LockedNotice what={`La pestaña «${TAB_LABEL[effectiveTab]}»`} />}
 
         {effectiveTab === "resumen" && (
           <>
@@ -1011,7 +1020,7 @@ export function Inspector({
           </>
         )}
 
-        {effectiveTab === "operations" && (
+        {effectiveTab === "operations" && !locked && (
           <>
             {nodeOps.length === 0 && <div className="empty">Sin operaciones recientes.</div>}
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1063,7 +1072,7 @@ export function Inspector({
           </>
         )}
 
-        {effectiveTab === "nexus" && n?.short_name && (
+        {effectiveTab === "nexus" && !locked && n?.short_name && (
           <NodeNexusPanel nodeId={nodeId} shortName={n.short_name} defaultGatewayId={primaryGatewayId} />
         )}
 
@@ -1219,7 +1228,7 @@ export function Inspector({
           </>
         )}
 
-        {effectiveTab === "general" && (
+        {effectiveTab === "general" && !locked && (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0 1rem" }}>
               <div>

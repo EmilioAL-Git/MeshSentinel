@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import SessionDep
+from noc.adapters.api.deps import RequireAuthDep, SessionDep
 from noc.adapters.api.schemas import PreferredGatewayIn, TagOut
 from noc.adapters.persistence.organization_repositories import SqlGroupRepository, SqlTagRepository
 from noc.adapters.persistence.repositories import SqlNodeRepository
@@ -67,7 +67,7 @@ async def list_tags(session: SessionDep) -> list[TagOut]:
 
 
 @router.post("/tags", response_model=TagOut, status_code=201)
-async def create_tag(body: TagIn, session: SessionDep) -> TagOut:
+async def create_tag(body: TagIn, session: SessionDep, _user: RequireAuthDep) -> TagOut:
     repo = SqlTagRepository(session)
     if await repo.get_by_name(body.name) is not None:
         raise HTTPException(status_code=409, detail="Tag already exists")
@@ -77,7 +77,7 @@ async def create_tag(body: TagIn, session: SessionDep) -> TagOut:
 
 
 @router.delete("/tags/{tag_id}", status_code=204)
-async def delete_tag(tag_id: int, session: SessionDep) -> None:
+async def delete_tag(tag_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
     deleted = await SqlTagRepository(session).delete(tag_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Tag not found")
@@ -93,7 +93,7 @@ async def list_groups(session: SessionDep) -> list[GroupOut]:
 
 
 @router.post("/groups", response_model=GroupOut, status_code=201)
-async def create_group(body: GroupIn, session: SessionDep) -> GroupOut:
+async def create_group(body: GroupIn, session: SessionDep, _user: RequireAuthDep) -> GroupOut:
     group = await SqlGroupRepository(session).create(Group(name=body.name, is_critical=body.is_critical))
     await session.commit()
     return GroupOut.from_entity(group)
@@ -111,7 +111,7 @@ async def get_group(group_id: int, session: SessionDep) -> GroupDetailOut:
 
 @router.put("/groups/{group_id}/preferred-gateway", response_model=GroupOut)
 async def set_group_preferred_gateway(
-    group_id: int, body: PreferredGatewayIn, session: SessionDep
+    group_id: int, body: PreferredGatewayIn, session: SessionDep, _user: RequireAuthDep
 ) -> GroupOut:
     """Nivel 3 de la selección inteligente de gateway (editor de grupo)."""
     group = await SqlGroupRepository(session).set_preferred_gateway(group_id, body.gateway_id)
@@ -122,7 +122,7 @@ async def set_group_preferred_gateway(
 
 
 @router.delete("/groups/{group_id}", status_code=204)
-async def delete_group(group_id: int, session: SessionDep) -> None:
+async def delete_group(group_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
     deleted = await SqlGroupRepository(session).delete(group_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -135,7 +135,9 @@ async def delete_group(group_id: int, session: SessionDep) -> None:
 # .../members/bulk encaja primero con el DELETE .../members/{node_id}
 # (node_id="bulk") y responde 405 en vez de llegar a esta ruta.
 @router.post("/groups/{group_id}/members/bulk", response_model=BulkMembersOut)
-async def add_group_members_bulk(group_id: int, body: BulkMembersIn, session: SessionDep) -> BulkMembersOut:
+async def add_group_members_bulk(
+    group_id: int, body: BulkMembersIn, session: SessionDep, _user: RequireAuthDep
+) -> BulkMembersOut:
     repo = SqlGroupRepository(session)
     if await repo.get(group_id) is None:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -145,7 +147,9 @@ async def add_group_members_bulk(group_id: int, body: BulkMembersIn, session: Se
 
 
 @router.post("/groups/{group_id}/members/bulk-remove", response_model=BulkRemoveOut)
-async def remove_group_members_bulk(group_id: int, body: BulkMembersIn, session: SessionDep) -> BulkRemoveOut:
+async def remove_group_members_bulk(
+    group_id: int, body: BulkMembersIn, session: SessionDep, _user: RequireAuthDep
+) -> BulkRemoveOut:
     repo = SqlGroupRepository(session)
     if await repo.get(group_id) is None:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -155,7 +159,7 @@ async def remove_group_members_bulk(group_id: int, body: BulkMembersIn, session:
 
 
 @router.post("/groups/{group_id}/members", status_code=204)
-async def add_group_member(group_id: int, body: MemberIn, session: SessionDep) -> None:
+async def add_group_member(group_id: int, body: MemberIn, session: SessionDep, _user: RequireAuthDep) -> None:
     repo = SqlGroupRepository(session)
     if await repo.get(group_id) is None:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -166,7 +170,7 @@ async def add_group_member(group_id: int, body: MemberIn, session: SessionDep) -
 
 
 @router.delete("/groups/{group_id}/members/{node_id}", status_code=204)
-async def remove_group_member(group_id: int, node_id: str, session: SessionDep) -> None:
+async def remove_group_member(group_id: int, node_id: str, session: SessionDep, _user: RequireAuthDep) -> None:
     removed = await SqlGroupRepository(session).remove_member(group_id, node_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Membership not found")

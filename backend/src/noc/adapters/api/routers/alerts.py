@@ -4,7 +4,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, model_validator
 
-from noc.adapters.api.deps import RequireAuthDep, SessionDep
+from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SecretsVisibleDep, SessionDep
 from noc.application.alerting.evaluators import GROUP_SCOPE_UNSUPPORTED
 from noc.adapters.notifications import PROVIDERS, build_provider
 from noc.adapters.persistence.alert_repositories import (
@@ -207,8 +207,8 @@ async def acknowledge_alert(alert_id: int, session: SessionDep, body: AckIn | No
 
 
 @router.post("/alerts/{alert_id}/resolve", response_model=AlertOut)
-async def resolve_alert(alert_id: int, session: SessionDep) -> AlertOut:
-    """Cierre manual (triaje, no configuración — igual que /ack): vía de
+async def resolve_alert(alert_id: int, session: SessionDep, _user: RequireAuthDep) -> AlertOut:
+    """Cierre manual (exige sesión: puede ocultar un problema real; /ack sí queda abierto, es triaje): vía de
     escape para alertas huérfanas (regla desactivada/borrada/reajustada tras
     el disparo) que de otro modo no tienen forma de dejar de estar activas.
     Si la condición sigue siendo cierta y la regla sigue habilitada, el
@@ -271,14 +271,28 @@ async def delete_rule(rule_id: int, request: Request, session: SessionDep, _user
 # ── Integraciones (instancias de proveedor) ─────────────────────────────────
 
 
+_SECRET_KEYS = {"bot_token", "token", "headers"}
+
+
+def _mask_secrets(provider: str, configuration: dict[str, Any]) -> dict[str, Any]:
+    """Sin sesión: tokens y cabeceras ocultos; la URL también en webhook
+    (suele llevar el secreto en el propio enlace)."""
+    secret = _SECRET_KEYS | ({"url"} if provider == "webhook" else set())
+    return {k: ("••••" if k in secret else v) for k, v in configuration.items()}
+
+
 @router.get("/notification-providers", response_model=list[ProviderOut])
-async def list_providers(session: SessionDep) -> list[ProviderOut]:
+async def list_providers(session: SessionDep, reveal: SecretsVisibleDep) -> list[ProviderOut]:
     providers = await SqlNotificationProviderRepository(session).list_all()
-    return [ProviderOut.from_entity(p) for p in providers]
+    out = [ProviderOut.from_entity(p) for p in providers]
+    if not reveal:
+        for p in out:
+            p.configuration = _mask_secrets(p.provider, p.configuration)
+    return out
 
 
 @router.post("/notification-providers", response_model=ProviderOut, status_code=201)
-async def create_provider(body: ProviderIn, session: SessionDep, _user: RequireAuthDep) -> ProviderOut:
+async def create_provider(body: ProviderIn, session: SessionDep, _admin: RequireAdminDep) -> ProviderOut:
     if body.provider not in PROVIDERS:
         raise HTTPException(status_code=422, detail=f"Unknown provider: {body.provider}")
     errors = build_provider(NotificationProviderConfig(**body.model_dump())).validate()
@@ -293,7 +307,7 @@ async def create_provider(body: ProviderIn, session: SessionDep, _user: RequireA
 
 @router.patch("/notification-providers/{provider_id}", response_model=ProviderOut)
 async def update_provider(
-    provider_id: int, body: ProviderPatch, session: SessionDep, _user: RequireAuthDep
+    provider_id: int, body: ProviderPatch, session: SessionDep, _admin: RequireAdminDep
 ) -> ProviderOut:
     # El SELECT previo (validar configuration) ya abre la transacción implícita
     # de la sesión, por lo que aquí NO puede usarse session.begin(): se cierra
@@ -317,7 +331,7 @@ async def update_provider(
 
 
 @router.delete("/notification-providers/{provider_id}", status_code=204)
-async def delete_provider(provider_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
+async def delete_provider(provider_id: int, session: SessionDep, _admin: RequireAdminDep) -> None:
     async with session.begin():
         deleted = await SqlNotificationProviderRepository(session).delete(provider_id)
     if not deleted:
@@ -325,7 +339,7 @@ async def delete_provider(provider_id: int, session: SessionDep, _user: RequireA
 
 
 @router.post("/notification-providers/{provider_id}/test")
-async def test_provider(provider_id: int, session: SessionDep, _user: RequireAuthDep) -> dict[str, str]:
+async def test_provider(provider_id: int, session: SessionDep, _admin: RequireAdminDep) -> dict[str, str]:
     config = await SqlNotificationProviderRepository(session).get(provider_id)
     if config is None:
         raise HTTPException(status_code=404, detail="Provider not found")
@@ -349,7 +363,7 @@ def _unique_copy_name(taken: set[str], base: str) -> str:
 
 
 @router.post("/notification-providers/{provider_id}/duplicate", response_model=ProviderOut, status_code=201)
-async def duplicate_provider(provider_id: int, session: SessionDep, _user: RequireAuthDep) -> ProviderOut:
+async def duplicate_provider(provider_id: int, session: SessionDep, _admin: RequireAdminDep) -> ProviderOut:
     async with session.begin():
         repo = SqlNotificationProviderRepository(session)
         source = await repo.get(provider_id)
@@ -377,7 +391,7 @@ async def list_channels(session: SessionDep) -> list[ChannelOut]:
 
 
 @router.post("/notification-channels", response_model=ChannelOut, status_code=201)
-async def create_channel(body: ChannelIn, session: SessionDep, _user: RequireAuthDep) -> ChannelOut:
+async def create_channel(body: ChannelIn, session: SessionDep, _admin: RequireAdminDep) -> ChannelOut:
     async with session.begin():
         channel = await SqlNotificationChannelRepository(session).create(NotificationChannel(**body.model_dump()))
     return ChannelOut.from_entity(channel)
@@ -385,7 +399,7 @@ async def create_channel(body: ChannelIn, session: SessionDep, _user: RequireAut
 
 @router.patch("/notification-channels/{channel_id}", response_model=ChannelOut)
 async def update_channel(
-    channel_id: int, body: ChannelPatch, session: SessionDep, _user: RequireAuthDep
+    channel_id: int, body: ChannelPatch, session: SessionDep, _admin: RequireAdminDep
 ) -> ChannelOut:
     async with session.begin():
         channel = await SqlNotificationChannelRepository(session).update(
@@ -397,7 +411,7 @@ async def update_channel(
 
 
 @router.delete("/notification-channels/{channel_id}", status_code=204)
-async def delete_channel(channel_id: int, session: SessionDep, _user: RequireAuthDep) -> None:
+async def delete_channel(channel_id: int, session: SessionDep, _admin: RequireAdminDep) -> None:
     async with session.begin():
         deleted = await SqlNotificationChannelRepository(session).delete(channel_id)
     if not deleted:

@@ -135,7 +135,7 @@ class NodeBulkDeleteOut(BaseModel):
 
 @router.delete("/bulk", response_model=NodeBulkDeleteOut)
 async def delete_nodes_bulk(
-    body: NodeBulkDeleteIn, session: SessionDep, current_user: RequireAuthDep
+    body: NodeBulkDeleteIn, session: SessionDep, current_user: RequireAdminDep
 ) -> NodeBulkDeleteOut:
     """Borrado real de varios nodos a la vez (selección de Flota) — distinto
     de `DELETE /nodes` (borrado TOTAL de la NodeDB, solo admin)."""
@@ -145,7 +145,7 @@ async def delete_nodes_bulk(
 
 
 @router.delete("/{node_id}", status_code=204)
-async def delete_node(node_id: str, session: SessionDep, current_user: RequireAuthDep) -> None:
+async def delete_node(node_id: str, session: SessionDep, current_user: RequireAdminDep) -> None:
     """Borrado real e irreversible de un nodo: fila + su historial propio
     (posiciones/telemetría/vecinos/tags/grupos/enlaces con pasarela/chat
     enviado). Distinto de `is_ignored` (M1.2), que solo lo oculta sin
@@ -157,7 +157,7 @@ async def delete_node(node_id: str, session: SessionDep, current_user: RequireAu
 
 
 @router.put("/{node_id}/favorite", response_model=NodeOut)
-async def set_favorite(node_id: str, body: FlagIn, session: SessionDep) -> NodeOut:
+async def set_favorite(node_id: str, body: FlagIn, session: SessionDep, _user: RequireAuthDep) -> NodeOut:
     node = await SqlNodeRepository(session).set_flag(node_id, "is_favorite", body.value)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
@@ -166,7 +166,7 @@ async def set_favorite(node_id: str, body: FlagIn, session: SessionDep) -> NodeO
 
 
 @router.put("/{node_id}/ignored", response_model=NodeOut)
-async def set_ignored(node_id: str, body: FlagIn, session: SessionDep) -> NodeOut:
+async def set_ignored(node_id: str, body: FlagIn, session: SessionDep, _user: RequireAuthDep) -> NodeOut:
     node = await SqlNodeRepository(session).set_flag(node_id, "is_ignored", body.value)
     if node is None:
         raise HTTPException(status_code=404, detail="Node not found")
@@ -190,7 +190,7 @@ async def set_nexus(
 
 @router.put("/{node_id}/preferred-gateway", response_model=NodeOut)
 async def set_node_preferred_gateway(
-    node_id: str, body: PreferredGatewayIn, session: SessionDep
+    node_id: str, body: PreferredGatewayIn, session: SessionDep, _user: RequireAuthDep
 ) -> NodeOut:
     """Nivel 2 de la selección inteligente de gateway (Inspector, sección Organización)."""
     node = await SqlNodeRepository(session).set_preferred_gateway(node_id, body.gateway_id)
@@ -201,7 +201,7 @@ async def set_node_preferred_gateway(
 
 
 @router.put("/{node_id}/node-type", response_model=NodeOut)
-async def set_node_type(node_id: str, body: NodeTypeIn, session: SessionDep) -> NodeOut:
+async def set_node_type(node_id: str, body: NodeTypeIn, session: SessionDep, _user: RequireAuthDep) -> NodeOut:
     """Clasificación manual (Inspector, Organización): null = "Automático",
     con prioridad absoluta sobre la clasificación derivada del role de
     firmware en cualquier otro caso (Flota, bloques, estadísticas de grupo)."""
@@ -217,7 +217,7 @@ class NodeTypeBulkOut(BaseModel):
 
 
 @router.put("/node-type/bulk", response_model=NodeTypeBulkOut)
-async def set_node_type_bulk(body: NodeTypeBulkIn, session: SessionDep) -> NodeTypeBulkOut:
+async def set_node_type_bulk(body: NodeTypeBulkIn, session: SessionDep, _user: RequireAuthDep) -> NodeTypeBulkOut:
     """Igual que set_node_type pero para la barra de selección de Flota."""
     updated = await SqlNodeRepository(session).set_node_type_override_bulk(
         body.node_ids, body.node_type
@@ -227,7 +227,7 @@ async def set_node_type_bulk(body: NodeTypeBulkIn, session: SessionDep) -> NodeT
 
 
 @router.put("/{node_id}/tags", status_code=204)
-async def set_node_tags(node_id: str, body: NodeTagsIn, session: SessionDep) -> None:
+async def set_node_tags(node_id: str, body: NodeTagsIn, session: SessionDep, _user: RequireAuthDep) -> None:
     if await SqlNodeRepository(session).get(node_id) is None:
         raise HTTPException(status_code=404, detail="Node not found")
     await SqlTagRepository(session).set_node_tags(node_id, body.tag_ids)

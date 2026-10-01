@@ -1411,3 +1411,9 @@ export interface NexusSettingsOut {
 export const fetchNexusSettings = () => get<NexusSettingsOut>("/nexus/settings");
 export const patchNexusSettings = (changes: Partial<NexusSettingsOut>) =>
   send<NexusSettingsOut>("PATCH", "/nexus/settings", changes);
+
+// Grupo de arranque: ajuste GLOBAL de la app ("last" | "none" | id de grupo).
+export type StartupGroup = "last" | "none" | number;
+export const fetchStartupGroup = () => get<{ value: StartupGroup }>("/settings/startup-group");
+export const setStartupGroup = (value: StartupGroup) =>
+  send<{ value: StartupGroup }>("PUT", "/settings/startup-group", { value });

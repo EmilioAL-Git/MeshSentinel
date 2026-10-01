@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from noc.adapters.api.deps import RequireAuthDep, SessionDep
+from noc.adapters.api.deps import RequireAdminDep, RequireAuthDep, SecretsVisibleDep, SessionDep
 from noc.adapters.api.schemas import GatewayOut
 from noc.adapters.persistence.organization_repositories import SqlGroupRepository
 from noc.adapters.persistence.repositories import (
@@ -98,10 +98,20 @@ class GatewayCreateIn(BaseModel):
     connection_params: dict[str, Any] = Field(default_factory=dict)
 
 
+def _masked(out: GatewayOut, reveal: bool) -> GatewayOut:
+    """Sin sesión, host/dispositivo/puertos de conexión son infraestructura:
+    se conservan las claves (la UI sabe qué hay) pero no los valores."""
+    if not reveal and out.connection_params:
+        out.connection_params = {k: "••••" for k in out.connection_params}
+    return out
+
+
 @router.get("", response_model=list[GatewayOut])
-async def list_gateways(session: SessionDep, include_deleted: bool = Query(False)) -> list[GatewayOut]:
+async def list_gateways(
+    session: SessionDep, reveal: SecretsVisibleDep, include_deleted: bool = Query(False)
+) -> list[GatewayOut]:
     gateways = await SqlGatewayRepository(session).list_all(include_deleted)
-    return [GatewayOut.from_entity(g) for g in gateways]
+    return [_masked(GatewayOut.from_entity(g), reveal) for g in gateways]
 
 
 @router.post("", response_model=GatewayOut)
@@ -187,11 +197,11 @@ async def gateway_stats(session: SessionDep, group_id: int | None = Query(None))
 
 
 @router.get("/{gateway_id}", response_model=GatewayOut)
-async def get_gateway(gateway_id: str, session: SessionDep) -> GatewayOut:
+async def get_gateway(gateway_id: str, session: SessionDep, reveal: SecretsVisibleDep) -> GatewayOut:
     gateway = await SqlGatewayRepository(session).get(gateway_id)
     if gateway is None:
         raise HTTPException(status_code=404, detail="Gateway not found")
-    return GatewayOut.from_entity(gateway)
+    return _masked(GatewayOut.from_entity(gateway), reveal)
 
 
 @router.post("/{gateway_id}/discover", response_model=list[DeviceOut])
@@ -260,7 +270,7 @@ async def disconnect_gateway(gateway_id: str, request: Request, current_user: Re
 
 
 @router.delete("/{gateway_id}", status_code=204)
-async def delete_gateway(gateway_id: str, request: Request, current_user: RequireAuthDep) -> None:
+async def delete_gateway(gateway_id: str, request: Request, current_user: RequireAdminDep) -> None:
     try:
         deleted = await _service(request).delete(gateway_id)
     except (GatewayHasActiveWorkError, GatewayStillConnectedError) as exc:

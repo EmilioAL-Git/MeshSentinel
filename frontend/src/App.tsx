@@ -46,6 +46,7 @@ import { NavRail } from "./components/shell/NavRail";
 import { StatusBar } from "./components/shell/StatusBar";
 import { toast, ToastHost } from "./components/shell/Toast";
 import { useAuth } from "./context/AuthContext";
+import { LockedNotice } from "./components/shell/LockedNotice";
 import { useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
 import { usePersistedState } from "./hooks/usePersistedState";
 import { useUrlFlag, useUrlNumber, useUrlParam, useUrlString, useUrlView } from "./hooks/useUrlState";
@@ -753,7 +754,11 @@ export default function App() {
           {view === "config" && (
             <div className="ws">
               <div className="ws-scroll legacy-chrome" style={{ padding: "0.9rem" }}>
-                <ConfigEditor summaries={summaries} />
+                {authState.canOperate ? (
+                  <ConfigEditor summaries={summaries} />
+                ) : (
+                  <LockedNotice what="La administración remota" />
+                )}
               </div>
             </div>
           )}
@@ -763,6 +768,7 @@ export default function App() {
               <div className="ws-scroll legacy-chrome" style={{ padding: "0.9rem" }}>
                 <ProfilesView
                   summaries={summaries}
+                  readOnly={!authState.canOperate}
                   onOpenBatch={(batchId) => {
                     setOpenBatchId(batchId);
                     setView("jobs");

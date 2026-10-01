@@ -582,12 +582,14 @@ function ProfileDetail({
   onBack,
   onNewVersion,
   onOpenBatch,
+  readOnly,
 }: {
   profileId: number;
   summaries: NodeSummaryOut[];
   onBack: () => void;
   onNewVersion: (profileName: string, sections: ProfileSections) => void;
   onOpenBatch: (batchId: number) => void;
+  readOnly: boolean;
 }) {
   const profile = useQuery({ queryKey: ["profile", profileId], queryFn: () => fetchProfile(profileId) });
   const versions = useQuery({
@@ -613,7 +615,7 @@ function ProfileDetail({
           <h2 style={{ margin: 0 }}>{p.name}</h2>
           <span style={styles.dim}>v{p.latest_version}</span>
           {p.description && <span style={styles.dim}>{p.description}</span>}
-          <button
+          {!readOnly && <button
             style={{ ...btn, marginLeft: "auto" }}
             onClick={() => onNewVersion(p.name, shownSections)}
             title={viewVersion != null && viewVersion !== p.latest_version
@@ -623,7 +625,7 @@ function ProfileDetail({
             ✏️ {viewVersion != null && viewVersion !== p.latest_version
               ? `Restaurar v${viewVersion} como nueva versión`
               : "Editar (nueva versión)"}
-          </button>
+          </button>}
         </div>
 
         {/* Historial de versiones */}
@@ -675,13 +677,13 @@ function ProfileDetail({
 
       <div style={styles.card}>
         <ComparePanel profileId={profileId} versions={versionNumbers} summaries={summaries} />
-        <SyncPanel
+        {!readOnly && <SyncPanel
           profileId={profileId}
           profileName={p.name}
           versions={versionNumbers}
           summaries={summaries}
           onOpenBatch={onOpenBatch}
-        />
+        />}
       </div>
     </div>
   );
@@ -696,9 +698,12 @@ type EditorMode =
 
 export function ProfilesView({
   summaries,
+  readOnly = false,
   onOpenBatch,
 }: {
   summaries: NodeSummaryOut[];
+  /** Sin sesión: se puede ver todo, no crear/editar/eliminar/sincronizar. */
+  readOnly?: boolean;
   onOpenBatch: (batchId: number) => void;
 }) {
   const queryClient = useQueryClient();
@@ -745,6 +750,7 @@ export function ProfilesView({
       <ProfileDetail
         profileId={openId}
         summaries={summaries}
+        readOnly={readOnly}
         onBack={() => setOpenId(null)}
         onNewVersion={(profileName, sections) =>
           setEditor({ kind: "version", profileId: openId, profileName, initial: sections })
@@ -759,12 +765,16 @@ export function ProfilesView({
     <div style={styles.card}>
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>Perfiles de configuración</h2>
-        <button
-          style={{ ...btn, marginLeft: "auto", background: "var(--accent)" }}
-          onClick={() => setEditor({ kind: "create", initial: {} })}
-        >
-          + Nuevo perfil
-        </button>
+        {readOnly ? (
+          <span style={{ ...styles.dim, marginLeft: "auto", fontSize: "0.85rem" }}>🔒 Solo lectura — inicia sesión para editar</span>
+        ) : (
+          <button
+            style={{ ...btn, marginLeft: "auto", background: "var(--accent)" }}
+            onClick={() => setEditor({ kind: "create", initial: {} })}
+          >
+            + Nuevo perfil
+          </button>
+        )}
       </div>
       <p style={{ ...styles.dim, fontSize: "0.85rem" }}>
         Un perfil describe la configuración de un tipo de nodo (repetidor, sensor, móvil…). Se puede
@@ -794,7 +804,7 @@ export function ProfilesView({
                 <td style={styles.td}>v{p.latest_version}</td>
                 <td style={styles.td}>{relativeTime(p.updated_at)}</td>
                 <td style={styles.td}>
-                  {deleteArmed === p.id ? (
+                  {readOnly ? null : deleteArmed === p.id ? (
                     <button
                       style={{ ...btn, background: "var(--crit)" }}
                       onClick={(e) => { e.stopPropagation(); doDelete.mutate(p.id); }}

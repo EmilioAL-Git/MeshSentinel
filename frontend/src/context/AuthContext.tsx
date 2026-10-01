@@ -14,6 +14,9 @@ interface AuthContextValue {
   me: MeOut | null;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  /** Puede operar/editar: modo abierto o sesión iniciada. Sin esto, la UI
+   *  muestra en solo lectura (el backend lo exige igualmente: RequireAuthDep). */
+  canOperate: boolean;
   protectedMode: boolean;
   loading: boolean;
   loginModalOpen: boolean;
@@ -40,13 +43,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mutationFn: (vars: { username: string; password: string }) => apiLogin(vars.username, vars.password),
     onSuccess: () => {
       setLoginModalOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["auth"] });
+      queryClient.invalidateQueries(); // todo: los datos enmascarados cambian con la sesión
     },
   });
 
   const logoutMutation = useMutation({
     mutationFn: apiLogout,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["auth"] }),
+    onSuccess: () => queryClient.invalidateQueries(),
   });
 
   const me = meQuery.data ?? null;
@@ -54,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     me,
     isAuthenticated: me?.authenticated ?? false,
     isAdmin: me?.user?.is_admin ?? false,
+    canOperate: !(me?.protected_mode ?? false) || (me?.authenticated ?? false),
     protectedMode: me?.protected_mode ?? false,
     loading: meQuery.isLoading,
     loginModalOpen,

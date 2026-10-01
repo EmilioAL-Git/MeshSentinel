@@ -18,6 +18,7 @@ import { toast } from "./shell/Toast";
 import { t } from "../tokens";
 import { useAuth } from "../context/AuthContext";
 import { useUrlString } from "../hooks/useUrlState";
+import { fetchGroups, fetchStartupGroup, setStartupGroup, type StartupGroup } from "../api/client";
 
 const CATEGORY_ORDER = ["network", "alerts", "admin", "activity"];
 
@@ -110,6 +111,7 @@ export function SettingsView() {
             fábrica (variables de entorno del backend); al guardar aquí, el cambio se aplica de inmediato en
             todo el proceso, sin reiniciar.
           </p>
+          <StartupGroupSetting />
           {settingsQuery.isLoading ? (
             <div className="empty">Cargando…</div>
           ) : (
@@ -139,6 +141,47 @@ export function SettingsView() {
       {tab === "nexus" && <NexusPanel />}
       {tab === "users" && canManageUsers && <UsersView />}
       {tab === "login-log" && authState.isAuthenticated && <LoginLogView />}
+    </div>
+  );
+}
+
+/** Preferencia local de este navegador: grupo con el que arranca la sesión. */
+function StartupGroupSetting() {
+  const groups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
+  const queryClient = useQueryClient();
+  const startup = useQuery({ queryKey: ["startup-group"], queryFn: fetchStartupGroup });
+  const save = useMutation({
+    mutationFn: (v: StartupGroup) => setStartupGroup(v),
+    onSuccess: (r) => queryClient.setQueryData(["startup-group"], r),
+    onError: (e) => toast(e instanceof Error ? e.message : "No se pudo guardar", { kind: "error" }),
+  });
+  const value: StartupGroup = startup.data?.value ?? "last";
+  const selected = value === "last" || value === "none" ? value : String(value);
+  return (
+    <div>
+      <h2>Arranque</h2>
+      <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, fontSize: 12.5 }}>
+        <span>Grupo al arrancar</span>
+        <select
+          className="input"
+          value={selected}
+          onChange={(e) => {
+            const v = e.target.value;
+            save.mutate(v === "last" || v === "none" ? v : Number(v));
+          }}
+        >
+          <option value="last">Recordar el último usado (por navegador)</option>
+          <option value="none">Toda la red</option>
+          {(groups.data ?? []).map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p style={{ color: t.textDim, fontSize: 12, marginTop: 6 }}>
+        Ajuste global de la aplicación: vale para todos los usuarios y navegadores. Un enlace con grupo explícito siempre tiene prioridad.
+      </p>
     </div>
   );
 }

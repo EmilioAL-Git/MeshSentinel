@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchGroups, type AlertOut, type GroupOut, type NodeSummaryOut, type OperationOut } from "../api/client";
+import { fetchGroups, fetchStartupGroup, type AlertOut, type GroupOut, type NodeSummaryOut, type OperationOut } from "../api/client";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { useUrlNumber } from "../hooks/useUrlState";
 
@@ -32,7 +32,21 @@ export function GroupProvider({ children }: { children: ReactNode }) {
   // (puesto de trabajo del operador entre sesiones sin enlace explícito).
   const [storedGroupId, setStoredGroupId] = usePersistedState<number | null>("activeGroupId", null);
   const [urlGroupId, setUrlGroupId] = useUrlNumber("group", null);
-  const activeGroupId = urlGroupId ?? storedGroupId;
+  // Ajuste GLOBAL "Grupo al arrancar" (Ajustes → General, guardado en servidor).
+  // Se aplica una sola vez al cargar; estado de sesión aparte para que quitar
+  // el grupo después no vuelva a caer al de arranque. "last" = recordar el
+  // último de este navegador (valor inicial de la sesión).
+  const startup = useQuery({ queryKey: ["startup-group"], queryFn: fetchStartupGroup });
+  // `undefined` = el operador aún no ha cambiado de grupo en esta sesión.
+  const [sessionGroupId, setSessionGroupId] = useState<number | null | undefined>(undefined);
+  const startupValue = startup.data?.value;
+  const startupGroupId =
+    startupValue === "none"
+      ? null
+      : typeof startupValue === "number" && (groups.data ?? []).some((g) => g.id === startupValue)
+        ? startupValue
+        : storedGroupId;
+  const activeGroupId = urlGroupId ?? (sessionGroupId === undefined ? startupGroupId : sessionGroupId);
 
   const list = groups.data ?? [];
   const activeGroup = useMemo(
@@ -43,6 +57,7 @@ export function GroupProvider({ children }: { children: ReactNode }) {
   const setActiveGroup = useCallback(
     (groupId: number | null) => {
       setStoredGroupId(groupId);
+      setSessionGroupId(groupId);
       setUrlGroupId(groupId);
     },
     [setStoredGroupId, setUrlGroupId],
@@ -54,6 +69,11 @@ export function GroupProvider({ children }: { children: ReactNode }) {
     [activeGroupId, activeGroup, list, setActiveGroup, clearActiveGroup],
   );
 
+  // No pintar hasta conocer el grupo de arranque (evita el parpadeo del grupo
+  // recordado por el navegador). Con `group` en la URL no hace falta esperar;
+  // si el servidor falla (isError) se sigue con lo recordado.
+  const ready = urlGroupId != null || (!startup.isPending && !groups.isPending);
+  if (!ready) return null;
   return <GroupContext.Provider value={value}>{children}</GroupContext.Provider>;
 }
 

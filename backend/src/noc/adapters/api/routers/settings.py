@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from noc.adapters.api.deps import RequireAdminDep, SessionDep
+from noc.adapters.persistence.organization_repositories import SqlGroupRepository
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.settings_registry import (
     CATEGORY_LABELS,
@@ -62,6 +63,40 @@ def _spec_or_404(key: str) -> Any:
     if spec is None:
         raise HTTPException(status_code=404, detail="Ajuste desconocido")
     return spec
+
+
+STARTUP_GROUP_KEY = "ui.startup_group"
+
+
+class StartupGroupOut(BaseModel):
+    # "last" = cada navegador recuerda el último grupo usado (comportamiento
+    # original), "none" = toda la red, número = id de grupo fijo para todos.
+    value: str | int
+
+
+class StartupGroupIn(BaseModel):
+    value: str | int
+
+
+@router.get("/startup-group", response_model=StartupGroupOut)
+async def get_startup_group(session: SessionDep) -> StartupGroupOut:
+    """Abierto (sin admin): el frontend lo necesita al arrancar, igual que /nexus/mode."""
+    stored = (await SqlSystemSettingsRepository(session).list_all()).get(STARTUP_GROUP_KEY, "last")
+    return StartupGroupOut(value=stored)
+
+
+@router.put("/startup-group", response_model=StartupGroupOut)
+async def set_startup_group(body: StartupGroupIn, session: SessionDep, admin: RequireAdminDep) -> StartupGroupOut:
+    v = body.value
+    if isinstance(v, int) and not isinstance(v, bool):
+        if await SqlGroupRepository(session).get(v) is None:
+            raise HTTPException(status_code=422, detail="El grupo no existe")
+    elif v not in ("last", "none"):
+        raise HTTPException(status_code=422, detail="Valor no válido")
+    actor = admin.username if admin is not None else None
+    await SqlSystemSettingsRepository(session).upsert(STARTUP_GROUP_KEY, v, actor)
+    await session.commit()
+    return StartupGroupOut(value=v)
 
 
 @router.get("", response_model=list[SettingOut])

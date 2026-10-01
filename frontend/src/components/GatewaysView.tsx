@@ -1,3 +1,4 @@
+import { useAuth } from "../context/AuthContext";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
@@ -542,6 +543,7 @@ function AddGatewayWizard({
 // ── Módulo del rack: un gateway ya reportado (gestionado o no) ───────────────
 
 function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayStatsOut }) {
+  const { canOperate } = useAuth();
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [editName, setEditName] = useState(gateway.name ?? "");
@@ -601,9 +603,11 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
             <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 0 }}>
               Late de verdad, pero todavía no está gestionada desde la aplicación.
             </p>
-            <button className="btn" disabled={doImport.isPending} onClick={() => doImport.mutate()}>
-              ⬆ Reclamar esta pasarela
-            </button>
+            {canOperate && (
+              <button className="btn" disabled={doImport.isPending} onClick={() => doImport.mutate()}>
+                ⬆ Reclamar esta pasarela
+              </button>
+            )}
             {doImport.isError && <p style={{ color: "var(--crit)", fontSize: 12 }}>{String(doImport.error)}</p>}
           </div>
         )}
@@ -633,7 +637,12 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
               </div>
             )}
 
-            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+            {!canOperate && (
+              <p style={{ color: "var(--text-dim)", fontSize: 12, margin: 0 }}>
+                🔒 Solo lectura — inicia sesión para editar o gestionar esta pasarela.
+              </p>
+            )}
+            {canOperate && <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
               <input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} />
               <input
                 className="input"
@@ -677,7 +686,7 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
                   </button>
                 )}
               </span>
-            </div>
+            </div>}
             {(doConnect.isError || doDisconnect.isError || doDelete.isError || doSaveEdit.isError) && (
               <p style={{ color: "var(--crit)", fontSize: 12, margin: 0 }}>
                 {String(doConnect.error ?? doDisconnect.error ?? doDelete.error ?? doSaveEdit.error)}
@@ -693,6 +702,7 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
 // ── Workspace ────────────────────────────────────────────────────────────────
 
 export function GatewaysView() {
+  const { canOperate } = useAuth();
   // include_deleted: una pasarela eliminada (borrado lógico) sigue siendo un
   // candidato válido para "+ Añadir enlace" — el proceso puede seguir vivo,
   // solo se retiró de la gestión activa (ver ADR 0021 §6).
@@ -722,9 +732,13 @@ export function GatewaysView() {
           {connected}/{list.length} conectados
         </span>
         <span style={{ marginLeft: "auto" }} />
-        <button className="btn primary" onClick={() => setWizardOpen(true)}>
-          + Añadir enlace
-        </button>
+        {canOperate ? (
+          <button className="btn primary" onClick={() => setWizardOpen(true)}>
+            + Añadir enlace
+          </button>
+        ) : (
+          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>🔒 Solo lectura</span>
+        )}
       </div>
 
       {wizardOpen ? (

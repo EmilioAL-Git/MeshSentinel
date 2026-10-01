@@ -62,3 +62,12 @@ async def require_admin(request: Request, current_user: RequireAuthDep) -> AuthU
 
 
 RequireAdminDep = Annotated[AuthUser | None, Depends(require_admin)]
+
+
+async def can_see_secrets(request: Request, current_user: CurrentUserDep) -> bool:
+    """Los secretos de integraciones/pasarelas solo se devuelven con sesión
+    (o en modo abierto, donde no hay nadie a quien ocultárselos)."""
+    return current_user is not None or not await _auth_service(request).is_protected_mode()
+
+
+SecretsVisibleDep = Annotated[bool, Depends(can_see_secrets)]
