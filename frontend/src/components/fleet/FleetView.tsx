@@ -25,7 +25,6 @@ import { IgnoreNodeModal } from "./IgnoreNodeModal";
 import { FleetBlocks } from "./FleetBlocks";
 import { GroupBar } from "./GroupBar";
 import { computeFleetGroupMetrics } from "./groupStats";
-import { NexusFleetOpsModal } from "../nexus/NexusFleetOpsModal";
 import { DEFAULT_FLEET_COLUMNS, FLEET_COLUMNS, FleetRow, buildFleetGrid, type FleetColumnId } from "./instruments";
 
 /**
@@ -94,7 +93,6 @@ export function FleetView({
 }) {
   const [ignoreTarget, setIgnoreTarget] = useState<{ id: string; label: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; label?: string } | null>(null);
-  const [nexusOpsOpen, setNexusOpsOpen] = useState(false);
   const nexusModeOn = useNexusMode();
   const { canOperate } = useAuth();
   const set = (patch: NodeFilterParams) => onFiltersChange({ ...filters, ...patch });
@@ -358,22 +356,9 @@ export function FleetView({
             ✕ limpiar
           </button>
         )}
-        {nexusModeOn && (
-          <button className="btn ghost" onClick={() => setNexusOpsOpen(true)}>
-            🐱 Operaciones Nexus
-          </button>
-        )}
         <span style={{ marginLeft: "auto" }} />
         <ColumnPicker visible={visibleColumns} onChange={setVisibleColumns} />
       </div>
-
-      {nexusOpsOpen && (
-        <NexusFleetOpsModal
-          onClose={() => setNexusOpsOpen(false)}
-          allSummaries={allSummaries}
-          checkedIds={checkedIds}
-        />
-      )}
 
       {/* Roster: bloques por categoría dentro de un grupo, lista plana en "Toda la red" */}
       <div className="panel" style={{ flex: 1, border: "none" }}>

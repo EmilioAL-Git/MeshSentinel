@@ -6,6 +6,7 @@ import {
   fetchBatch,
   fetchBatchOperations,
   fetchBatches,
+  fetchNexusOperations,
   fetchOperations,
   pauseBatch,
   resumeBatch,
@@ -21,6 +22,9 @@ import { useUrlString } from "../../hooks/useUrlState";
 import { NodeSelect } from "../NodeSelect";
 import { GroupScopeBanner } from "../shell/GroupScopeBanner";
 import { toast } from "../shell/Toast";
+import { useNexusMode } from "../nexus/useNexusMode";
+import { NexusFleetOpsModal } from "../nexus/NexusFleetOpsModal";
+import { NexusJobRow } from "./NexusJobRow";
 import { NewOperationForm } from "./NewOperationForm";
 import {
   ACK_ONLY_NO_VERIFY,
@@ -441,6 +445,15 @@ export function JobsView({
   onLocate: (nodeId: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const nexusModeOn = useNexusMode();
+  const [nexusOpsOpen, setNexusOpsOpen] = useState(false);
+  const noChecked = useMemo(() => new Set<string>(), []);
+  const nexusOps = useQuery({
+    queryKey: ["nexus-operations", "jobs"],
+    queryFn: () => fetchNexusOperations(undefined, undefined, 200),
+    enabled: nexusModeOn,
+    refetchInterval: 5_000,
+  });
   const operations = useQuery({
     queryKey: ["operations", "jobs"],
     queryFn: () => fetchOperations(undefined, 500),
@@ -503,8 +516,8 @@ export function JobsView({
     [rawBatches, groupBatchIds],
   );
 
-  const opTypes = useMemo(() => [...new Set(allOps.map((o) => o.operation_type))].sort(), [allOps]);
-  const gwIds = useMemo(() => [...new Set(allOps.map((o) => o.gateway_id))].sort(), [allOps]);
+  const opTypes = useMemo(() => [...new Set([...allOps.map((o) => o.operation_type), ...(nexusModeOn ? ["nexus"] : [])])].sort(), [allOps, nexusModeOn]);
+  const gwIds = useMemo(() => [...new Set(allOps.map((o) => o.gateway_id))].sort(), [allOps, nexusModeOn]);
 
   const matches = (op: OperationOut) =>
     (nodeFilter === "" || op.target_node_id === nodeFilter) &&
@@ -598,7 +611,29 @@ export function JobsView({
       ),
     [allOps, nodeFilter, typeFilter, gwFilter],
   );
+  // Operaciones Nexus: mismas secciones, filtradas por pasarela/nodo/tipo
+  const nexusAll = (nexusModeOn ? (nexusOps.data ?? []) : []).filter((o) => {
+    if (gwFilter && o.gateway_id !== gwFilter) return false;
+    if (typeFilter && typeFilter !== "nexus") return false;
+    if (nodeFilter) {
+      const sn = summaries.find((x) => x.node.node_id === nodeFilter)?.node.short_name;
+      if (o.target_kind !== "node" || o.target_value !== sn) return false;
+    }
+    return true;
+  });
+  const nexusRunning = nexusAll.filter((o) => o.status === "sent");
+  const nexusQueued = nexusAll.filter((o) => o.status === "pending");
+  const nexusAttention = nexusAll.filter(
+    (o) => o.status === "no_response" && new Date(o.response_at ?? o.sent_at ?? o.created_at ?? 0).getTime() > dayAgo,
+  );
+  const nexusDone = nexusAll.filter((o) => o.status === "confirmed");
   const history: { ts: string; item: ReactNode }[] = [
+    ...nexusDone.map((o) => ({
+      ts: o.response_at ?? o.sent_at ?? o.created_at ?? "",
+      item: (
+        <NexusJobRow key={`n${o.id}`} op={o} summaries={summaries} flash={flash(`nexus:${o.id}`)} showTime="finished" onOpenNode={onOpenNode} />
+      ),
+    })),
     ...doneBatches
       .filter((b) => nodeFilter === "" || (opsByBatch.get(b.id) ?? []).some((o) => matches(o)))
       .map((b) => ({
@@ -683,16 +718,28 @@ export function JobsView({
           >
             ＋ Nueva operación
           </button>
+          {nexusModeOn && (
+            <button
+              style={{ ...smallBtn, background: t.accentTint, borderColor: t.accent, color: t.accent }}
+              onClick={() => setNexusOpsOpen(!nexusOpsOpen)}
+            >
+              🐱 Operaciones Nexus
+            </button>
+          )}
         </span>
       </div>
 
-      {showForm && <NewOperationForm summaries={summaries} onClose={() => setShowForm(false)} />}
+      {nexusOpsOpen && (
+        <NexusFleetOpsModal embedded onClose={() => setNexusOpsOpen(false)} allSummaries={summaries} checkedIds={noChecked} />
+      )}
 
-      <div className="jobs-grid">
+      {!nexusOpsOpen && showForm && <NewOperationForm summaries={summaries} onClose={() => setShowForm(false)} />}
+
+      <div className="jobs-grid" style={nexusOpsOpen ? { display: "none" } : undefined}>
         {/* Columna viva: qué hace la red, qué espera, qué pide intervención */}
         <div>
-          <Section title="EN EJECUCIÓN" count={activeBatches.length + runningOps.length}>
-            {activeBatches.length === 0 && runningOps.length === 0 && (
+          <Section title="EN EJECUCIÓN" count={activeBatches.length + runningOps.length + nexusRunning.length}>
+            {activeBatches.length === 0 && runningOps.length === 0 && nexusRunning.length === 0 && (
               <p style={{ color: t.textFaint, fontSize: 12.5, margin: "0.2rem 0" }}>
                 La red no está ejecutando ningún trabajo ahora mismo.
               </p>
@@ -726,10 +773,13 @@ export function JobsView({
                 showTime="created"
               />
             ))}
+            {nexusRunning.map((o) => (
+              <NexusJobRow key={`n${o.id}`} op={o} summaries={summaries} flash={flash(`nexus:${o.id}`)} showTime="created" onOpenNode={onOpenNode} />
+            ))}
           </Section>
 
-          <Section title="EN COLA" count={queuedOps.length}>
-            {queuedOps.length === 0 && (
+          <Section title="EN COLA" count={queuedOps.length + nexusQueued.length}>
+            {queuedOps.length === 0 && nexusQueued.length === 0 && (
               <p style={{ color: t.textFaint, fontSize: 12.5, margin: "0.2rem 0" }}>Cola vacía.</p>
             )}
             {queuedOps.map((op) => (
@@ -745,10 +795,13 @@ export function JobsView({
                 showTime="created"
               />
             ))}
+            {nexusQueued.map((o) => (
+              <NexusJobRow key={`n${o.id}`} op={o} summaries={summaries} flash={flash(`nexus:${o.id}`)} showTime="created" onOpenNode={onOpenNode} />
+            ))}
           </Section>
 
-          <Section title="REQUIEREN INTERVENCIÓN" count={needsAttention.length}>
-            {needsAttention.length === 0 && (
+          <Section title="REQUIEREN INTERVENCIÓN" count={needsAttention.length + nexusAttention.length}>
+            {needsAttention.length === 0 && nexusAttention.length === 0 && (
               <p style={{ color: t.textFaint, fontSize: 12.5, margin: "0.2rem 0" }}>
                 Nada pendiente de tu intervención.
               </p>
@@ -765,6 +818,9 @@ export function JobsView({
                 onRetry={(id) => doRetryOp.mutate(id)}
                 showTime="finished"
               />
+            ))}
+            {nexusAttention.map((o) => (
+              <NexusJobRow key={`n${o.id}`} op={o} summaries={summaries} flash={flash(`nexus:${o.id}`)} showTime="finished" onOpenNode={onOpenNode} />
             ))}
           </Section>
         </div>

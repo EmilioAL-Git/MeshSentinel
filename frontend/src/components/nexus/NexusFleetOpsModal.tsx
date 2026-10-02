@@ -40,7 +40,10 @@ export function NexusFleetOpsModal({
   onClose,
   allSummaries,
   checkedIds,
+  embedded = false,
 }: {
+  /** Integrada en una vista (Trabajos): sin overlay, sin Esc, ocupa el espacio que le dé el padre. */
+  embedded?: boolean;
   onClose: () => void;
   allSummaries: NodeSummaryOut[];
   checkedIds: Set<string>;
@@ -85,7 +88,7 @@ export function NexusFleetOpsModal({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
-      if (e.key === "Escape" && tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") onClose();
+      if (!embedded && e.key === "Escape" && tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -190,10 +193,17 @@ export function NexusFleetOpsModal({
 
   return (
     <div
-      style={{
-        position: "fixed", inset: 0, zIndex: 1000, background: "var(--chassis)",
-        display: "flex", flexDirection: "column",
-      }}
+      style={
+        embedded
+          ? {
+              height: "calc(100vh - 190px)", minHeight: 480, background: "var(--chassis)",
+              display: "flex", flexDirection: "column", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden",
+            }
+          : {
+              position: "fixed", inset: 0, zIndex: 1000, background: "var(--chassis)",
+              display: "flex", flexDirection: "column",
+            }
+      }
     >
       <div className="panel-head" style={{ gap: 12 }}>
         <span className="panel-title">🐱 Operaciones Nexus</span>
@@ -209,7 +219,7 @@ export function NexusFleetOpsModal({
           <input type="checkbox" checked={showNoise} onChange={(e) => setShowNoise(e.target.checked)} />
           otros mensajes del canal
         </label>
-        <button className="btn ghost" style={{ padding: "0.1rem 0.5rem", fontSize: 11 }} onClick={onClose} title="Cerrar (Esc)">
+        <button className="btn ghost" style={{ padding: "0.1rem 0.5rem", fontSize: 11 }} onClick={onClose} title={embedded ? "Volver a Trabajos" : "Cerrar (Esc)"}>
           ✕
         </button>
       </div>
@@ -255,7 +265,7 @@ export function NexusFleetOpsModal({
             <button
               className={`btn ${scope === "selected" ? "primary" : "ghost"}`}
               disabled={checkedIds.size === 0}
-              title={checkedIds.size === 0 ? "Selecciona nodos en Flota (checkboxes) primero" : undefined}
+              title={checkedIds.size === 0 ? "Solo disponible si se abre con nodos seleccionados" : undefined}
               onClick={() => { setScope("selected"); resetPreview(); }}
             >
               Seleccionados ({checkedIds.size})

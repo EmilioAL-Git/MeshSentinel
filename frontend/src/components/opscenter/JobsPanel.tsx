@@ -1,6 +1,10 @@
+import { useNexusMode } from "../nexus/useNexusMode";
+import { STATUS_COLORS as NEXUS_COLORS, STATUS_LABELS as NEXUS_LABELS } from "../nexus/NexusOperationsPanel";
+import { nexusTargetLabel } from "../jobs/NexusJobRow";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, type CSSProperties, type ReactNode } from "react";
 import {
+  fetchNexusOperations,
   cancelBatch,
   cancelOperation,
   fetchBatches,
@@ -96,6 +100,27 @@ export function JobsPanel({
     queryFn: () => fetchBatches({ limit: 10 }),
     refetchInterval: 30_000,
   });
+  const nexusModeOn = useNexusMode();
+  const nexusOps = useQuery({
+    queryKey: ["nexus-operations", "jobs"],
+    queryFn: () => fetchNexusOperations(undefined, undefined, 200),
+    enabled: nexusModeOn,
+    refetchInterval: 5_000,
+  });
+  const nexusList = nexusModeOn ? (nexusOps.data ?? []) : [];
+  const nexusSent = nexusList.filter((o) => o.status === "sent");
+  const nexusPending = nexusList.filter((o) => o.status === "pending");
+  const nexusRecent = nexusList.filter((o) => o.status === "confirmed" || o.status === "no_response").slice(0, 5);
+  const nexusRow = (o: (typeof nexusList)[number]) => (
+    <div key={`n${o.id}`} style={rowStyle}>
+      <span title="Operación Nexus">🐱</span>
+      <span style={{ color: t.text }}>{o.command_name}</span>
+      <span style={{ color: t.textDim, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {nexusTargetLabel(o)}
+      </span>
+      <span style={{ color: NEXUS_COLORS[o.status], fontSize: 11 }}>{NEXUS_LABELS[o.status]}</span>
+    </div>
+  );
   const activeBatches = (batches.data ?? []).filter((b) => b.status === "running" || b.status === "paused");
 
   const nodeName = useMemo(() => {
@@ -120,7 +145,7 @@ export function JobsPanel({
       .sort((a, b) => ((a.finished_at ?? "") < (b.finished_at ?? "") ? 1 : -1))
       .slice(0, 5),
   );
-  const inFlight = running.length + activeBatches.length;
+  const inFlight = running.length + activeBatches.length + nexusSent.length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -145,7 +170,7 @@ export function JobsPanel({
       </div>
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: "0.5rem" }}>
         <Section title="EN CURSO">
-          {activeBatches.length === 0 && running.length === 0 && (
+          {activeBatches.length === 0 && running.length === 0 && nexusSent.length === 0 && (
             <div style={{ ...rowStyle, color: t.textFaint }}>Nada en ejecución.</div>
           )}
           {activeBatches.map((b) => {
@@ -198,10 +223,11 @@ export function JobsPanel({
               <span style={{ color: t.textFaint, fontFamily: t.fontMono, fontSize: 11 }}>{op.gateway_id}</span>
             </div>
           ))}
+          {nexusSent.map(nexusRow)}
         </Section>
 
-        <Section title={`COLA (${queued.length})`}>
-          {queued.length === 0 && <div style={{ ...rowStyle, color: t.textFaint }}>Cola vacía.</div>}
+        <Section title={`COLA (${queued.length + nexusPending.length})`}>
+          {queued.length === 0 && nexusPending.length === 0 && <div style={{ ...rowStyle, color: t.textFaint }}>Cola vacía.</div>}
           {queued.slice(0, 6).map((op) => (
             <div key={op.id} style={{ ...rowStyle, background: rowBg(op) }}>
               <span style={{ color: t.textDim }}>⧗</span>
@@ -214,13 +240,14 @@ export function JobsPanel({
               )}
             </div>
           ))}
+          {nexusPending.map(nexusRow)}
           {queued.length > 6 && (
             <div style={{ ...rowStyle, color: t.textFaint }}>… y {queued.length - 6} más</div>
           )}
         </Section>
 
         <Section title="RECIENTES">
-          {recent.length === 0 && <div style={{ ...rowStyle, color: t.textFaint }}>Sin operaciones recientes.</div>}
+          {recent.length === 0 && nexusRecent.length === 0 && <div style={{ ...rowStyle, color: t.textFaint }}>Sin operaciones recientes.</div>}
           {recent.map((op) => {
             const ok = op.status === "succeeded" || op.status === "succeeded_unconfirmed";
             return (
@@ -241,6 +268,7 @@ export function JobsPanel({
               </div>
             );
           })}
+          {nexusRecent.map(nexusRow)}
         </Section>
       </div>
     </div>

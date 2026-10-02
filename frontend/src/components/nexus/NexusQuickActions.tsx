@@ -1,6 +1,7 @@
 import { useMemo, useState, type CSSProperties } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { fetchNexusCatalog, fetchNexusSettings } from "../../api/client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchNexusCatalog, fetchNexusSettings, patchNexusSettings, type NexusTemplate } from "../../api/client";
+import { toast } from "../shell/Toast";
 import { t } from "../../tokens";
 import { NexusCatalogWizard } from "./NexusCatalogBrowser";
 import type { NexusNodeOption } from "./NexusArgsField";
@@ -92,6 +93,17 @@ export function NexusQuickActions({
   const settings = useQuery({ queryKey: ["nexus-settings"], queryFn: fetchNexusSettings });
   const hidden = useMemo(() => new Set(settings.data?.hidden_commands ?? []), [settings.data]);
   const [guided, setGuided] = useState<QuickAction | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [tplLabel, setTplLabel] = useState("");
+  const [tplCommand, setTplCommand] = useState("");
+  const [tplArgs, setTplArgs] = useState("");
+  const queryClient = useQueryClient();
+  const saveTemplates = useMutation({
+    mutationFn: (next: NexusTemplate[]) => patchNexusSettings({ templates: next }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["nexus-settings"] }),
+    onError: (e: unknown) => toast(`No se pudo guardar: ${e instanceof Error ? e.message : "error"} (requiere administrador)`),
+  });
 
   const templates = settings.data?.templates ?? [];
   const known = new Set((catalog.data ?? []).map((e) => e.name));
@@ -120,15 +132,71 @@ export function NexusQuickActions({
       )}
       <Section title="CONSULTAS RÁPIDAS">{QUERIES.filter(available).map(render)}</Section>
       <Section title="ACCIONES SOBRE UN NODO">{WITH_NODE.filter(available).map(render)}</Section>
-      {templates.length > 0 && (
+      {(templates.length > 0 || editing) && (
         <Section title="TUS PLANTILLAS">
-          {templates.map((tpl) =>
-            render({
-              icon: "★", label: tpl.label, hint: `${tpl.command} ${tpl.args}`.trim(),
-              command: tpl.command, args: tpl.args.trim() ? tpl.args.trim().split(/\s+/) : [],
-            }),
-          )}
+          {templates.map((tpl) => (
+            <div key={`${tpl.command}-${tpl.label}`} style={{ position: "relative", display: "flex" }}>
+              <div style={{ flex: 1, display: "flex" }}>
+                {render({
+                  icon: "★", label: tpl.label, hint: `${tpl.command} ${tpl.args}`.trim(),
+                  command: tpl.command, args: tpl.args.trim() ? tpl.args.trim().split(/\s+/) : [],
+                })}
+              </div>
+              {editing && (
+                <button
+                  className="btn ghost"
+                  title="Quitar este comando rápido"
+                  style={{ position: "absolute", top: 2, right: 2, padding: "0 6px", fontSize: 11, color: t.crit }}
+                  onClick={() => saveTemplates.mutate(templates.filter((x) => x !== tpl))}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ))}
         </Section>
+      )}
+      <div>
+        <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => setEditing(!editing)}>
+          {editing ? "Hecho" : "＋/✕ Personalizar comandos rápidos"}
+        </button>
+        {editing && (
+          <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+            <input className="input" style={{ width: 130 }} placeholder="etiqueta" value={tplLabel} onChange={(e) => setTplLabel(e.target.value)} />
+            <input
+              className="input" style={{ width: 150, fontFamily: t.fontMono, cursor: "pointer" }}
+              placeholder="📖 elegir comando…" readOnly value={tplCommand}
+              title="Abre el asistente con la explicación de cada comando"
+              onClick={() => setPicking(true)}
+            />
+            <input className="input" style={{ width: 150, fontFamily: t.fontMono }} placeholder="argumentos" value={tplArgs} onChange={(e) => setTplArgs(e.target.value)} />
+            <button
+              className="btn primary"
+              disabled={!tplCommand.trim() || saveTemplates.isPending}
+              onClick={() => {
+                const command = tplCommand.trim().toUpperCase();
+                saveTemplates.mutate([...templates, { label: tplLabel.trim() || command, command, args: tplArgs.trim() }]);
+                setTplLabel(""); setTplCommand(""); setTplArgs("");
+              }}
+            >
+              Añadir
+            </button>
+          </div>
+        )}
+      </div>
+      {picking && catalog.data && (
+        <NexusCatalogWizard
+          catalog={catalog.data}
+          hidden={hidden}
+          nodeOptions={nodeOptions}
+          initialName={tplCommand || null}
+          onSelect={(name, nextArgs) => {
+            setTplCommand(name);
+            setTplArgs(nextArgs.join(" "));
+            if (!tplLabel.trim()) setTplLabel(name);
+          }}
+          onClose={() => setPicking(false)}
+        />
       )}
       {guided && catalog.data && (
         <NexusCatalogWizard
