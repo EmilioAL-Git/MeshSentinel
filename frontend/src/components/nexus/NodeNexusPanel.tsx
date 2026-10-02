@@ -300,6 +300,10 @@ function NodeNexusSecurity({
     (op) => op.command_name === "SECURITY" && op.status === "confirmed" && op.response_kind === "structured",
   );
   const pending = ops.find((op) => op.command_name === "SECURITY" && (op.status === "pending" || op.status === "sent"));
+  // El firmware respondió «JT: Unknown command 'SECURITY'» (existe desde
+  // 2.8.005): se avisa solo si esa es la lectura más reciente de SECURITY.
+  const lastRead = ops.find((op) => op.command_name === "SECURITY" && op.status === "confirmed");
+  const unsupported = lastRead?.response_kind === "unsupported";
 
   const readMutation = useMutation({
     mutationFn: async () => {
@@ -338,7 +342,15 @@ function NodeNexusSecurity({
         </button>
       </div>
 
-      {!bits && <div style={{ color: t.textFaint, fontSize: 11.5, marginTop: 6 }}>Sin lectura confirmada todavía.</div>}
+      {unsupported && (
+        <div style={{ marginTop: 8, padding: "0.4rem 0.5rem", background: t.bg, border: `1px solid ${t.warn}`, borderRadius: 5, color: t.warn, fontSize: 11 }}>
+          ⚠ Este nodo no soporta SECURITY (el firmware respondió «Unknown command»). Ese comando existe desde
+          JenTastic-Nexus 2.8.005: comprueba la versión con VERSION o INFO y actualiza el firmware si quieres gestionar
+          ALLOW_DM y el resto de bits.
+        </div>
+      )}
+
+      {!bits && !unsupported && <div style={{ color: t.textFaint, fontSize: 11.5, marginTop: 6 }}>Sin lectura confirmada todavía.</div>}
 
       {bits && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
