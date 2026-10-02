@@ -385,6 +385,12 @@ export default function App() {
     () => scopeGatewaysToGroup(gateways.data ?? [], groupNodeIds, groupGatewayStats.data),
     [gateways.data, groupNodeIds, groupGatewayStats.data],
   );
+  // Salud de pasarelas = infraestructura: la barra inferior cuenta todas las
+  // operativas, nunca solo las que oyen nodos del grupo activo.
+  const operativeGateways = useMemo(
+    () => (gateways.data ?? []).filter((g) => g.enabled && g.deleted_at == null),
+    [gateways.data],
+  );
   const shellGroupMetrics = useMemo(
     () => (groupNodeIds == null ? null : computeFleetGroupMetrics(groupSummaries, alerts.data ?? [])),
     [groupNodeIds, groupSummaries, alerts.data],
@@ -850,7 +856,7 @@ export default function App() {
         wsStatus={wsStatus}
         backendOk={!health.isError && health.data?.status === "ok"}
         summary={shellSummary}
-        gateways={shellGateways}
+        gateways={operativeGateways}
         alertCounts={alertCounts.data}
         operationCounts={operationCounts.data}
         runningBatch={runningBatch.data}

@@ -645,7 +645,7 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
               <Field k="Última conexión" v={relativeTime(gateway.last_connected_at)} />
               <Field k="Última desconexión" v={relativeTime(gateway.last_disconnected_at)} />
             </div>
-            {gateway.last_error && (
+            {gateway.last_error && gateway.status !== "connected" && (
               <div style={{ minWidth: 0 }}>
                 <div className="microlabel">Último error · {relativeTime(gateway.last_error_at)}</div>
                 <div
