@@ -83,13 +83,30 @@ const TRANSPORT_LABEL: Record<string, string> = {
 };
 
 /** Par clave/valor en mono, la unidad de lectura de los módulos del rack. */
-function Field({ k, v, title }: { k: string; v: React.ReactNode; title?: string }) {
+function Field({ k, v, title, color }: { k: string; v: React.ReactNode; title?: string; color?: string }) {
   return (
     <div title={title} style={{ minWidth: 0 }}>
       <div className="microlabel">{k}</div>
-      <div className="mono" style={{ fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div className="mono" style={{ fontSize: 12, color: color ?? "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {v}
       </div>
+    </div>
+  );
+}
+
+/** Enlace = el nodo conectado responde (decide si la pasarela está caída);
+ *  RX/TX LoRa = hay tráfico de radio (silencio no es avería). */
+function ActivitySignals({ gateway, lastHeardFallback, spaced }: { gateway: GatewayOut; lastHeardFallback: string | null; spaced: boolean }) {
+  const resp = gateway.last_device_response_at;
+  const ageS = resp ? (Date.now() - new Date(resp).getTime()) / 1000 : null;
+  const connected = gateway.status === "connected";
+  // El latido llega cada 30 s y sondea justo antes: >2 min sin respuesta = enlace colgado
+  const linkColor = !connected ? "var(--text-dim)" : ageS === null ? "var(--text-dim)" : ageS > 120 ? "var(--crit)" : "var(--ok)";
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "0.6rem", marginBottom: spaced ? "0.75rem" : 0 }}>
+      <Field k="Enlace" v={connected ? relativeTime(resp) : "—"} color={linkColor} title="Última respuesta real del nodo conectado por USB/TCP. Si envejece con la pasarela 'conectada', el enlace está colgado." />
+      <Field k="RX LoRa" v={relativeTime(gateway.last_lora_rx_at ?? lastHeardFallback)} title="Último paquete de otro nodo recibido por radio. Silencio = sin tráfico, no pasarela caída." />
+      <Field k="TX LoRa" v={relativeTime(gateway.last_lora_tx_at)} title="Última transmisión ordenada a la malla (comandos, administración, texto)." />
     </div>
   );
 }
@@ -594,9 +611,12 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
             <Field k="Exclusivos" v={stats.nodes_exclusive} title="Nodos que solo esta pasarela oye ahora mismo" />
             <Field k="Compartidos" v={stats.nodes_shared} title="Nodos que también oye otra pasarela" />
             <Field k="Primaria de" v={stats.primary_for} title="Nodos cuya pasarela primaria es esta" />
-            <Field k="Actividad" v={relativeTime(stats.last_heard_at)} />
           </div>
         )}
+
+        {/* Tres señales distintas (no mezclar): que la pasarela esté viva no
+            depende de que haya tráfico, y viceversa. */}
+        <ActivitySignals gateway={gateway} lastHeardFallback={stats?.last_heard_at ?? null} spaced={expanded || !gateway.managed} />
 
         {!gateway.managed && (
           <div>

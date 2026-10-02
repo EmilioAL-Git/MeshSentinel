@@ -35,6 +35,11 @@ class GatewayModel(Base):
     local_hw_model: Mapped[str | None] = mapped_column(String(32))
     local_firmware_version: Mapped[str | None] = mapped_column(String(32))
     channels: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # Tres señales de actividad independientes (último latido que las trajo):
+    # el nodo responde por el enlace API / RX LoRa / TX LoRa.
+    last_device_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_lora_rx_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_lora_tx_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # ── Configuración gestionada desde la aplicación (M5, ADR 0021) ────────
     name: Mapped[str | None] = mapped_column(String(128))
     managed: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -132,6 +132,10 @@ class GatewayInfo:
     # Canales del nodo local (índice+nombre), refrescados en cada conexión;
     # `[{"index": int, "name": str}, ...]`
     channels: list[dict] = field(default_factory=list)
+    # Actividad (ver Transport en el gateway): enlace API / RX LoRa / TX LoRa
+    last_device_response_at: datetime | None = None
+    last_lora_rx_at: datetime | None = None
+    last_lora_tx_at: datetime | None = None
     # Configuración gestionada desde la aplicación (M5, ADR 0021)
     name: str | None = None
     managed: bool = False

@@ -17,6 +17,9 @@
     "local_long_name": { "type": ["string", "null"], "description": "Nombre largo del nodo local (M5, refrescado al conectar)" },
     "local_hw_model": { "type": ["string", "null"], "description": "Hardware del nodo local (M5, refrescado al conectar)" },
     "local_firmware_version": { "type": ["string", "null"], "description": "Firmware del nodo local (M5, refrescado al conectar)" },
+    "last_device_response_at": { "type": ["string", "null"], "format": "date-time", "description": "Última respuesta real del nodo conectado por el enlace API (USB/TCP): la pasarela está viva. Independiente del tráfico LoRa." },
+    "last_lora_rx_at": { "type": ["string", "null"], "format": "date-time", "description": "Último paquete de OTRO nodo recibido por radio (tráfico RX)" },
+    "last_lora_tx_at": { "type": ["string", "null"], "format": "date-time", "description": "Última transmisión a la malla ordenada por la pasarela (tráfico TX)" },
     "channels": {
       "type": ["array", "null"],
       "description": "Canales configurados en el nodo local (índice+nombre), refrescados al conectar",

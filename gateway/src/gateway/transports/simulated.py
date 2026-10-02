@@ -111,8 +111,12 @@ class SimulatedTransport(Transport):
             )
         return nodes
 
+    async def probe(self) -> None:
+        self.mark_device_response()  # el nodo simulado siempre responde
+
     async def run(self) -> None:
         self.status = "connected"
+        self.mark_device_response()
         local = self._nodes[0]
         self.local_node_id = local.node_id
         self.local_short_name = local.short_name
@@ -150,6 +154,7 @@ class SimulatedTransport(Transport):
         )
 
     async def _tick(self, node: SimNode, elapsed: int) -> None:
+        self.mark_lora_rx()
         node.uptime += elapsed
         node.battery = max(5.0, node.battery - node.rng.uniform(0, 0.05))
 
@@ -183,6 +188,7 @@ class SimulatedTransport(Transport):
             )
 
     async def send_command(self, command: dict[str, Any]) -> None:
+        self.mark_lora_tx()
         if command.get("command_type") == "command.send_text":
             await self._simulate_send_text((command.get("payload") or {}).get("text") or "")
             return
@@ -224,6 +230,7 @@ class SimulatedTransport(Transport):
     # sin hardware, con latencias y timeouts deterministas por seed (ADR 0007).
 
     async def execute_admin(self, operation: dict[str, Any]) -> dict[str, Any]:
+        self.mark_lora_tx()
         node_id = str(operation["target_node_id"]).lower()
         node = next((n for n in self._nodes if n.node_id == node_id), None)
         if node is None:

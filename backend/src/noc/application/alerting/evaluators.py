@@ -139,9 +139,32 @@ def eval_snr_degraded(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondi
 
 
 def eval_gateway_disconnected(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    """Pasarela caída = el proceso no late, no está conectada o el NODO conectado
+    no responde por el enlace API (`last_device_response_at`). El tráfico LoRa
+    NO interviene: una malla en silencio no es una pasarela caída."""
     stale_after = rule.duration_seconds if rule.duration_seconds is not None else 90
     out = []
     for g in snap.gateways:
+        if (
+            g.status == "connected"
+            and not is_stale(g.updated_at, stale_after, snap.now)
+            and g.last_device_response_at is not None  # pasarelas antiguas sin sello: no se juzga
+            and is_stale(g.last_device_response_at, stale_after, snap.now)
+        ):
+            out.append(
+                AlertCondition(
+                    rule_id=rule.id or 0,
+                    subject_type="gateway",
+                    subject_id=g.gateway_id,
+                    message=(
+                        f"Pasarela {g.gateway_id} sin respuesta del nodo conectado "
+                        f"(enlace colgado) desde hace "
+                        f"{_fmt_duration_es((snap.now - ensure_utc(g.last_device_response_at)).total_seconds())}"
+                    ),
+                    correlation_key=f"gateway:{g.gateway_id}",
+                )
+            )
+            continue
         if g.status != "connected" or is_stale(g.updated_at, stale_after, snap.now):
             out.append(
                 AlertCondition(
@@ -173,6 +196,9 @@ def eval_gateway_no_traffic(rule: AlertRule, snap: NetworkSnapshot) -> list[Aler
         if g.deleted_at is not None or g.status != "connected":
             continue  # desconectada ya la cubre gateway_disconnected
         heard = last_heard.get(g.gateway_id)
+        if g.last_lora_rx_at is not None:
+            rx = ensure_utc(g.last_lora_rx_at)
+            heard = rx if heard is None or rx > heard else heard
         if heard is None:
             continue
         silent = (snap.now - heard).total_seconds()

@@ -293,6 +293,47 @@ def test_gateway_no_traffic_only_when_connected_with_baseline():
     assert [c.subject_id for c in conds] == ["gw-01"]
 
 
+def test_gateway_down_depends_on_device_response_not_on_traffic():
+    """Pasarela caída = el nodo no responde por el enlace API. Sin tráfico
+    LoRa (rx/tx antiguos) pero con el nodo respondiendo NO es una caída."""
+    from noc.domain.nodes.entities import GatewayInfo
+
+    now = datetime.now(timezone.utc)
+    quiet = dict(last_lora_rx_at=now - timedelta(hours=5), last_lora_tx_at=None)
+    snap = NetworkSnapshot(
+        gateways=[
+            # viva y callada: no alerta
+            GatewayInfo(gateway_id="gw-ok", status="connected", transport="usb", updated_at=now,
+                        last_device_response_at=now - timedelta(seconds=20), **quiet),
+            # latido fresco pero el nodo no contesta desde hace 10 min: enlace colgado
+            GatewayInfo(gateway_id="gw-hung", status="connected", transport="tcp", updated_at=now,
+                        last_device_response_at=now - timedelta(minutes=10)),
+            # pasarela antigua sin sello: no se juzga
+            GatewayInfo(gateway_id="gw-old", status="connected", transport="usb", updated_at=now),
+        ],
+    )
+    rule = AlertRule(id=1, name="g", rule_type="gateway_disconnected", severity="CRITICAL", duration_seconds=90)
+    conds = EVALUATORS["gateway_disconnected"](rule, snap)
+    assert [c.subject_id for c in conds] == ["gw-hung"]
+    assert "sin respuesta del nodo" in conds[0].message
+
+
+def test_gateway_no_traffic_uses_lora_rx_stamp():
+    from noc.domain.nodes.entities import GatewayInfo
+
+    now = datetime.now(timezone.utc)
+    snap = NetworkSnapshot(
+        gateways=[
+            GatewayInfo(gateway_id="gw-rx", status="connected", transport="usb", updated_at=now,
+                        last_lora_rx_at=now - timedelta(hours=2)),
+            GatewayInfo(gateway_id="gw-fresh", status="connected", transport="usb", updated_at=now,
+                        last_lora_rx_at=now - timedelta(seconds=30)),
+        ],
+    )
+    rule = AlertRule(id=1, name="g", rule_type="gateway_no_traffic", severity="WARNING", duration_seconds=1800)
+    assert [c.subject_id for c in EVALUATORS["gateway_no_traffic"](rule, snap)] == ["gw-rx"]
+
+
 def test_low_redundancy_needs_two_gateways():
     from noc.domain.nodes.entities import GatewayInfo, NodeGatewayLink
 

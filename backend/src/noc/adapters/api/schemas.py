@@ -232,6 +232,9 @@ class GatewayOut(BaseModel):
     local_hw_model: str | None
     local_firmware_version: str | None
     channels: list[dict]
+    last_device_response_at: datetime | None
+    last_lora_rx_at: datetime | None
+    last_lora_tx_at: datetime | None
     name: str | None
     managed: bool
     transport_type: str | None

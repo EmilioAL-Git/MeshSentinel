@@ -561,6 +561,13 @@ class SqlGatewayRepository:
         existing.local_hw_model = info.local_hw_model
         existing.local_firmware_version = info.local_firmware_version
         existing.channels = info.channels
+        # Los sellos de actividad solo avanzan: tras reiniciar el proceso el
+        # gateway los emite a None hasta la primera señal y no debe borrar lo
+        # último que se vio.
+        for attr in ("last_device_response_at", "last_lora_rx_at", "last_lora_tx_at"):
+            new = getattr(info, attr)
+            if new is not None:
+                setattr(existing, attr, new)
         # Historial mínimo derivado de la transición (ADR 0021 §2): no una
         # tabla de eventos, solo el último dato de cada tipo.
         if info.status == "connected" and previous_status != "connected":

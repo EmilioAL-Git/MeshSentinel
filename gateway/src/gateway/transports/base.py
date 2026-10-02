@@ -6,10 +6,15 @@ del callback `emit`, nunca estructuras de la librería.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 EmitFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 """(event_type, payload) -> None. El transporte no construye el sobre."""
+
+
+def _iso(dt: datetime | None) -> str | None:
+    return dt.isoformat() if dt is not None else None
 
 
 class Transport(ABC):
@@ -28,6 +33,32 @@ class Transport(ABC):
         # Canales del nodo local (índice+nombre), refrescados al conectar —
         # base de los nombres reales de canal en el Registro/Chat.
         self.channels: list[dict[str, Any]] | None = None
+        # Tres señales independientes (no confundir):
+        #  · device_response: el nodo conectado RESPONDE por el enlace API
+        #    (USB/TCP) — "la pasarela está viva". Es la que decide si se ha caído.
+        #  · lora_rx: llegó un paquete de OTRO nodo por radio — hay tráfico.
+        #  · lora_tx: la pasarela ordenó una transmisión a la malla.
+        # Que no haya tráfico (rx/tx antiguos) NO implica que la pasarela esté caída.
+        self.last_device_response_at: datetime | None = None
+        self.last_lora_rx_at: datetime | None = None
+        self.last_lora_tx_at: datetime | None = None
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    def mark_device_response(self) -> None:
+        self.last_device_response_at = self._now()
+
+    def mark_lora_rx(self) -> None:
+        self.last_lora_rx_at = self._now()
+
+    def mark_lora_tx(self) -> None:
+        self.last_lora_tx_at = self._now()
+
+    async def probe(self) -> None:
+        """Sondeo activo del enlace con el nodo (sin emitir nada a la malla).
+        Por defecto no hace nada; los transportes reales piden una respuesta."""
 
     async def emit_status(self, detail: str | None = None) -> None:
         await self._emit(
@@ -42,6 +73,9 @@ class Transport(ABC):
                 "local_hw_model": self.local_hw_model,
                 "local_firmware_version": self.local_firmware_version,
                 "channels": self.channels,
+                "last_device_response_at": _iso(self.last_device_response_at),
+                "last_lora_rx_at": _iso(self.last_lora_rx_at),
+                "last_lora_tx_at": _iso(self.last_lora_tx_at),
             },
         )
 

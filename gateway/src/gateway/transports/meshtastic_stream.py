@@ -47,6 +47,7 @@ class MeshtasticStreamTransport(Transport):
         # True tras la primera conexión con éxito: distingue "conectando" de
         # "reconectando" en el estado emitido (M5, ADR 0021 §4)
         self._ever_connected = False
+        self._local_node_num: int | None = None
 
     # ── Hooks de subclase: la ÚNICA diferencia entre transportes ────────────
 
@@ -71,7 +72,44 @@ class MeshtasticStreamTransport(Transport):
             self._counters["dropped"] += 1
 
     def _on_receive(self, packet: dict[str, Any], interface: Any) -> None:  # noqa: ARG002
+        # RX LoRa = paquete de OTRO nodo. Lo que el nodo local reporta de sí
+        # mismo por la API (telemetría propia, etc.) no pasó por la radio.
+        if self._local_node_num is None or packet.get("from") != self._local_node_num:
+            self.mark_lora_rx()
         self._enqueue(("packet", packet))
+
+    def _instrument(self, iface: Any) -> None:
+        """Engancha dos puntos de la interfaz (API privada, como `_sendAdmin`;
+        ADR 0013 §5) para sellar las señales de actividad sin tocar la
+        lógica: toda trama FromRadio = el nodo responde; todo `_sendPacket`
+        = transmisión pedida a la malla (admin, texto, ACK-only)."""
+        orig_rx = iface._handleFromRadio
+        orig_tx = iface._sendPacket
+
+        def handle_from_radio(*a: Any, **kw: Any) -> Any:
+            self.mark_device_response()
+            return orig_rx(*a, **kw)
+
+        def send_packet(*a: Any, **kw: Any) -> Any:
+            result = orig_tx(*a, **kw)
+            self.mark_lora_tx()
+            return result
+
+        iface._handleFromRadio = handle_from_radio
+        iface._sendPacket = send_packet
+
+    async def probe(self) -> None:
+        """Sondeo de vida: un `ToRadio.heartbeat` por el enlace API (no emite
+        a la malla). Si el nodo está vivo contesta por el mismo enlace y
+        `_handleFromRadio` sella `last_device_response_at`; si el enlace
+        murió en silencio, el sello envejece y el backend lo ve."""
+        iface = self._iface
+        if iface is None or self.status != "connected":
+            return
+        try:
+            await asyncio.wait_for(asyncio.to_thread(iface.sendHeartbeat), timeout=10)
+        except Exception:
+            logger.warning("%s.probe_failed", self.name, exc_info=True)
 
     def _on_connection_lost(self, interface: Any) -> None:
         # OJO: iface.close() también dispara connection.lost (el hilo lector al
@@ -103,6 +141,7 @@ class MeshtasticStreamTransport(Transport):
                 continue
 
             delay = self._settings.reconnect_initial_delay  # conexión OK: backoff a cero
+            self._instrument(self._iface)
             await self._on_connected()
             await self._pump_events()  # hasta desconexión o cierre
 
@@ -120,6 +159,13 @@ class MeshtasticStreamTransport(Transport):
             self.local_hw_model, self.local_firmware_version, self.channels, nodes = info
         self.status = "connected"
         self._ever_connected = True
+        self.mark_device_response()  # acabamos de leer su NodeDB: responde
+        try:
+            from meshtastic.util import to_node_num
+
+            self._local_node_num = to_node_num(self.local_node_id) if self.local_node_id else None
+        except Exception:
+            self._local_node_num = None
         await self.emit_status()
         logger.info(
             "%s.connected endpoint=%s local_node=%s nodedb_size=%d",

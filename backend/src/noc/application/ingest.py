@@ -49,6 +49,17 @@ def _node_label(node: Node | None, fallback: str) -> str:
     return fallback
 
 
+def _parse_dt(value: str | None) -> datetime | None:
+    """Fecha ISO opcional de un latido; inválida o ausente -> None."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def _parse_ts(value: str | None) -> datetime:
     if value:
         try:
@@ -429,6 +440,9 @@ class IngestService:
                 local_hw_model=p.get("local_hw_model"),
                 local_firmware_version=p.get("local_firmware_version"),
                 channels=p.get("channels") or [],
+                last_device_response_at=_parse_dt(p.get("last_device_response_at")),
+                last_lora_rx_at=_parse_dt(p.get("last_lora_rx_at")),
+                last_lora_tx_at=_parse_dt(p.get("last_lora_tx_at")),
             )
         )
         # Diario operativo (Actividad 2.0 Fase 1): narrar SOLO transiciones de

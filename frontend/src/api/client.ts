@@ -151,6 +151,10 @@ export interface GatewayOut {
   local_long_name: string | null;
   local_hw_model: string | null;
   local_firmware_version: string | null;
+  // Tres señales independientes: nodo responde (viva) / RX LoRa / TX LoRa
+  last_device_response_at: string | null;
+  last_lora_rx_at: string | null;
+  last_lora_tx_at: string | null;
   name: string | null;
   managed: boolean;
   transport_type: string | null;

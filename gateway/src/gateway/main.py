@@ -42,6 +42,9 @@ async def main() -> None:
             await asyncio.sleep(settings.status_interval_seconds)
             try:
                 if manager.transport is not None:
+                    # Sondear ANTES de emitir: el latido lleva el sello de la
+                    # última respuesta real del nodo, no solo "proceso vivo".
+                    await manager.transport.probe()
                     await manager.transport.emit_status()
             except Exception:
                 logger.exception("heartbeat.emit_failed")
