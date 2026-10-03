@@ -1,4 +1,4 @@
-# MeshSentinel (meshtastic-noc) — Arquitectura base
+# MeshSentinel — Arquitectura base
 
 Versión 1.0 — aprobada el 2026-06-12, actualizada para reflejar el estado
 vigente del proyecto. Las decisiones individuales se registran en

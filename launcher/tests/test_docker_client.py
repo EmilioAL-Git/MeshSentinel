@@ -83,7 +83,7 @@ def test_create_container_conflicts_with_foreign_container():
 def test_create_container_recreates_own_stale_container():
     client, fake_docker = _client_with_fake_docker()
     own = MagicMock()
-    own.labels = {"noc.gateway": "true"}
+    own.labels = {"meshsentinel.gateway": "true"}
     fake_docker.containers.get.return_value = own
     created = MagicMock(id="abc123", status="created")
     fake_docker.containers.run.return_value = created
@@ -106,9 +106,9 @@ def test_create_container_fresh_name():
 
     assert result.container_id == "def456"
     kwargs = fake_docker.containers.run.call_args.kwargs
-    assert kwargs["name"] == "noc-gateway-gw-x"
-    assert kwargs["labels"] == {"noc.gateway": "true", "noc.gateway_id": "gw-x"}
-    assert kwargs["network"] == "meshtastic-noc"
+    assert kwargs["name"] == "meshsentinel-gateway-gw-x"
+    assert kwargs["labels"] == {"meshsentinel.gateway": "true", "meshsentinel.gateway_id": "gw-x"}
+    assert kwargs["network"] == "meshsentinel"
 
 
 def test_destroy_container_not_found():
@@ -130,7 +130,7 @@ def test_destroy_container_refuses_foreign_container():
 def test_destroy_container_removes_own_container():
     client, fake_docker = _client_with_fake_docker()
     own = MagicMock()
-    own.labels = {"noc.gateway": "true"}
+    own.labels = {"meshsentinel.gateway": "true"}
     fake_docker.containers.get.return_value = own
     client.destroy_container("gw-x")
     own.remove.assert_called_once_with(force=True)

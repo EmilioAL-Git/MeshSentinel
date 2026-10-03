@@ -1,4 +1,4 @@
-name: meshtastic-noc
+name: meshsentinel
 
 services:
   postgres:
@@ -71,8 +71,8 @@ services:
   gateway-launcher:
     build: ./launcher
     environment:
-      LAUNCHER_GATEWAY_IMAGE: meshtastic-noc-gateway:local
-      LAUNCHER_DOCKER_NETWORK: meshtastic-noc
+      LAUNCHER_GATEWAY_IMAGE: meshsentinel-gateway:local
+      LAUNCHER_DOCKER_NETWORK: meshsentinel
       LAUNCHER_GATEWAY_REDIS_URL: redis://redis:6379/0
       LAUNCHER_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
     volumes:
@@ -104,7 +104,7 @@ services:
     # mano: `docker compose up -d --scale gateway=1 gateway`.
     scale: 0
     build: ./gateway
-    image: meshtastic-noc-gateway:local
+    image: meshsentinel-gateway:local
     environment:
       GATEWAY_ID: ${GATEWAY_ID:-gw-01}
       GATEWAY_TRANSPORT: ${GATEWAY_TRANSPORT:-simulated}
@@ -127,7 +127,7 @@ services:
 
 networks:
   noc:
-    name: meshtastic-noc
+    name: meshsentinel
 
 volumes:
   postgres-data:

@@ -13,7 +13,7 @@ de Docker.
 - `docker compose exec gateway-launcher wget -qO- http://localhost:9000/health`
   debe devolver `{"ok": true}`.
 - Cualquier pasarela creada desde la interfaz debe aparecer en
-  `docker ps --filter label=noc.gateway=true`.
+  `docker ps --filter label=meshsentinel.gateway=true`.
 
 ## A. Crear una pasarela simulada (sin hardware)
 
@@ -22,7 +22,7 @@ de Docker.
 2. Transporte **SIM**, nombre "Prueba simulada" (el `gateway_id` se rellena
    solo como `gw-prueba-simulada`, editable).
 3. **Crear pasarela**. Debe aparecer casi al instante un contenedor
-   `noc-gateway-gw-prueba-simulada` en `docker ps`, y la tarjeta en la
+   `meshsentinel-gateway-gw-prueba-simulada` en `docker ps`, y la tarjeta en la
    interfaz debe pasar de "Sin conexión" a "Conectado" en pocos segundos
    (chip "contenedor" visible).
 4. **Eliminar** esa pasarela desde su panel (confirmar "¿Eliminar y destruir
@@ -45,7 +45,7 @@ Docker Desktop se espera que falle — ver ADR 0028 §2)
    en macOS).
 2. En un host Linux con el dispositivo conectado, selecciona el puerto y
    crea la pasarela — el contenedor debe nacer ya con `--device` mapeado
-   (`docker inspect noc-gateway-<id> --format '{{.HostConfig.Devices}}'`).
+   (`docker inspect meshsentinel-gateway-<id> --format '{{.HostConfig.Devices}}'`).
 
 ## D. Registrar un proceso externo (camino de siempre, sin lanzador)
 
