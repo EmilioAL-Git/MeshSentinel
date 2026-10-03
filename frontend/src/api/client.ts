@@ -1125,6 +1125,8 @@ export interface EventsSocketHandle {
   close: () => void;
 }
 
+export const AUTH_CHANGED_EVENT = "ms:auth-changed";
+
 export function openEventsSocket(
   onEvent: (e: NocEvent) => void,
   onStatus?: (s: EventsSocketStatus) => void,
@@ -1167,9 +1169,21 @@ export function openEventsSocket(
     };
   };
 
+  // Tras iniciar/cerrar sesión el canal puede haber sido rechazado (ajuste
+  // "exigir sesión"): reconectar YA en vez de esperar al backoff de hasta 30 s
+  const onAuthChanged = () => {
+    if (closedByClient || ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+    if (retryTimer != null) window.clearTimeout(retryTimer);
+    retryTimer = null;
+    retryDelayMs = 1_000;
+    connect();
+  };
+  window.addEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
+
   connect();
   return {
     close: () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
       closedByClient = true;
       if (retryTimer != null) window.clearTimeout(retryTimer);
       ws?.close();
@@ -1517,3 +1531,63 @@ export type StartupGroup = "last" | "none" | number;
 export const fetchStartupGroup = () => get<{ value: StartupGroup }>("/settings/startup-group");
 export const setStartupGroup = (value: StartupGroup) =>
   send<{ value: StartupGroup }>("PUT", "/settings/startup-group", { value });
+
+// ── Mantenimiento de datos: almacenamiento, retención y salud del NOC (admin) ──
+
+export interface TableStatsOut {
+  table: string;
+  label: string;
+  rows: number;
+  bytes: number | null;
+  oldest: string | null;
+}
+
+export interface RetentionPolicyOut {
+  key: string;
+  label: string;
+  setting: string;
+  days: number;
+  tables: string[];
+  rows: number;
+  bytes: number | null;
+  oldest: string | null;
+}
+
+export interface RetentionRunOut {
+  finished_at: string;
+  duration_seconds: number;
+  deleted: Record<string, number>;
+  trigger: "scheduled" | "manual";
+  error: string | null;
+}
+
+export interface StorageOut {
+  engine: string;
+  total_bytes: number | null;
+  tables: TableStatsOut[];
+  policies: RetentionPolicyOut[];
+  last_run: RetentionRunOut | null;
+  running: boolean;
+}
+
+export interface RuntimeOut {
+  uptime_seconds: number;
+  ws_clients: number;
+  ws_dropped_clients: number;
+  activity_queue_size: number;
+  activity_queue_max: number;
+  activity_dropped: number;
+  event_loop_lag_ms: number;
+  retention_running: boolean;
+}
+
+export const fetchStorage = () => get<StorageOut>("/maintenance/storage");
+export const pruneNow = () => send<RetentionRunOut>("POST", "/maintenance/prune");
+export const fetchRuntime = () => get<RuntimeOut>("/maintenance/runtime");
+
+export interface DigestSendOut {
+  delivered: number;
+  providers: number;
+}
+export const fetchDigestStatus = () => get<{ last_sent_at: string | null }>("/maintenance/digest");
+export const sendDigestNow = () => send<DigestSendOut>("POST", "/maintenance/digest/send");

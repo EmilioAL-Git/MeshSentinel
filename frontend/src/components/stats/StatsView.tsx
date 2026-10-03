@@ -1,5 +1,7 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { downloadText, stamp, toCsv } from "../../utils/exportData";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useUrlNumber } from "../../hooks/useUrlState";
 import { displayName, fetchStatsRanking, fetchStatsSummary, type StatRecordOut } from "../../api/client";
 import { Modal } from "../shell/Modal";
@@ -69,6 +71,8 @@ function RecordCard({ r, onOpen }: { r: StatRecordOut; onOpen: (r: StatRecordOut
   );
 }
 
+const ROW_HEIGHT = 34;
+
 function RankingModal({
   record,
   hours,
@@ -85,43 +89,83 @@ function RankingModal({
     queryFn: () => fetchStatsRanking(record.key, hours),
   });
   const rows = ranking.data ?? [];
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 12,
+  });
 
   return (
     <Modal title={`${record.icon} ${record.label} · ${windowLabel(hours)}`} onClose={onClose}>
       {ranking.isLoading && <div className="empty">Cargando…</div>}
       {!ranking.isLoading && rows.length === 0 && <div className="empty">Sin nodos con este dato.</div>}
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        {rows.map((row, i) => (
+      {rows.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
           <button
-            key={row.node_id}
-            className="btn"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.6rem",
-              justifyContent: "flex-start",
-              border: "none",
-              borderBottom: "1px solid var(--border-subtle)",
-              borderRadius: 0,
-              background: i === 0 ? "var(--accent-tint)" : "transparent",
-              padding: "0.4rem 0.3rem",
-            }}
-            onClick={() => {
-              onOpenNode(row.node_id);
-              onClose();
-            }}
+            className="btn ghost"
+            onClick={() =>
+              downloadText(
+                `ranking-${record.key}-${stamp()}.csv`,
+                "text/csv",
+                toCsv(
+                  ["posicion", "node_id", "short_name", "long_name", "valor"],
+                  rows.map((r, i) => [i + 1, r.node_id, r.short_name, r.long_name, formatValue(r)]),
+                ),
+                true,
+              )
+            }
           >
-            <span className="mono" style={{ fontSize: 11, color: "var(--text-faint)", width: 28, flexShrink: 0 }}>
-              #{i + 1}
-            </span>
-            <span style={{ flex: 1, minWidth: 0, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {displayName({ node_id: row.node_id, short_name: row.short_name, long_name: row.long_name })}
-            </span>
-            <span className="mono" style={{ fontSize: 12.5, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
-              {formatValue(row)}
-            </span>
+            ⤓ CSV ({rows.length})
           </button>
-        ))}
+        </div>
+      )}
+      {/* Virtualizado: el ranking completo puede ser de ~1000 nodos */}
+      <div ref={scrollRef} style={{ maxHeight: "60vh", overflowY: "auto" }}>
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          {virtualizer.getVirtualItems().map((v) => {
+            const row = rows[v.index];
+            const i = v.index;
+            return (
+              <button
+                key={row.node_id}
+                className="btn"
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: ROW_HEIGHT,
+                  transform: `translateY(${v.start}px)`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.6rem",
+                  justifyContent: "flex-start",
+                  border: "none",
+                  borderBottom: "1px solid var(--border-subtle)",
+                  borderRadius: 0,
+                  background: i === 0 ? "var(--accent-tint)" : "transparent",
+                  padding: "0 0.3rem",
+                }}
+                onClick={() => {
+                  onOpenNode(row.node_id);
+                  onClose();
+                }}
+              >
+                <span className="mono" style={{ fontSize: 11, color: "var(--text-faint)", width: 28, flexShrink: 0 }}>
+                  #{i + 1}
+                </span>
+                <span style={{ flex: 1, minWidth: 0, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {displayName({ node_id: row.node_id, short_name: row.short_name, long_name: row.long_name })}
+                </span>
+                <span className="mono" style={{ fontSize: 12.5, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                  {formatValue(row)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </Modal>
   );

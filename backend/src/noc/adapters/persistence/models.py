@@ -502,8 +502,8 @@ class AuthSessionModel(Base):
 class AuthLoginLogModel(Base):
     """Auditoría de accesos (auth), independiente de `activity_log`: registra
     intentos de login (correctos y fallidos), logout, expiración de sesión,
-    usuario deshabilitado y bloqueos por rate limit. No se poda automáticamente
-    — es un registro de seguridad, no un diario operativo con memoria acotada."""
+    usuario deshabilitado y bloqueos por rate limit. Es un registro de seguridad:
+    solo se poda por `retention_login_log_days` (Ajustes → Datos; 0 = nunca)."""
 
     __tablename__ = "auth_login_log"
     __table_args__ = (Index("ix_auth_login_log_created", "created_at"),)

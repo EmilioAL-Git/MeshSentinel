@@ -85,3 +85,13 @@ sin renunciar a dos principios del producto:
 - La comparación de modo protegido se cachea en memoria por proceso y se
   invalida en cada mutación de usuarios; con un único proceso backend es
   suficiente.
+
+## Nota (2026-10-03): WebSocket `/ws/events`
+
+La monitorización es siempre abierta (GET sin sesión) y el WebSocket de
+eventos es su equivalente en tiempo real, así que por defecto sigue abierto.
+Para quien quiera cerrarlo existe el ajuste `ws_require_auth` (Ajustes →
+Seguridad, o `NOC_WS_REQUIRE_AUTH=1`): con el modo protegido activo, el
+handshake sin sesión válida se rechaza (código 4401) y la UI reconecta al
+instante al iniciar sesión. Sin sesión se siguen viendo datos por REST pero
+sin actualizaciones en vivo.

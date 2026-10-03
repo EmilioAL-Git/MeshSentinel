@@ -1,3 +1,4 @@
+import { downloadText, fleetCsv, fleetGeoJson, stamp } from "../../utils/exportData";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -357,6 +358,21 @@ export function FleetView({
           </button>
         )}
         <span style={{ marginLeft: "auto" }} />
+        <select
+          className="input"
+          value=""
+          title="Exporta la lista filtrada que ves ahora"
+          onChange={(e) => {
+            const kind = e.target.value;
+            if (kind === "csv") downloadText(`flota-${stamp()}.csv`, "text/csv", fleetCsv(summaries), true);
+            if (kind === "geojson") downloadText(`flota-${stamp()}.geojson`, "application/geo+json", fleetGeoJson(summaries));
+            e.target.value = "";
+          }}
+        >
+          <option value="">⤓ exportar ({summaries.length})</option>
+          <option value="csv">CSV</option>
+          <option value="geojson">GeoJSON (con posición)</option>
+        </select>
         <ColumnPicker visible={visibleColumns} onChange={setVisibleColumns} />
       </div>
 

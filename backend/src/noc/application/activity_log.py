@@ -15,6 +15,7 @@ transporte del gateway, ADR 0009).
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -34,14 +35,29 @@ class ActivityLogWriter:
     """Cola acotada -> INSERT por lotes -> poda periódica por tamaño máximo."""
 
     def __init__(
-        self, session_factory: async_sessionmaker[AsyncSession], max_rows: int
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        max_rows: int | Callable[[], int],
     ) -> None:
         self._session_factory = session_factory
-        self._max_rows = max_rows
+        # Callable: el tope es editable en runtime (Ajustes → Datos)
+        self._max_rows_source = max_rows
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=QUEUE_MAX)
         self._task: asyncio.Task[None] | None = None
         self._dropped = 0
         self._since_prune = 0
+
+    @property
+    def _max_rows(self) -> int:
+        src = self._max_rows_source
+        return src() if callable(src) else src
+
+    def metrics(self) -> dict[str, int]:
+        return {
+            "queue_size": self._queue.qsize(),
+            "queue_max": QUEUE_MAX,
+            "dropped": self._dropped,
+        }
 
     def enqueue(self, envelope: dict[str, Any]) -> None:
         """No bloqueante y sin excepciones: apto para llamar desde el publisher."""

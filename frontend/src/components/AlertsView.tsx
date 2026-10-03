@@ -128,7 +128,7 @@ const PROVIDER_FIELD_META: Record<
   ntfy: {
     label: "ntfy",
     fields: [
-      { key: "topic", label: "Topic", placeholder: "meshtastic-noc" },
+      { key: "topic", label: "Topic", placeholder: "meshsentinel" },
       { key: "url", label: "Servidor", placeholder: "https://ntfy.sh (opcional)", optional: true },
       { key: "token", label: "Token", type: "password", optional: true },
     ],
@@ -1022,7 +1022,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
             </div>
             <div className="panel-body flush">
               {(providers.data ?? []).length === 0 && (
-                <div className="empty">Sin integraciones. Las alertas solo se verán en el NOC.</div>
+                <div className="empty">Sin integraciones. Las alertas solo se verán en MeshSentinel.</div>
               )}
               {(providers.data ?? []).map((p) => (
                 <div

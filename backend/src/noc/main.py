@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
@@ -21,6 +22,7 @@ from noc.adapters.api.routers import (
     nexus as nexus_router,
     nodes,
     organization,
+    maintenance as maintenance_router,
     settings as settings_router,
     stats as stats_router,
     system,
@@ -44,12 +46,14 @@ from noc.application.alerting.dispatcher import NotificationDispatcher
 from noc.application.alerting.seed import seed_default_rules
 from noc.application.auth.service import AuthService
 from noc.application.dashboard import DashboardService
+from noc.application.digest import DigestService
 from noc.application.envelopes import make_event_envelope
 from noc.application.gateways.service import GatewayService
 from noc.application.nexus_conversation import NexusConversationService
 from noc.application.nexus_gateway import NexusGateway
 from noc.application.nexus_operations import NexusOperationService
 from noc.application.ingest import IngestService
+from noc.application.retention import RetentionService
 from noc.application.settings_registry import apply_overrides
 from noc.application.stats import StatsService
 from noc.config import get_settings
@@ -118,10 +122,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # una sesión propia inline, que en SQLite chocaría con la transacción de
     # la ingesta que está narrando.
     activity_log_writer = ActivityLogWriter(
-        app.state.db.session_factory, settings.activity_log_max_rows
+        app.state.db.session_factory, lambda: settings.activity_log_max_rows
     )
     activity.attach_store(activity_log_writer.enqueue)
     activity_log_writer.start()
+    app.state.activity_log_writer = activity_log_writer
+    app.state.started_at = asyncio.get_running_loop().time()
+
+    # Retención por tipo de dato (Ajustes → Datos): poda periódica en lotes
+    retention = RetentionService(app.state.db.session_factory, settings)
+    app.state.retention = retention
+    retention.start()
+
+    # Resumen periódico de la red (Ajustes → Datos): reutiliza las integraciones
+    digest = DigestService(
+        app.state.db.session_factory, settings, app.state.dashboard, app.state.stats
+    )
+    app.state.digest = digest
+    digest.start()
 
     # Pipeline de administración remota (M1.1, ADR 0013)
     admin_service = AdminOperationService(app.state.db.session_factory, command_queue, settings)
@@ -159,6 +177,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await digest.stop()
+        await retention.stop()
         await admin_service.stop()
         await nexus_ops.stop()
         await alert_loop.stop()
@@ -248,6 +268,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, prefix=settings.api_v1_prefix)
     app.include_router(topology.router, prefix=settings.api_v1_prefix)
     app.include_router(settings_router.router, prefix=settings.api_v1_prefix)
+    app.include_router(maintenance_router.router, prefix=settings.api_v1_prefix)
     app.include_router(nexus_router.router, prefix=settings.api_v1_prefix)
     app.include_router(ws_router)
     return app

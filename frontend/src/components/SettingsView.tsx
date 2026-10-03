@@ -2,8 +2,13 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchConfigExport,
+  fetchDigestStatus,
+  fetchRuntime,
   fetchSettings,
+  fetchStorage,
   importConfig,
+  pruneNow,
+  sendDigestNow,
   patchSetting,
   resetSetting,
   wipeAllNodes,
@@ -20,11 +25,12 @@ import { useAuth } from "../context/AuthContext";
 import { useUrlString } from "../hooks/useUrlState";
 import { fetchGroups, fetchStartupGroup, setStartupGroup, type StartupGroup } from "../api/client";
 
-const CATEGORY_ORDER = ["network", "alerts", "admin", "activity"];
+const CATEGORY_ORDER = ["network", "alerts", "admin", "activity", "security"];
 
 const TAB_LABEL: Record<string, string> = {
   general: "General",
   mantenimiento: "Configuración",
+  datos: "Datos",
   nexus: "Nexus",
   users: "Usuarios",
   "login-log": "Accesos",
@@ -72,7 +78,7 @@ export function SettingsView() {
   const tabs = [
     ...(authState.canOperate ? ["general"] : []),
     // Importar/exportar/borrar la BD: solo admin (ADR 0029).
-    ...(authState.canAdmin ? ["mantenimiento"] : []),
+    ...(authState.canAdmin ? ["mantenimiento", "datos"] : []),
     ...(authState.canOperate ? ["nexus"] : []),
     ...(canManageUsers ? ["users"] : []),
     ...(authState.isAuthenticated ? ["login-log"] : []),
@@ -137,6 +143,14 @@ export function SettingsView() {
           <ConfigPortability />
           <NodeDbMaintenance />
         </div>
+      )}
+
+      {tab === "datos" && authState.canAdmin && (
+        <DataPanel
+          retentionSettings={settings.filter((s) => s.category === "retention")}
+          digestSettings={settings.filter((s) => s.category === "digest")}
+          onChanged={invalidate}
+        />
       )}
 
       {tab === "nexus" && <NexusPanel />}
@@ -469,7 +483,7 @@ function SettingRow({ setting, onChanged }: { setting: SettingOut; onChanged: ()
                 />
                 <span style={{ color: t.textDim }}>h</span>
               </>
-            ) : !setting.choices ? (
+            ) : !setting.choices || customMode ? (
               <>
                 <input
                   type="number"
@@ -516,5 +530,234 @@ function SettingRow({ setting, onChanged }: { setting: SettingOut; onChanged: ()
         )}
       </td>
     </tr>
+  );
+}
+
+// ── Datos: retención por tipo, almacenamiento y salud del proceso ──────────
+
+function fmtBytes(n: number | null): string {
+  if (n == null) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
+function fmtDate(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleDateString() : "—";
+}
+
+function fmtUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return [d ? `${d} d` : "", h ? `${h} h` : "", `${m} min`].filter(Boolean).join(" ");
+}
+
+const thStyle = { textAlign: "left", padding: "4px 8px", color: t.textDim, fontWeight: 500, fontSize: 11.5 } as const;
+const tdStyle = { padding: "5px 8px", fontSize: 12.5 } as const;
+
+function DataPanel({
+  retentionSettings,
+  digestSettings,
+  onChanged,
+}: {
+  retentionSettings: SettingOut[];
+  digestSettings: SettingOut[];
+  onChanged: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const storage = useQuery({ queryKey: ["storage"], queryFn: fetchStorage, refetchInterval: 30_000 });
+  const runtime = useQuery({ queryKey: ["runtime"], queryFn: fetchRuntime, refetchInterval: 10_000 });
+
+  const digestStatus = useQuery({ queryKey: ["digest-status"], queryFn: fetchDigestStatus });
+  const digest = useMutation({
+    mutationFn: sendDigestNow,
+    onSuccess: (res) => {
+      toast(`Resumen enviado a ${res.delivered} de ${res.providers} integraciones`);
+      queryClient.invalidateQueries({ queryKey: ["digest-status"] });
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo enviar", { kind: "error" }),
+  });
+
+  const prune = useMutation({
+    mutationFn: pruneNow,
+    onSuccess: (run) => {
+      const total = Object.values(run.deleted).reduce((a, b) => a + b, 0);
+      if (run.error) toast(`La poda falló: ${run.error}`, { kind: "error" });
+      else toast(total ? `Poda aplicada: ${total.toLocaleString()} filas eliminadas` : "Nada que podar con los plazos actuales");
+      queryClient.invalidateQueries({ queryKey: ["storage"] });
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo podar", { kind: "error" }),
+  });
+
+  const s = storage.data;
+  const r = runtime.data;
+  const lastRun = s?.last_run;
+  const lastTotal = lastRun ? Object.values(lastRun.deleted).reduce((a, b) => a + b, 0) : 0;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.4rem" }}>
+      <p style={{ color: t.textDim, fontSize: 12.5, maxWidth: 680 }}>
+        Cuánto tiempo conserva MeshSentinel cada tipo de dato. Una tarea en segundo plano poda cada hora lo que
+        supere su plazo (por lotes, sin bloquear la ingesta); «Siempre» desactiva la poda de ese tipo. Las alertas
+        activas, las operaciones en curso y los favoritos nunca se podan. Los cambios se aplican de inmediato.
+      </p>
+
+      <div className="kpis">
+        <div className="kpi">
+          <div className="v">{fmtBytes(s?.total_bytes ?? null)}</div>
+          <div className="k">Tamaño de la BD ({s?.engine ?? "…"})</div>
+        </div>
+        <div className="kpi">
+          <div className="v">{s ? s.tables.reduce((a, x) => a + x.rows, 0).toLocaleString() : "—"}</div>
+          <div className="k">Filas totales</div>
+        </div>
+        <div className="kpi">
+          <div className="v">{lastRun ? `${lastTotal.toLocaleString()}` : "—"}</div>
+          <div className="k">
+            {lastRun
+              ? `Última poda: ${new Date(lastRun.finished_at).toLocaleString()} (${lastRun.trigger === "manual" ? "manual" : "programada"}, ${lastRun.duration_seconds} s)`
+              : "Aún no ha corrido ninguna poda"}
+          </div>
+        </div>
+      </div>
+      {lastRun?.error && <div style={{ color: t.crit, fontSize: 12.5 }}>Última poda con error: {lastRun.error}</div>}
+
+      <div>
+        <h2>Plazos de retención</h2>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, fontSize: 12.5 }}>
+          <tbody>
+            {retentionSettings.map((st) => (
+              <SettingRow key={st.key} setting={st} onChanged={() => { onChanged(); queryClient.invalidateQueries({ queryKey: ["storage"] }); }} />
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 10 }}>
+          <button className="btn" disabled={prune.isPending || s?.running} onClick={() => prune.mutate()}>
+            {prune.isPending || s?.running ? "Podando…" : "Aplicar ahora"}
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <h2>Resumen periódico</h2>
+        <div style={{ color: t.textDim, fontSize: 12.5, maxWidth: 640, marginTop: 4 }}>
+          Mensaje con el estado de la red, nodos nuevos, alertas y récords, enviado a todas las integraciones de
+          notificación habilitadas (Alertas → Integraciones).
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, fontSize: 12.5 }}>
+          <tbody>
+            {digestSettings.map((st) => (
+              <SettingRow key={st.key} setting={st} onChanged={onChanged} />
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center" }}>
+          <button className="btn" disabled={digest.isPending} onClick={() => digest.mutate()}>
+            {digest.isPending ? "Enviando…" : "Enviar ahora"}
+          </button>
+          <span style={{ color: t.textFaint, fontSize: 12 }}>
+            {digestStatus.data?.last_sent_at
+              ? `Último envío: ${new Date(digestStatus.data.last_sent_at).toLocaleString()}`
+              : "Aún no se ha enviado ninguno"}
+          </span>
+        </div>
+      </div>
+
+      <div>
+        <h2>Almacenamiento por tipo de dato</h2>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${t.borderSubtle}` }}>
+              <th style={thStyle}>Tipo</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>Filas</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>Tamaño</th>
+              <th style={thStyle}>Dato más antiguo</th>
+              <th style={thStyle}>Retención</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(s?.policies ?? []).map((p) => (
+              <tr key={p.key} style={{ borderBottom: `1px solid ${t.borderSubtle}` }}>
+                <td style={tdStyle}>{p.label}</td>
+                <td style={{ ...tdStyle, textAlign: "right", fontFamily: t.fontMono }}>{p.rows.toLocaleString()}</td>
+                <td style={{ ...tdStyle, textAlign: "right", fontFamily: t.fontMono }}>{fmtBytes(p.bytes)}</td>
+                <td style={tdStyle}>{fmtDate(p.oldest)}</td>
+                <td style={{ ...tdStyle, color: p.days ? t.text : t.textDim }}>{p.days ? `${p.days} d` : "Siempre"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <details>
+        <summary style={{ cursor: "pointer", color: t.textDim, fontSize: 12.5 }}>
+          Todas las tablas ({s?.tables.length ?? 0})
+        </summary>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+          <tbody>
+            {(s?.tables ?? []).map((tb) => (
+              <tr key={tb.table} style={{ borderBottom: `1px solid ${t.borderSubtle}` }}>
+                <td style={tdStyle}>
+                  {tb.label}
+                  {tb.label !== tb.table && (
+                    <span style={{ color: t.textFaint, fontFamily: t.fontMono, fontSize: 11, marginLeft: 6 }}>{tb.table}</span>
+                  )}
+                </td>
+                <td style={{ ...tdStyle, textAlign: "right", fontFamily: t.fontMono }}>{tb.rows.toLocaleString()}</td>
+                <td style={{ ...tdStyle, textAlign: "right", fontFamily: t.fontMono }}>{fmtBytes(tb.bytes)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
+
+      <div>
+        <h2>Copia de seguridad</h2>
+        <div style={{ color: t.textDim, fontSize: 12.5, maxWidth: 640, margin: "4px 0 8px" }}>
+          Descarga una copia lógica completa (JSON Lines comprimido, válida para SQLite y PostgreSQL). Contiene
+          hashes de contraseña y tokens de integraciones: guárdala como un secreto. Se restaura sobre una BD vacía
+          y migrada con{" "}
+          <code style={{ fontFamily: t.fontMono }}>docker compose exec backend python -m noc.restore_backup /ruta/copia.jsonl.gz</code>.
+          Con bases grandes la descarga puede tardar.
+        </div>
+        <a className="btn" href="/api/v1/maintenance/backup" download>
+          ⤓ Descargar copia
+        </a>
+      </div>
+
+      <div>
+        <h2>Salud del proceso MeshSentinel</h2>
+        <div className="kpis" style={{ marginTop: 8 }}>
+          <div className="kpi">
+            <div className="v">{r ? fmtUptime(r.uptime_seconds) : "—"}</div>
+            <div className="k">En marcha</div>
+          </div>
+          <div className="kpi">
+            <div className="v">{r?.ws_clients ?? "—"}</div>
+            <div className="k">Pestañas conectadas{r?.ws_dropped_clients ? ` · ${r.ws_dropped_clients} expulsadas` : ""}</div>
+          </div>
+          <div className="kpi">
+            <div className="v" style={{ color: r && r.activity_dropped > 0 ? t.warn : undefined }}>
+              {r ? `${r.activity_queue_size}/${r.activity_queue_max}` : "—"}
+            </div>
+            <div className="k">Cola del Registro{r?.activity_dropped ? ` · ${r.activity_dropped} descartadas` : ""}</div>
+          </div>
+          <div className="kpi">
+            <div className="v" style={{ color: r && r.event_loop_lag_ms > 100 ? t.warn : undefined }}>
+              {r ? `${r.event_loop_lag_ms} ms` : "—"}
+            </div>
+            <div className="k">Latencia del bucle de eventos</div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

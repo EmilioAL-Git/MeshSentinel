@@ -49,7 +49,7 @@ def test_message() -> NotificationMessage:
         title="[TEST] INFO: Prueba de integración",
         severity="INFO",
         kind="test",
-        subject_label="system:noc",
-        body="Mensaje de prueba — Meshtastic NOC",
+        subject_label="system:meshsentinel",
+        body="Mensaje de prueba — MeshSentinel",
         occurred_at=datetime.now(timezone.utc),
     )

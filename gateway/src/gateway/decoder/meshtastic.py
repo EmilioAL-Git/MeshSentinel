@@ -261,3 +261,37 @@ def decode_nodedb_entry(node_id_raw: str, entry: dict[str, Any]) -> DecodedEvent
     payload["via_mqtt"] = bool(entry.get("viaMqtt", False))
     payload["last_heard"] = _epoch_to_iso(entry.get("lastHeard"))
     return ("node.seen", payload)
+
+
+_UNKNOWN_SNR_RAW = -128  # el firmware marca "sin SNR" así (valores en cuartos de dB)
+
+
+def _snr_db(raw_list: Any) -> list[float | None]:
+    out: list[float | None] = []
+    for raw in raw_list or []:
+        out.append(None if raw == _UNKNOWN_SNR_RAW else round(raw / 4, 2))
+    return out
+
+
+def traceroute_result(packet: dict[str, Any]) -> dict[str, Any]:
+    """Respuesta a un traceroute ACTIVO -> resultado de la operación admin.
+
+    La librería entrega el callback `onResponse` con la respuesta
+    TRACEROUTE_APP (ya parseada en `decoded.traceroute`) o con un
+    ROUTING_APP si el firmware rechazó/no pudo entregar. `route` lista solo
+    los saltos INTERMEDIOS (vacío = alcance directo). Que no haya ruta NO es
+    un fallo de la operación: es el resultado ("reached": false)."""
+    decoded = packet.get("decoded") or {}
+    trace = decoded.get("traceroute")
+    if decoded.get("portnum") == "TRACEROUTE_APP" and isinstance(trace, dict):
+        route = [_node_id_from_num(n) for n in (trace.get("route") or [])]
+        route_back = [_node_id_from_num(n) for n in (trace.get("routeBack") or [])]
+        return {
+            "reached": True,
+            "route": route,
+            "snr_towards": _snr_db(trace.get("snrTowards")),
+            "route_back": route_back,
+            "snr_back": _snr_db(trace.get("snrBack")),
+        }
+    routing = decoded.get("routing") or {}
+    return {"reached": False, "error_reason": routing.get("errorReason") or "UNKNOWN"}

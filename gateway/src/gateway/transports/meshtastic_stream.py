@@ -346,6 +346,8 @@ class MeshtasticStreamTransport(Transport):
             self.name, operation.get("operation_id"), op_type, node_id,
         )
 
+        if op_type == "traceroute.run":
+            return await self._execute_traceroute(node_id, params, operation)
         if op_type in SET_OPERATIONS:
             return await self._execute_set(node_id, op_type, params, operation)
         if op_type in ACK_ONLY_OPERATIONS:
@@ -353,6 +355,46 @@ class MeshtasticStreamTransport(Transport):
 
         message, response_key = build_admin_request(op_type, params)
         return await self._admin_roundtrip(node_id, message, response_key)
+
+    async def _execute_traceroute(
+        self, node_id: str, params: dict[str, Any], operation: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Traceroute activo: UN envío, sin reintentos en el gateway (cada
+        intento inunda la malla hasta `hop_limit` saltos). La ausencia de
+        respuesta se devuelve como resultado ("reached": false), no como
+        error: el backend no debe reintentar solo y triplicar el tráfico."""
+        from gateway.decoder.meshtastic import traceroute_result
+        from meshtastic.protobuf import mesh_pb2, portnums_pb2
+
+        assert self._loop is not None
+        loop = self._loop
+        hop_limit = max(1, min(7, int(params.get("hop_limit") or 5)))
+        # Margen bajo el timeout de la operación para devolver el resultado
+        # "sin respuesta" en vez de que el consumer lo mate como timeout
+        op_timeout = float(operation.get("timeout_seconds") or 120)
+        wait = max(10.0, min(20.0 + 8.0 * hop_limit, op_timeout - 10.0))
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        def on_response(packet: dict[str, Any]) -> None:
+            if not future.done():
+                loop.call_soon_threadsafe(future.set_result, packet)
+
+        def send() -> None:
+            self._iface.sendData(
+                mesh_pb2.RouteDiscovery(),
+                destinationId=node_id,
+                portNum=portnums_pb2.PortNum.TRACEROUTE_APP,
+                wantResponse=True,
+                onResponse=on_response,
+                hopLimit=hop_limit,
+            )
+
+        await asyncio.to_thread(send)
+        try:
+            packet = await asyncio.wait_for(future, timeout=wait)
+        except (TimeoutError, asyncio.TimeoutError):
+            return {"reached": False, "error_reason": "NO_RESPONSE", "waited_seconds": wait}
+        return traceroute_result(packet)
 
     async def _ack_roundtrip(self, send: Any, timeout: float) -> dict[str, Any]:
         """Envía un mensaje esperando solo el ACK/NAK de la capa de transporte

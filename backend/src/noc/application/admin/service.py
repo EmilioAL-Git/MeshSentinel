@@ -169,7 +169,12 @@ class AdminOperationService:
                     )
                     logger.info("admin.op %s id=%s node=%s", status, op_id, op.target_node_id)
                     verify = result.get("verify") if isinstance(result, dict) else None
-                    await activity.operation(op, "finished", final_status=status, verify=verify)
+                    extra: dict[str, Any] = {}
+                    if op.operation_type == "traceroute.run" and isinstance(result, dict):
+                        # El resultado es pequeño y el operador quiere verlo al
+                        # instante (toast); el resto de tipos no lo necesita
+                        extra["traceroute"] = result
+                    await activity.operation(op, "finished", final_status=status, verify=verify, **extra)
                     await self._notify_batch(session, op)
             else:
                 await self._apply_failure(repo, op, state, payload.get("error"), now, session)

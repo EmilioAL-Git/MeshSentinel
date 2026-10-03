@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchMe, login as apiLogin, logout as apiLogout, onUnauthorized, type MeOut, type UserRole } from "../api/client";
+import { AUTH_CHANGED_EVENT, fetchMe, login as apiLogin, logout as apiLogout, onUnauthorized, type MeOut, type UserRole } from "../api/client";
 
 /**
  * Sesión de MeshSentinel: monitorización siempre abierta (`protectedMode`
@@ -51,12 +51,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onSuccess: () => {
       setLoginModalOpen(false);
       queryClient.invalidateQueries(); // todo: los datos enmascarados cambian con la sesión
+      window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
     },
   });
 
   const logoutMutation = useMutation({
     mutationFn: apiLogout,
-    onSuccess: () => queryClient.invalidateQueries(),
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+      window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+    },
   });
 
   const me = meQuery.data ?? null;

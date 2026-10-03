@@ -34,7 +34,19 @@ CATEGORY_LABELS: dict[str, str] = {
     "alerts": "Motor de alertas",
     "admin": "Administración remota",
     "activity": "Actividad y registro",
+    "retention": "Retención de datos",
+    "digest": "Resumen periódico",
+    "security": "Seguridad",
 }
+
+RETENTION_CHOICES: tuple[tuple[str, float], ...] = (
+    ("Siempre", 0),
+    ("7 días", 7),
+    ("30 días", 30),
+    ("90 días", 90),
+    ("180 días", 180),
+    ("1 año", 365),
+)
 
 SETTINGS_REGISTRY: list[SettingSpec] = [
     SettingSpec(
@@ -133,9 +145,82 @@ SETTINGS_REGISTRY: list[SettingSpec] = [
         "Pausa fija antes de reenviar favorito/ignorado remoto ya confirmado por ACK aislado (ADR 0019).",
     ),
     SettingSpec(
-        "activity_log_max_rows", "activity", "Tope del registro",
+        "activity_log_max_rows", "retention", "Registro de actividad (tope de filas)",
         "int", "filas", 100,
         "Filas máximas de activity_log; se podan las más antiguas al superarlo.",
+    ),
+    SettingSpec(
+        "retention_telemetry_days", "retention", "Telemetría",
+        "int", "d", 0,
+        "Batería, voltaje, uso de canal, entorno… de cada nodo. 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
+        "retention_positions_days", "retention", "Posiciones",
+        "int", "d", 0,
+        "Historial GPS (traza en el mapa y distancia recorrida). 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
+        "retention_neighbors_days", "retention", "Vecinos (NeighborInfo)",
+        "int", "d", 0,
+        "Enlaces nodo↔nodo reportados; crece rápido (N vecinos por paquete). Las alertas de enlace perdido miran 7 días. 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
+        "retention_chat_days", "retention", "Mensajes de chat",
+        "int", "d", 0,
+        "Mensajes de texto oídos por las pasarelas. 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
+        "retention_alerts_days", "retention", "Alertas resueltas",
+        "int", "d", 0,
+        "Solo alertas ya resueltas; las activas y reconocidas nunca se podan. 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
+        "retention_admin_days", "retention", "Operaciones y lotes de administración",
+        "int", "d", 0,
+        "Solo operaciones terminadas y lotes finalizados. 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
+        "retention_nexus_days", "retention", "Operaciones Nexus",
+        "int", "d", 0,
+        "Solo operaciones terminadas (con sus respuestas por nodo). 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
+        "retention_login_log_days", "retention", "Registro de accesos",
+        "int", "d", 0,
+        "Intentos de login (auditoría de seguridad). 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
+        "retention_nodes_days", "retention", "Nodos sin actividad",
+        "int", "d", 0,
+        "Borra el nodo y TODA su historia si no se le oye en este tiempo. Excluye favoritos y nodos locales de pasarela. 0 = nunca.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
+        "digest_period_hours", "digest", "Periodicidad del resumen",
+        "int", "h", 0,
+        "Envía un resumen de la red a todas las integraciones de notificación habilitadas.",
+        choices=(("Desactivado", 0), ("Cada día", 24), ("Cada semana", 168)),
+    ),
+    SettingSpec(
+        "digest_hour_utc", "digest", "Hora de envío (UTC)",
+        "int", "h", 0,
+        "Hora del día, en UTC (0-23), a la que se envía el resumen.",
+        choices=tuple((f"{h:02d}:00 UTC", h) for h in range(0, 24, 2)),
+    ),
+    SettingSpec(
+        "ws_require_auth", "security", "Canal en vivo (WebSocket)",
+        "int", None, 0,
+        "Con el modo protegido activo, exige sesión iniciada para recibir las actualizaciones en vivo. "
+        "Sin sesión la app sigue mostrando datos, pero hay que recargar para verlos actualizados.",
+        choices=(("Abierto", 0), ("Exigir sesión", 1)),
     ),
 ]
 

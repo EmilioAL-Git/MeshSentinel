@@ -16,7 +16,7 @@ def build_payload(message: NotificationMessage) -> dict[str, Any]:
             "message": message.body,
             "occurred_at": message.occurred_at.isoformat(),
         },
-        "source": "meshtastic-noc",
+        "source": "meshsentinel",
     }
 
 

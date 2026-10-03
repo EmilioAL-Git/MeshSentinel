@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NOC_", env_file=".env", extra="ignore")
 
-    app_name: str = "Meshtastic NOC"
+    app_name: str = "MeshSentinel"
     version: str = "0.1.0"
     # Inyectados en build (Dockerfile ARG -> ENV); "unknown" en desarrollo local
     git_commit: str = "unknown"
@@ -79,6 +79,26 @@ class Settings(BaseSettings):
     # superarlo (diario operativo con memoria, no histórico ilimitado).
     activity_log_max_rows: int = 20_000
 
+    # ── Retención de datos (días; 0 = conservar siempre) ────────────────
+    # Poda periódica por tipo de dato (application/retention.py). Todos
+    # editables en runtime desde Ajustes → Datos. Los nodos NUNCA se podan por
+    # defecto (0): borrar un nodo arrastra toda su historia.
+    retention_interval_seconds: int = 3600
+    retention_telemetry_days: int = 90
+    retention_positions_days: int = 90
+    retention_neighbors_days: int = 30
+    retention_chat_days: int = 180
+    retention_alerts_days: int = 180
+    retention_admin_days: int = 180
+    retention_nexus_days: int = 180
+    retention_login_log_days: int = 180
+    retention_nodes_days: int = 0
+
+    # ── Resumen periódico por notificaciones ───────────────────────────
+    # 0 = desactivado; 24 = diario; 168 = semanal. Se envía a la hora UTC dada.
+    digest_period_hours: int = 0
+    digest_hour_utc: int = 8
+
     # ── Autenticación ──────────────────────────────────────────────────
     # Modo abierto mientras no exista ningún auth_users con is_admin+enabled
     # (sin flag de entorno: ver AuthService.is_protected_mode). Sesión
@@ -94,6 +114,11 @@ class Settings(BaseSettings):
     # eso el default es false; con TLS delante SIEMPRE debe ir a true.
     cookie_secure: bool = False
     password_min_length: int = 10
+    # 1 = el canal en vivo (WebSocket) exige sesión cuando el modo protegido
+    # está activo. 0 (defecto) = abierto, igual que el resto de lecturas; con
+    # 1, quien no ha iniciado sesión sigue viendo datos por REST pero sin
+    # actualizaciones en vivo. Ver nota en ADR 0024.
+    ws_require_auth: int = 0
     login_rate_limit_window_seconds: int = 900
     login_rate_limit_per_username: int = 5
     login_rate_limit_per_ip: int = 20

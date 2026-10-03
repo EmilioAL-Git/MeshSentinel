@@ -177,7 +177,7 @@ class Group:
 
 @dataclass(slots=True)
 class NodeSummary:
-    """Vista agregada para el listado del NOC: nodo + últimos datos conocidos."""
+    """Vista agregada para el listado de MeshSentinel: nodo + últimos datos conocidos."""
 
     node: Node
     last_position: Position | None = None

@@ -243,6 +243,19 @@ class SimulatedTransport(Transport):
 
         op_type = operation["operation_type"]
         params = operation.get("params") or {}
+        if op_type == "traceroute.run":
+            # Determinista por seed/nodo: la mitad directos, la otra mitad con
+            # un salto intermedio ficticio de la malla simulada
+            others = [n.node_id for n in self._nodes if n.node_id != node_id]
+            via = others[:1] if node.rng.random() < 0.5 else []
+            snr = round(node.rng.uniform(-8, 9), 2)
+            return {
+                "reached": True,
+                "route": via,
+                "snr_towards": [snr] * (len(via) + 1),
+                "route_back": via,
+                "snr_back": [round(snr - 1.5, 2)] * (len(via) + 1),
+            }
         if op_type == "metadata.get":
             return {
                 "firmwareVersion": "2.7.0",

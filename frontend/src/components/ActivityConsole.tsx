@@ -1,3 +1,4 @@
+import { activityCsv, downloadText, stamp } from "../utils/exportData";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -389,6 +390,13 @@ export function ActivityConsole({
           ))}
         </span>
         <span style={{ marginLeft: "auto" }} />
+        <button
+          className="btn ghost"
+          onClick={() => downloadText(`registro-${stamp()}.csv`, "text/csv", activityCsv(filtered), true)}
+          title="Exporta a CSV las entradas cargadas que cumplen los filtros actuales"
+        >
+          ⤓ CSV ({filtered.length})
+        </button>
         <button
           className={`btn ghost${groupBursts ? " on" : ""}`}
           style={groupBursts ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined}

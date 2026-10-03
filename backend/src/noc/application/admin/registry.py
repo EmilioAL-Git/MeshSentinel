@@ -90,6 +90,16 @@ OPERATIONS: dict[str, OperationSpec] = {
             kind="get", allow_bulk=True, destructive=False, required_role="operator",
             param_choices={"section": MODULE_CONFIG_SECTIONS},
         ),
+        # Traceroute ACTIVO: el gateway envía un RouteDiscovery y espera la
+        # respuesta. Sin esto el observador pasivo nunca ve rutas (solo oye
+        # tráfico dirigido a su propio nodo). Transmite un paquete que se
+        # propaga hasta `hop_limit` saltos: por eso no admite lotes.
+        OperationSpec(
+            "traceroute.run",
+            "Traceroute activo hacia el nodo (ruta y SNR por salto, ida y vuelta)",
+            kind="get", allow_bulk=False, destructive=False, required_role="operator",
+            param_fields=[ParamField("hop_limit", "number", minimum=1, maximum=7)],
+        ),
         OperationSpec(
             "owner.set",
             "Cambiar nombre corto y/o largo del nodo (con verificación por lectura)",
@@ -231,6 +241,20 @@ def _validate_generic_set(section_choices: list[str]) -> Callable[[dict[str, Any
     return validator
 
 
+def _validate_traceroute(params: dict[str, Any]) -> dict[str, Any]:
+    unknown = set(params) - {"hop_limit"}
+    if unknown:
+        raise ValueError(f"Unknown parameters for traceroute.run: {sorted(unknown)}")
+    raw = params.get("hop_limit", 5)
+    try:
+        hop_limit = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("hop_limit must be an integer") from exc
+    if not 1 <= hop_limit <= 7:
+        raise ValueError("hop_limit out of range [1, 7]")
+    return {"hop_limit": hop_limit}
+
+
 def _validate_subject_node_id(params: dict[str, Any]) -> dict[str, Any]:
     subject = params.get("subject_node_id")
     if not isinstance(subject, str) or not NODE_ID_PATTERN.match(subject):
@@ -252,6 +276,7 @@ def _validate_contact_add(params: dict[str, Any]) -> dict[str, Any]:
 
 _VALIDATORS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "owner.set": _validate_owner_set,
+    "traceroute.run": _validate_traceroute,
     "position.set_fixed": _validate_fixed_position,
     "config.set": _validate_generic_set(CONFIG_SECTIONS),
     "module_config.set": _validate_generic_set(MODULE_CONFIG_SECTIONS),

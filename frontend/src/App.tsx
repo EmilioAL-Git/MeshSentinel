@@ -1,3 +1,4 @@
+import { poll, setLiveConnected } from "./api/livePolling";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
@@ -77,7 +78,7 @@ export default function App() {
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, refetchInterval: 15_000 });
   // Query base (sin ignorados): la usan Mapa, Centro y el feed — nunca escopada
   // al grupo activo (necesitan ver toda la red para el contexto espacial/global)
-  const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes(), refetchInterval: 30_000 });
+  const nodes = useQuery({ queryKey: ["nodes"], queryFn: () => fetchNodes(), refetchInterval: poll(30_000) });
   // Filtros de Flota ↔ URL (`nodes.*`, ADR 0026 / docs/design/urls-compartibles.md
   // §3.3). Prefijo `nodes.` a propósito: `nodes.group` es el filtro puntual
   // de tabla (M1.2), distinto del grupo ACTIVO global (`group`, GroupContext)
@@ -156,7 +157,7 @@ export default function App() {
   const filteredNodes = useQuery({
     queryKey: ["nodes", filters, activeGroupId],
     queryFn: () => fetchNodes(activeGroupId != null ? { ...filters, group_id: activeGroupId } : filters),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
   // Estadísticas Multi-Gateway escopadas al grupo activo (§ GroupBar) —
   // reutiliza compute_multi_gateway_stats sin tocarlo (backend, scope_to_members)
@@ -168,16 +169,16 @@ export default function App() {
   });
   const tags = useQuery({ queryKey: ["tags"], queryFn: fetchTags });
   const groups = useQuery({ queryKey: ["groups"], queryFn: fetchGroups });
-  const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways(), refetchInterval: 30_000 });
+  const gateways = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways(), refetchInterval: poll(30_000) });
   const dashboard = useQuery({
     queryKey: ["dashboard"],
     queryFn: fetchDashboardSummary,
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
   const alerts = useQuery({
     queryKey: ["alerts"],
     queryFn: () => fetchAlerts(undefined, 100),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
   // Soporte del shell (HUD + barra inferior + insignias del riel).
   // Hardening: los CONTADORES del shell salen de agregados reales del
@@ -186,22 +187,22 @@ export default function App() {
   const operations = useQuery({
     queryKey: ["operations", "shell"],
     queryFn: () => fetchOperations(undefined, 200),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
   const alertCounts = useQuery({
     queryKey: ["alert-counts", activeGroupId],
     queryFn: () => fetchAlertCounts(activeGroupId),
-    refetchInterval: 15_000,
+    refetchInterval: poll(15_000),
   });
   const operationCounts = useQuery({
     queryKey: ["operation-counts", activeGroupId],
     queryFn: () => fetchOperationCounts(activeGroupId),
-    refetchInterval: 15_000,
+    refetchInterval: poll(15_000),
   });
   const runningBatches = useQuery({
     queryKey: ["batches", "running"],
     queryFn: () => fetchBatches({ status: "running", limit: 5 }),
-    refetchInterval: 30_000,
+    refetchInterval: poll(30_000),
   });
   const runningBatchId = runningBatches.data?.[0]?.id;
   const runningBatch = useQuery({
@@ -298,7 +299,10 @@ export default function App() {
           queryClient.invalidateQueries({ queryKey: ["chat-channels"] });
         }, 2000);
       }
-    }, setWsStatus);
+    }, (status) => {
+      setLiveConnected(status.state === "connected");
+      setWsStatus(status);
+    });
 
     const flush = window.setInterval(() => {
       if (pending.length === 0) return;

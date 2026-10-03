@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { LockedNotice } from "../shell/LockedNotice";
 import { useUrlString } from "../../hooks/useUrlState";
@@ -58,7 +58,10 @@ import { ConfirmModal } from "../shell/ConfirmModal";
 import { FloatingWindow } from "../shell/FloatingWindow";
 import { PreferredGatewaySelect } from "../shell/GatewaySelect";
 import { toast } from "../shell/Toast";
-import { HistoryChart, type HistoryPoint } from "./HistoryChart";
+import type { HistoryPoint } from "./HistoryChart";
+
+// ECharts pesa ~1 MB: chunk aparte, solo se descarga al abrir la pestaña Histórico
+const HistoryChart = lazy(() => import("./HistoryChart").then((m) => ({ default: m.HistoryChart })));
 import { NodeLog } from "./NodeLog";
 import { computeNodeStats24h, TRAFFIC_LEVEL_LABEL } from "./nodeStats24h";
 import { PositionMiniMap } from "./PositionMiniMap";
@@ -438,6 +441,15 @@ export function Inspector({
     onSuccess: (op) => {
       trackOperations([op.id]); // toast de cierre cuando termine (opTracker)
       toast(`metadata.get añadida a la cola (op #${op.id})`);
+    },
+    onError: (e) => toast(`No se pudo añadir a la cola: ${e.message}`, { kind: "error" }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
+  });
+  const runTraceroute = useMutation({
+    mutationFn: () => createOperation({ node_id: nodeId, operation_type: "traceroute.run" }),
+    onSuccess: (op) => {
+      trackOperations([op.id]);
+      toast(`Traceroute añadido a la cola (op #${op.id})`);
     },
     onError: (e) => toast(`No se pudo añadir a la cola: ${e.message}`, { kind: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
@@ -1249,6 +1261,7 @@ export function Inspector({
               )}
             </Section>
 
+            <Suspense fallback={<div className="empty">Cargando gráficas…</div>}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.6rem 1rem" }}>
               <Section label="BATERÍA">
                 <HistoryChart points={batteryHistory} unit="%" color={hex.catGreen} />
@@ -1266,6 +1279,7 @@ export function Inspector({
                 <HistoryChart points={temperatureHistory} unit="°C" color={hex.catOrange} />
               </Section>
             </div>
+            </Suspense>
             <div style={{ color: t.textFaint, fontSize: 11, marginTop: 6 }}>
               SNR/RSSI no tienen serie histórica hoy — solo se persiste el último valor
               (ver docs/design/motor-de-reglas-y-topologia.md).
@@ -1493,6 +1507,14 @@ export function Inspector({
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
             <button style={{ ...actionBtn, width: "100%" }} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Añade metadata.get a la cola (solo lectura)">
               ⚙ Pedir metadata
+            </button>
+            <button
+              style={{ ...actionBtn, width: "100%" }}
+              disabled={runTraceroute.isPending}
+              onClick={() => runTraceroute.mutate()}
+              title="Envía un traceroute real por radio (hasta 5 saltos): muestra ruta y SNR por salto. Transmite un paquete por la malla."
+            >
+              ⌁ Traceroute
             </button>
             <button
               style={{ ...actionBtn, width: "100%" }}

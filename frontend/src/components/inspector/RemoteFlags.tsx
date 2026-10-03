@@ -125,7 +125,7 @@ function RemoteFlagList({
           </span>
           <span
             style={{ ...chipStyle(SYNC_STATE_COLOR[r.sync_state]), fontSize: 10.5 }}
-            title="«Confirmado» = el firmware aceptó la operación (ACK). El NOC no puede releer la NodeDB remota para verificarlo."
+            title="«Confirmado» = el firmware aceptó la operación (ACK). MeshSentinel no puede releer la NodeDB remota para verificarlo."
           >
             {SYNC_STATE_LABEL[r.sync_state]}
           </span>
@@ -207,7 +207,7 @@ export function RemoteFlags({
       )}
       <p style={{ color: t.textFaint, fontSize: 11.5, margin: "0 0 0.6rem" }}>
         Administra la NodeDB del firmware de este nodo (qué otros nodos ve como favoritos o
-        ignorados en su pantalla). Sin relación con el ★/ojo locales del NOC.
+        ignorados en su pantalla). Sin relación con el ★/ojo locales de MeshSentinel.
       </p>
       <RemoteFlagList nodeId={nodeId} flagType="favorite" label="Favoritos conocidos" subjectOptions={subjectOptions} />
       <RemoteFlagList nodeId={nodeId} flagType="ignored" label="Ignorados conocidos" subjectOptions={subjectOptions} />

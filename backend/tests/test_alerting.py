@@ -467,7 +467,7 @@ def test_webhook_payload_shape():
     assert payload["event"] == "alert.fired"
     assert payload["alert"]["severity"] == "WARNING"
     assert payload["alert"]["subject"] == "node:!00000002"
-    assert payload["source"] == "meshtastic-noc"
+    assert payload["source"] == "meshsentinel"
 
 
 def test_ntfy_priority_mapping():
