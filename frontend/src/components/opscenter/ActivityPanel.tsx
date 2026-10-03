@@ -49,6 +49,7 @@ export function ActivityPanel({
   selectedId,
   onOpenNode,
   nodeNames,
+  groupNodeIds,
 }: {
   entries: ActivityEntry[];
   focusId: string | null;
@@ -58,13 +59,20 @@ export function ActivityPanel({
   /** node_id -> nombre completo (long_name), resuelto por el Centro desde la
    * flota ya cargada — la entrada solo trae el nombre corto del backend. */
   nodeNames?: Map<string, string>;
+  /** Nodos del grupo activo (null = toda la red). Las entradas sin nodo
+   * (pasarela, sistema) siempre se muestran, igual que en el Registro. */
+  groupNodeIds?: Set<string> | null;
 }) {
   const [level, setLevel] = useState<Level>("todo");
   const filtered = useMemo(() => {
     const cats = LEVEL_CATEGORIES[level];
-    const base = entries.filter((e) => !isEmptyPacket(e));
+    const base = entries.filter(
+      (e) =>
+        !isEmptyPacket(e) &&
+        (groupNodeIds == null || e.nodeId == null || groupNodeIds.has(e.nodeId)),
+    );
     return cats == null ? base : base.filter((e) => cats.has(e.category));
-  }, [entries, level]);
+  }, [entries, level, groupNodeIds]);
 
   // Focus (§7.3): los eventos del objetivo se MUEVEN a una sección fija
   // arriba (no se duplican); el flujo general continúa debajo, intacto.

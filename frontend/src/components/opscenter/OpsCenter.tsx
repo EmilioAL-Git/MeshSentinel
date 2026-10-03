@@ -275,6 +275,7 @@ export function OpsCenter({
                 selectedId={selected}
                 onOpenNode={setSelected}
                 nodeNames={nodeNames}
+                groupNodeIds={groupNodeIds}
               />
             ),
           },
