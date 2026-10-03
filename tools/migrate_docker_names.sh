@@ -11,10 +11,18 @@
 # (Ajustes → Datos → Descargar copia) como red de seguridad adicional.
 set -euo pipefail
 
-OLD=meshtastic-noc
+# Parametrizable por entorno (en un servidor sin el override de desarrollo):
+#   OLD            proyecto Docker antiguo (por defecto meshtastic-noc; si la
+#                  instalación es anterior al `name:` fijo, es el nombre del directorio)
+#   COMPOSE_FILES  ficheros de compose a usar (por defecto solo docker-compose.yml)
+#   HEALTH_URL     URL de salud para verificar (por defecto la UI en :8080)
+#   SERVICES       servicios a levantar (por defecto todos los de compose)
+OLD=${OLD:-meshtastic-noc}
 NEW=meshsentinel
 VOLUMES=(postgres-data redis-data)
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.dev.yml)
+read -r -a COMPOSE_FILES_ARR <<< "${COMPOSE_FILES:--f docker-compose.yml}"
+COMPOSE=(docker compose "${COMPOSE_FILES_ARR[@]}")
+HEALTH_URL=${HEALTH_URL:-http://localhost:${NOC_HTTP_PORT:-8080}/api/v1/health}
 DRY=0
 [[ "${1:-}" == "--dry-run" ]] && DRY=1
 
@@ -66,17 +74,18 @@ for v in "${VOLUMES[@]}"; do
 done
 
 # ── 3. Levantar el stack nuevo ────────────────────────────────────────────
-run "${COMPOSE[@]}" up --build -d --remove-orphans
+# shellcheck disable=SC2086
+run "${COMPOSE[@]}" up --build -d --remove-orphans ${SERVICES:-}
 
 # ── 4. Verificación ───────────────────────────────────────────────────────
 if [[ $DRY -eq 0 ]]; then
   echo -n "Esperando al backend"
   for _ in $(seq 1 60); do
-    if curl -fs -m 3 localhost:8000/api/v1/health >/dev/null 2>&1; then break; fi
+    if curl -fs -m 3 "$HEALTH_URL" >/dev/null 2>&1; then break; fi
     echo -n "."; sleep 3
   done
   echo
-  curl -fs -m 5 localhost:8000/api/v1/health || die "El backend no responde; el stack antiguo y sus volúmenes siguen intactos."
+  curl -fs -m 5 "$HEALTH_URL" || die "El backend no responde; el stack antiguo y sus volúmenes siguen intactos."
   echo
   n=$(docker exec "${NEW}-postgres-1" psql -U "${POSTGRES_USER:-noc}" -d "${POSTGRES_DB:-noc}" -Atc 'select count(*) from nodes' 2>/dev/null || echo '?')
   echo "Nodos en la BD migrada: ${n}"
