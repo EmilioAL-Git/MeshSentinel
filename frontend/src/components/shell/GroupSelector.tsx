@@ -58,11 +58,13 @@ export function GroupSelector() {
           display: "inline-flex",
           alignItems: "center",
           gap: "0.4rem",
-          border: `1px solid ${t.borderSubtle}`,
+          border: `1px solid ${activeGroup ? t.accent : t.borderSubtle}`,
+          background: activeGroup ? t.accentTint : undefined,
+          color: activeGroup ? t.accent : undefined,
           whiteSpace: "nowrap",
         }}
       >
-        <span style={{ color: t.textFaint, fontSize: 11 }}>GRUPO</span>
+        <span style={{ color: activeGroup ? t.accent : t.textFaint, fontSize: 11 }}>GRUPO</span>
         <span>{activeGroup ? `${activeGroup.name} (${activeGroup.member_count})` : "Toda la red"}</span>
         <span style={{ color: t.textFaint, fontSize: 10 }}>▾</span>
       </button>
