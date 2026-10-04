@@ -130,12 +130,12 @@ export function StatusBar({
     : `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")} local`;
 
   return (
-    <footer style={barStyle}>
+    <footer className="statusbar" style={barStyle}>
       <Segment title="Estado de la conexión en tiempo real (WebSocket + backend)">
         <span className={conn.pulse ? "noc-pulse" : undefined} style={{ color: conn.color }}>
           ●
         </span>
-        <span style={{ color: conn.color === t.ok ? "inherit" : conn.color }}>{conn.label}</span>
+        <span className="sb-label" style={{ color: conn.color === t.ok ? "inherit" : conn.color }}>{conn.label}</span>
       </Segment>
       <Segment title="Pasarelas conectadas / habilitadas" onClick={() => onGoTo("gateways")}>
         <span style={{ color: gwProblem ? t.crit : "inherit" }}>
@@ -152,7 +152,7 @@ export function StatusBar({
         title="Operaciones ejecutándose y lote activo"
         onClick={() => onGoTo("jobs")}
       >
-        ▶ {runningCount} op
+        ▶ {runningCount}<span className="sb-label"> op</span>
         {runningBatch && (
           <span style={{ color: t.accent }}>
             · #{runningBatch.id} {Math.round(runningBatch.progress.percent)}%
@@ -181,13 +181,14 @@ function SessionSegment() {
   if (isAuthenticated && me?.user) {
     return (
       <Segment title="Cerrar sesión" onClick={() => void doLogout()}>
-        👤 {me.user.display_name}
+        👤<span className="sb-label"> {me.user.display_name}</span>
       </Segment>
     );
   }
   return (
     <Segment title="Iniciar sesión" onClick={openLoginModal}>
-      Iniciar sesión
+      <span className="sb-label">Iniciar sesión</span>
+      <span className="m-only" aria-label="Iniciar sesión">👤</span>
     </Segment>
   );
 }
