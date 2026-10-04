@@ -56,18 +56,23 @@ class StatsSummaryOut(BaseModel):
 
 
 @router.get("/summary", response_model=StatsSummaryOut)
-async def stats_summary(request: Request, hours: WindowHours = DEFAULT_WINDOW_HOURS) -> StatsSummaryOut:
-    summary = await request.app.state.stats.get_summary(hours)
+async def stats_summary(
+    request: Request, hours: WindowHours = DEFAULT_WINDOW_HOURS, group_id: int | None = Query(None)
+) -> StatsSummaryOut:
+    summary = await request.app.state.stats.get_summary(hours, group_id)
     return StatsSummaryOut.from_entity(summary)
 
 
 @router.get("/ranking/{key}", response_model=list[StatRecordOut])
 async def stats_ranking(
-    key: str, request: Request, hours: WindowHours = DEFAULT_WINDOW_HOURS
+    key: str,
+    request: Request,
+    hours: WindowHours = DEFAULT_WINDOW_HOURS,
+    group_id: int | None = Query(None),
 ) -> list[StatRecordOut]:
     """Todos los nodos con dato para el récord `key`, ordenados (mejor
     primero) — "nodos por debajo del top" al desplegar una tarjeta."""
-    ranking = await request.app.state.stats.get_ranking(key, hours)
+    ranking = await request.app.state.stats.get_ranking(key, hours, group_id)
     if ranking is None:
         raise HTTPException(status_code=404, detail="Récord desconocido")
     return [StatRecordOut.from_entity(r) for r in ranking]

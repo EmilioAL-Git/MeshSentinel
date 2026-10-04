@@ -26,6 +26,7 @@ from typing import Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from noc.adapters.persistence.organization_repositories import SqlGroupRepository
 from noc.adapters.persistence.repositories import (
     SqlNodeGatewayLinkRepository,
     SqlNodeRepository,
@@ -80,37 +81,47 @@ class StatsService:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], settings: Settings) -> None:
         self._session_factory = session_factory
         self._settings = settings
-        self._cache: dict[int, tuple[float, _NetworkStats]] = {}
+        self._cache: dict[tuple[int, int | None], tuple[float, _NetworkStats]] = {}
         self._lock = asyncio.Lock()
 
-    async def get_summary(self, hours: int = DEFAULT_WINDOW_HOURS) -> StatsSummary:
-        stats = await self._get_stats(clamp_hours(hours))
+    async def get_summary(
+        self, hours: int = DEFAULT_WINDOW_HOURS, group_id: int | None = None
+    ) -> StatsSummary:
+        stats = await self._get_stats(clamp_hours(hours), group_id)
         return stats.summary
 
-    async def get_ranking(self, key: str, hours: int = DEFAULT_WINDOW_HOURS) -> list[StatRecord] | None:
+    async def get_ranking(
+        self, key: str, hours: int = DEFAULT_WINDOW_HOURS, group_id: int | None = None
+    ) -> list[StatRecord] | None:
         """Todos los nodos con dato para `key`, ordenados (mejor primero).
         `None` si `key` no es un récord conocido (404 en el router)."""
-        stats = await self._get_stats(clamp_hours(hours))
+        stats = await self._get_stats(clamp_hours(hours), group_id)
         return stats.rankings.get(key)
 
-    async def _get_stats(self, hours: int) -> _NetworkStats:
+    async def _get_stats(self, hours: int, group_id: int | None = None) -> _NetworkStats:
+        cache_key = (hours, group_id)
         async with self._lock:
-            hit = self._cache.get(hours)
+            hit = self._cache.get(cache_key)
             if hit and (time.monotonic() - hit[0]) < self._settings.stats_cache_seconds:
                 return hit[1]
-            stats = await self._compute(hours)
-            if len(self._cache) >= 32:  # ventanas distintas acotadas (máx. 168 posibles)
+            stats = await self._compute(hours, group_id)
+            if len(self._cache) >= 64:  # ventanas distintas acotadas (máx. 168 posibles)
                 self._cache.clear()
-            self._cache[hours] = (time.monotonic(), stats)
+            self._cache[cache_key] = (time.monotonic(), stats)
             return stats
 
-    async def _compute(self, hours: int) -> _NetworkStats:
+    async def _compute(self, hours: int, group_id: int | None = None) -> _NetworkStats:
         s = self._settings
         now = datetime.now(timezone.utc)
         since = now - timedelta(hours=hours)
 
         async with self._session_factory() as session:
             summaries = await SqlNodeRepository(session).list_summaries()
+            member_ids = (
+                set(await SqlGroupRepository(session).members(group_id))
+                if group_id is not None
+                else None
+            )
             telemetry_repo = SqlTelemetryRepository(session)
             device_ext = await telemetry_repo.extremes_since("device", since)
             env_ext = await telemetry_repo.extremes_since("environment", since)
@@ -123,6 +134,9 @@ class StatsService:
         # Los nodos ignorados no cuentan para las estadísticas (mismo criterio
         # que el Dashboard, M1.2): su telemetría sigue persistiéndose igual.
         summaries = [x for x in summaries if not x.node.is_ignored]
+        # Grupo activo: el Top se calcula solo sobre sus miembros.
+        if member_ids is not None:
+            summaries = [x for x in summaries if x.node.node_id in member_ids]
         # Nodos con actividad dentro de la ventana: base de los récords de
         # estado actual (SNR, saltos, pasarelas, antigüedad).
         active = [

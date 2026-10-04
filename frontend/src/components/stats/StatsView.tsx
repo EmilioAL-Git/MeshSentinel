@@ -6,6 +6,7 @@ import { useUrlNumber } from "../../hooks/useUrlState";
 import { displayName, fetchStatsRanking, fetchStatsSummary, type StatRecordOut } from "../../api/client";
 import { Modal } from "../shell/Modal";
 import { fmtDuration } from "../../time";
+import { useActiveGroup } from "../../context/GroupContext";
 
 /**
  * Estadísticas (identidad v0.8): panel de datos curiosos sobre la malla —
@@ -84,9 +85,10 @@ function RankingModal({
   onClose: () => void;
   onOpenNode: (nodeId: string) => void;
 }) {
+  const { activeGroupId } = useActiveGroup();
   const ranking = useQuery({
-    queryKey: ["stats", "ranking", record.key, hours],
-    queryFn: () => fetchStatsRanking(record.key, hours),
+    queryKey: ["stats", "ranking", record.key, hours, activeGroupId],
+    queryFn: () => fetchStatsRanking(record.key, hours, activeGroupId),
   });
   const rows = ranking.data ?? [];
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -176,9 +178,10 @@ export function StatsView({ onOpenNode }: { onOpenNode: (nodeId: string) => void
   const hours = clampHours(hoursParam ?? 24);
   const days = Math.floor(hours / 24);
   const restHours = hours % 24;
+  const { activeGroupId, activeGroup } = useActiveGroup();
   const stats = useQuery({
-    queryKey: ["stats", "summary", hours],
-    queryFn: () => fetchStatsSummary(hours),
+    queryKey: ["stats", "summary", hours, activeGroupId],
+    queryFn: () => fetchStatsSummary(hours, activeGroupId),
     refetchInterval: 20_000,
   });
   const [openRecord, setOpenRecord] = useState<StatRecordOut | null>(null);
@@ -189,7 +192,7 @@ export function StatsView({ onOpenNode }: { onOpenNode: (nodeId: string) => void
   return (
     <div className="ws">
       <div className="toolbar">
-        <span className="microlabel">Datos curiosos de la malla · últimos {windowLabel(hours)}</span>
+        <span className="microlabel">Datos curiosos de {activeGroup ? `${activeGroup.name}` : "la malla"} · últimos {windowLabel(hours)}</span>
         <span style={{ flex: 1 }} />
         <div className="seg">
           {PRESETS.map((p) => (

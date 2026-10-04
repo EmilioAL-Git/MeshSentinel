@@ -486,11 +486,14 @@ export interface StatsSummaryOut {
 }
 
 /** `hours`: ventana del Top, 1..168 (máximo 1 semana). */
-export const fetchStatsSummary = (hours = 24) => get<StatsSummaryOut>(`/stats/summary?hours=${hours}`);
+export const fetchStatsSummary = (hours = 24, groupId?: number | null) =>
+  get<StatsSummaryOut>(`/stats/summary?hours=${hours}${groupId != null ? `&group_id=${groupId}` : ""}`);
 /** Ranking completo de un récord (todos los nodos con dato, mejor primero) —
  * "nodos por debajo del top" al desplegar una tarjeta de Estadísticas. */
-export const fetchStatsRanking = (key: string, hours = 24) =>
-  get<StatRecordOut[]>(`/stats/ranking/${encodeURIComponent(key)}?hours=${hours}`);
+export const fetchStatsRanking = (key: string, hours = 24, groupId?: number | null) =>
+  get<StatRecordOut[]>(
+    `/stats/ranking/${encodeURIComponent(key)}?hours=${hours}${groupId != null ? `&group_id=${groupId}` : ""}`,
+  );
 
 export type Severity = "INFO" | "WARNING" | "CRITICAL";
 
