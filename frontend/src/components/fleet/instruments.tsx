@@ -219,6 +219,11 @@ export function Signal({ snr }: { snr: number | null }) {
   );
 }
 
+const MOBILE_COLUMNS: FleetColumnId[] = ["battery", "lastSeen"];
+
+/** Clase que oculta una columna en móvil (mobile.css `.r-hide`) salvo las esenciales. */
+const colCls = (id: FleetColumnId) => (MOBILE_COLUMNS.includes(id) ? undefined : "r-hide");
+
 export function RosterHead({ visibleColumns }: { visibleColumns: FleetColumnId[] }) {
   return (
     <div className="roster-head" style={{ gridTemplateColumns: buildFleetGrid(visibleColumns) }}>
@@ -226,12 +231,12 @@ export function RosterHead({ visibleColumns }: { visibleColumns: FleetColumnId[]
       <span />
       <span />
       <span>Nodo</span>
-      <span>ID</span>
+      <span className="r-hide">ID</span>
       {FLEET_COLUMNS.filter((c) => visibleColumns.includes(c.id)).map((c) => (
-        <span key={c.id}>{c.label}</span>
+        <span key={c.id} className={colCls(c.id)}>{c.label}</span>
       ))}
-      <span />
-      <span />
+      <span className="r-hide" />
+      <span className="r-hide" />
     </div>
   );
 }
@@ -323,13 +328,14 @@ function FleetRowImpl({
         <span style={{ color: "var(--text-dim)" }}>{node.long_name ?? ""}</span>
         {node.is_ignored && <span style={{ color: "var(--text-faint)" }}> · ignorado</span>}
       </span>
-      <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{node.node_id}</span>
+      <span className="mono r-hide" style={{ fontSize: 11, color: "var(--text-dim)" }}>{node.node_id}</span>
       {FLEET_COLUMNS.filter((c) => visibleColumns.includes(c.id)).map((c) => (
-        <span key={c.id} style={{ overflow: "hidden", whiteSpace: "nowrap" }}>
+        <span key={c.id} className={colCls(c.id)} style={{ overflow: "hidden", whiteSpace: "nowrap" }}>
           {c.render(summary, ctx)}
         </span>
       ))}
       <span
+        className="r-hide"
         title={node.is_ignored ? "Dejar de ignorar" : "Ignorar nodo"}
         style={{ cursor: "pointer", color: "var(--text-faint)" }}
         onClick={(e) => {
@@ -340,6 +346,7 @@ function FleetRowImpl({
         {node.is_ignored ? "🚫" : "👁"}
       </span>
       <span
+        className="r-hide"
         title="Borrar nodo del sistema"
         style={{ cursor: "pointer", color: "var(--text-faint)" }}
         onClick={(e) => {

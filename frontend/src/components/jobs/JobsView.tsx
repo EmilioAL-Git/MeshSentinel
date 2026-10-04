@@ -147,7 +147,7 @@ function OpRow({
 }) {
   return (
     <div
-      className={flash ? "noc-flash" : undefined}
+      className={flash ? "job-row noc-flash" : "job-row"}
       title={`por ${op.actor_label}`}
       style={{
         ...rowStyle,

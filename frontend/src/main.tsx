@@ -6,6 +6,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { GroupProvider } from "./context/GroupContext";
 import "./theme.css";
 import "./console.css";
+import "./mobile.css";
 
 const queryClient = new QueryClient();
 

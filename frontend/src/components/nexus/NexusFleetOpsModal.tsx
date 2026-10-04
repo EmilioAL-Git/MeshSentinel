@@ -224,7 +224,7 @@ export function NexusFleetOpsModal({
         </button>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+      <div className="nxo-body" style={{ flex: 1, minHeight: 0, display: "flex" }}>
       <div
         style={{
           flex: 1, minWidth: 0, background: t.surface, padding: "0.8rem 1rem",
@@ -406,6 +406,7 @@ export function NexusFleetOpsModal({
       </div>
       </div>
       <aside
+        className="nxo-aside"
         style={{
           width: "min(440px, 38vw)", minWidth: 280, flexShrink: 0, minHeight: 0,
           display: "flex", flexDirection: "column", borderLeft: "1px solid var(--border)",

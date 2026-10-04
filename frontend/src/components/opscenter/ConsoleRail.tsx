@@ -36,9 +36,12 @@ export function ConsoleRail({
   width,
   open,
   onToggleOpen,
+  fill = false,
 }: {
   panels: RailPanelDef[];
   width: number;
+  /** Móvil: la consola ocupa todo el ancho disponible y no se pliega. */
+  fill?: boolean;
   /** Controlado por el padre (OpsCenter): permite además una flecha de borde simétrica a la del panel izquierdo. */
   open: boolean;
   onToggleOpen: (open: boolean) => void;
@@ -47,14 +50,15 @@ export function ConsoleRail({
   const active = panels.find((p) => p.id === activeId) ?? panels[0];
 
   return (
-    <div style={{ display: "flex", height: "100%", borderLeft: `1px solid ${t.border}` }}>
+    <div style={{ display: "flex", height: "100%", width: fill ? "100%" : undefined, borderLeft: `1px solid ${t.border}` }}>
       {/* Panel activo: todos montados, solo se alterna display (cambio instantáneo).
           Ancho animado (nunca desmontado/remontado) — mismo tratamiento que el
           panel de estado izquierdo, para que ambos plieguen con la misma
           transición en vez de desaparecer de golpe. */}
       <div
         style={{
-          width: open ? width : 0,
+          width: fill ? undefined : open ? width : 0,
+          flex: fill ? 1 : undefined,
           background: t.surface,
           height: "100%",
           minWidth: 0,
@@ -62,7 +66,7 @@ export function ConsoleRail({
           transition: "width 180ms ease-out",
         }}
       >
-        <div style={{ width, height: "100%" }}>
+        <div style={{ width: fill ? "100%" : width, height: "100%" }}>
           {panels.map((p) => (
             <div key={p.id} style={{ display: p.id === active?.id ? "block" : "none", height: "100%" }}>
               {p.content}
@@ -82,14 +86,14 @@ export function ConsoleRail({
         }}
       >
         {panels.map((p) => {
-          const isActive = open && p.id === active?.id;
+          const isActive = (open || fill) && p.id === active?.id;
           return (
             <button
               key={p.id}
               title={p.title}
               style={railBtn(isActive)}
               onClick={() => {
-                if (isActive) onToggleOpen(false); // clic en el activo = plegar
+                if (isActive && !fill) onToggleOpen(false); // clic en el activo = plegar
                 else {
                   setActiveId(p.id);
                   onToggleOpen(true);

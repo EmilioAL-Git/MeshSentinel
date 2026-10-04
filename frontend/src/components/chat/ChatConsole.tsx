@@ -50,6 +50,8 @@ export function ChatConsole({
   const [nodeFilter, setNodeFilter] = useState("");
   const [gatewayFilter, setGatewayFilter] = useState("");
   const [search, setSearch] = useState("");
+  // Móvil: canales/búsqueda plegados tras un botón (ver mobile.css `.m-collapsible`)
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   useEffect(() => {
@@ -155,6 +157,9 @@ export function ChatConsole({
           {rows.length} mensajes{history.hasNextPage ? " · histórico ↓" : " · histórico completo"}
         </span>
         <span className="sep" />
+        <button className="btn m-only" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen}>
+          ⚙ Canales y búsqueda {filtersOpen ? "▴" : "▾"}
+        </button>
         <span className="seg wrap">
           <button
             className={channelTab === "all" && !gatewayFilter ? "on" : undefined}
@@ -174,6 +179,7 @@ export function ChatConsole({
         </span>
       </div>
 
+      <div className={filtersOpen ? "m-collapsible open" : "m-collapsible"}>
       {byGateway.map((g) => (
         <div key={g.gateway_id} className="toolbar" style={{ paddingTop: 0 }}>
           <span className="microlabel" style={{ minWidth: 70 }}>{g.gateway_id}</span>
@@ -218,6 +224,7 @@ export function ChatConsole({
           onChange={(e) => setSearch(e.target.value)}
         />
         <NodeSelect value={nodeFilter} onChange={setNodeFilter} options={summaries} placeholder="— todos los nodos —" />
+      </div>
       </div>
 
       <div className="ws-scroll" ref={scrollRef} onScroll={onScroll}>

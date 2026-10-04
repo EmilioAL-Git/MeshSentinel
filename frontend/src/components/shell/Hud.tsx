@@ -62,12 +62,14 @@ function Item({
 }
 
 export function Hud({
+  className,
   summary,
   gateways,
   alertCounts,
   operationCounts,
   onGoTo,
 }: {
+  className?: string;
   summary: DashboardSummaryOut | undefined;
   gateways: GatewayOut[];
   /** Agregados reales del backend (hardening) — nunca listas truncadas. */
@@ -100,7 +102,7 @@ export function Hud({
           : "red estable";
 
   return (
-    <div style={hudStyle} title="Constantes vitales de la red">
+    <div className={className} style={hudStyle} title="Constantes vitales de la red">
       <Item
         title="Salud global de la red"
         onClick={() => onGoTo("ops")}

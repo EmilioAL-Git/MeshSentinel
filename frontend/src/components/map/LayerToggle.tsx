@@ -49,6 +49,7 @@ const chipBtn = (active: boolean): React.CSSProperties => ({
   cursor: "pointer",
   fontSize: 11,
   padding: "0.15rem 0.5rem",
+  minHeight: 26,
   borderRadius: 4,
   border: `1px solid ${active ? t.accent : t.border}`,
   background: active ? "color-mix(in srgb, var(--accent) 18%, transparent)" : "transparent",
@@ -59,18 +60,21 @@ export function LayerToggle({
   layers,
   onChange,
   showNexusToggle = false,
+  wide = false,
 }: {
   layers: MapLayerState;
   onChange: (next: MapLayerState) => void;
   /** Módulo JenTastic-Nexus activo (ADR 0027) — si no, ni se ofrece el filtro. */
   showNexusToggle?: boolean;
+  /** Sin tope de ancho (hoja de capas móvil). */
+  wide?: boolean;
 }) {
   const set = <K extends keyof MapLayerState>(key: K, value: MapLayerState[K]) =>
     onChange({ ...layers, [key]: value });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", maxWidth: 260 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", maxWidth: wide ? undefined : 260 }}>
         <button style={chipBtn(layers.showGateways)} onClick={() => set("showGateways", !layers.showGateways)}>
           🛰 Gateways
         </button>

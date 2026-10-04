@@ -13,6 +13,7 @@ import type {
 } from "../../api/client";
 import { fetchTopology } from "../../api/client";
 import { useGroupNodeIds } from "../../context/GroupContext";
+import { useIsMobile } from "../../hooks/useMediaQuery";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { t } from "../../tokens";
 import { MapView, type MapPulse } from "../MapView";
@@ -89,6 +90,11 @@ export function OpsCenter({
   // izquierdo.
   const [railOpen, setRailOpen] = usePersistedState<boolean>("rail.open", true);
   const setSelected = onSelect;
+  // Móvil: tres columnas no caben — una pestaña a la vez (Mapa | Estado |
+  // Consola). Las tres vistas siguen MONTADAS (solo display) para que el mapa
+  // y los buffers de actividad no se pierdan al cambiar de pestaña.
+  const isMobile = useIsMobile();
+  const [mTab, setMTab] = usePersistedState<"map" | "status" | "console">("ops.mobileTab", "map");
 
   // ── Mapa vivo (v0.7.3): un pulso de una sola vez por evento nuevo ──────────
   // El feed de actividad ya llega deduplicado y en lotes de 1 s; aquí solo se
@@ -193,21 +199,58 @@ export function OpsCenter({
     (o) => o.status === "pending" || o.status === "queued" || o.status === "running",
   ).length;
 
+  const showLeft = isMobile ? mTab === "status" : leftOpen;
+  const activeAlertCount = alerts.filter((a) => a.status !== "resolved").length;
+
   return (
-    <div style={{ display: "flex", height: "100%", minHeight: 0, position: "relative" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: isMobile ? "column" : "row",
+        height: "100%",
+        minHeight: 0,
+        position: "relative",
+      }}
+    >
+      {isMobile && (
+        <div className="toolbar" style={{ flexWrap: "nowrap", justifyContent: "center" }}>
+          <span className="seg" role="tablist" style={{ width: "100%" }}>
+            {(
+              [
+                ["map", "▦ Mapa"],
+                ["status", `◉ Estado${activeAlertCount > 0 ? ` · ${activeAlertCount}` : ""}`],
+                ["console", `▤ Consola${activeOps > 0 ? ` · ${activeOps}` : ""}`],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                className={mTab === id ? "on" : undefined}
+                style={{ flex: 1, padding: "0.5rem 0.3rem" }}
+                onClick={() => setMTab(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
+        </div>
+      )}
       {/* Panel izquierdo: estado (leer) */}
       <div
         style={{
-          width: leftOpen ? 340 : 0,
+          width: isMobile ? "100%" : leftOpen ? 340 : 0,
+          flex: isMobile ? 1 : undefined,
+          display: isMobile && !showLeft ? "none" : undefined,
+          minHeight: 0,
           flexShrink: 0,
           background: t.surface,
-          borderRight: leftOpen ? `1px solid ${t.border}` : "none",
+          borderRight: !isMobile && leftOpen ? `1px solid ${t.border}` : "none",
           overflow: "hidden",
-          transition: "width 180ms ease-out",
+          transition: isMobile ? undefined : "width 180ms ease-out",
           position: "relative",
         }}
       >
-        {leftOpen && (
+        {showLeft && (
           <StatusPanel
             summaries={summaries}
             summary={summary}
@@ -223,7 +266,15 @@ export function OpsCenter({
 
       {/* Mapa: lienzo protagonista, borde a borde. Clic en marcador = abrir
           el Inspector global (renderizado en App, §8.1) */}
-      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+          position: "relative",
+          display: isMobile && mTab !== "map" ? "none" : undefined,
+        }}
+      >
         <MapView
           summaries={summaries}
           gatewayNodeIds={gatewayNodeIds}
@@ -237,25 +288,33 @@ export function OpsCenter({
           pulses={pulses}
           onMapReady={onMapReady}
         />
-        <button
+        {!isMobile && <button
           style={collapseBtn("left")}
           onClick={() => setLeftOpen(!leftOpen)}
           title={leftOpen ? "Plegar panel de estado" : "Desplegar panel de estado"}
         >
           {leftOpen ? "◂" : "▸"}
-        </button>
-        <button
+        </button>}
+        {!isMobile && <button
           style={collapseBtn("right")}
           onClick={() => setRailOpen(!railOpen)}
           title={railOpen ? "Plegar consola" : "Desplegar consola"}
         >
           {railOpen ? "▸" : "◂"}
-        </button>
+        </button>}
       </div>
 
       {/* Consola operativa: riel de iconos (actuar) */}
+      <div
+        style={{
+          display: isMobile ? (mTab === "console" ? "flex" : "none") : "contents",
+          flex: isMobile ? 1 : undefined,
+          minHeight: 0,
+        }}
+      >
       <ConsoleRail
         width={360}
+        fill={isMobile}
         open={railOpen}
         onToggleOpen={setRailOpen}
         panels={[
@@ -299,6 +358,7 @@ export function OpsCenter({
           // cola de ATENCIÓN del StatusPanel, con ACK inline.
         ]}
       />
+      </div>
     </div>
   );
 }

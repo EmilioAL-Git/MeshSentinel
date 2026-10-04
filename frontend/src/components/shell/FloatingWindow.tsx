@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { MOBILE_QUERY, useIsMobile } from "../../hooks/useMediaQuery";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { t } from "../../tokens";
 
@@ -79,10 +80,14 @@ export function FloatingWindow({
   });
   const rectRef = useRef(rect);
   rectRef.current = rect;
+  // Móvil: la ventana es una hoja a pantalla completa — sin arrastre,
+  // redimensión ni rectángulo persistido (el de escritorio no tiene sentido).
+  const isMobile = useIsMobile();
 
   // Re-clamp si la ventana quedó fuera del viewport (p. ej. tras cambiar de
   // pantalla): solo al montar, nunca durante el uso normal.
   useEffect(() => {
+    if (isMobile) return;
     const clamped = clampRect(rectRef.current, minWidth, minHeight);
     if (clamped.x !== rectRef.current.x || clamped.y !== rectRef.current.y || clamped.w !== rectRef.current.w || clamped.h !== rectRef.current.h) {
       setRect(clamped);
@@ -167,22 +172,36 @@ export function FloatingWindow({
 
   // Re-clamp en resize del navegador (no durante drag/resize propios).
   useEffect(() => {
-    const onWinResize = () => setRect(clampRect(rectRef.current, minWidth, minHeight));
+    const onWinResize = () => {
+      if (!window.matchMedia(MOBILE_QUERY).matches) setRect(clampRect(rectRef.current, minWidth, minHeight));
+    };
     window.addEventListener("resize", onWinResize);
     return () => window.removeEventListener("resize", onWinResize);
   }, [minWidth, minHeight, setRect]);
 
-  const windowStyle: CSSProperties = {
-    position: "fixed",
-    left: rect.x,
-    top: rect.y,
-    width: rect.w,
-    height: rect.h,
-    zIndex,
-    boxShadow: "0 12px 40px rgba(0, 0, 0, 0.55)",
-    borderRadius: 6,
-    overflow: "hidden",
-  };
+  const windowStyle: CSSProperties = isMobile
+    ? {
+        position: "fixed",
+        left: 0,
+        top: 0,
+        width: "100vw",
+        height: "100dvh",
+        zIndex,
+        overflow: "hidden",
+        paddingTop: "env(safe-area-inset-top)",
+        background: "var(--surface)",
+      }
+    : {
+        position: "fixed",
+        left: rect.x,
+        top: rect.y,
+        width: rect.w,
+        height: rect.h,
+        zIndex,
+        boxShadow: "0 12px 40px rgba(0, 0, 0, 0.55)",
+        borderRadius: 6,
+        overflow: "hidden",
+      };
 
   const handleStyle = (edge: "e" | "s" | "se"): CSSProperties => ({
     position: "absolute",
@@ -211,8 +230,8 @@ export function FloatingWindow({
       <div ref={panelRef} className="panel" style={windowStyle}>
       <div
         className="panel-head"
-        style={{ cursor: "grab", touchAction: "none" }}
-        onPointerDown={onHeaderPointerDown}
+        style={isMobile ? undefined : { cursor: "grab", touchAction: "none" }}
+        onPointerDown={isMobile ? undefined : onHeaderPointerDown}
         onPointerMove={onHeaderPointerMove}
         onPointerUp={onHeaderPointerUp}
       >
@@ -231,17 +250,21 @@ export function FloatingWindow({
           </button>
         </span>
       </div>
-      <div className="panel-body flush" style={{ position: "relative", display: "flex", flexDirection: "column" }}>
+      <div className="panel-body flush" style={{ position: "relative", display: "flex", flexDirection: "column", overflow: isMobile ? "hidden" : undefined }}>
         {children}
       </div>
-      <div style={handleStyle("e")} onPointerDown={startResize("e")} onPointerMove={onResizePointerMove} onPointerUp={onResizePointerUp} />
-      <div style={handleStyle("s")} onPointerDown={startResize("s")} onPointerMove={onResizePointerMove} onPointerUp={onResizePointerUp} />
-      <div
-        style={{ position: "absolute", right: 0, bottom: 0, width: 14, height: 14, cursor: "nwse-resize", touchAction: "none" }}
-        onPointerDown={startResize("se")}
-        onPointerMove={onResizePointerMove}
-        onPointerUp={onResizePointerUp}
-      />
+      {!isMobile && (
+        <>
+          <div style={handleStyle("e")} onPointerDown={startResize("e")} onPointerMove={onResizePointerMove} onPointerUp={onResizePointerUp} />
+          <div style={handleStyle("s")} onPointerDown={startResize("s")} onPointerMove={onResizePointerMove} onPointerUp={onResizePointerUp} />
+          <div
+            style={{ position: "absolute", right: 0, bottom: 0, width: 14, height: 14, cursor: "nwse-resize", touchAction: "none" }}
+            onPointerDown={startResize("se")}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={onResizePointerUp}
+          />
+        </>
+      )}
       </div>
     </>,
     document.body,

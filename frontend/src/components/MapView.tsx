@@ -1,12 +1,13 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, Marker, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
 import { activeGatewayCount, type GatewayOut, type NodeSummaryOut } from "../api/client";
 import { classifyNode } from "./fleet/classify";
 import { nexusCatMarkup } from "./nexus/NexusCatIcon";
 import { useNexusMode } from "./nexus/useNexusMode";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { useUrlList, useUrlNumber, useUrlParam } from "../hooks/useUrlState";
 import { LayerToggle, DEFAULT_MAP_LAYERS, type MapColorMode, type MapLayerState } from "./map/LayerToggle";
 import { LinksLayer } from "./map/LinksLayer";
@@ -347,6 +348,8 @@ export function MapView({
   const withPosition = useMemo(() => summaries.filter((s) => s.last_position), [summaries]);
   const withoutPosition = summaries.length - withPosition.length;
   const nexusModeOn = useNexusMode();
+  const isMobile = useIsMobile();
+  const [layersOpen, setLayersOpen] = useState(false);
 
   // Capas y modo de color ↔ URL (`map.layers`, `map.color` — ADR 0026):
   // sustituye el `usePersistedState("noc.map.layers", …)` anterior, que
@@ -470,18 +473,48 @@ export function MapView({
   if (fill) {
     // Lienzo del Centro de Operaciones: overlays en las esquinas (§5.1)
     return (
-      <div style={{ position: "relative", height: "100%", width: "100%" }}>
+      <div style={{ position: "relative", height: "100%", width: "100%", isolation: "isolate" }}>
         {map}
         <div style={{ ...overlayStyle, top: 10, left: 10 }}>
-          {visibleByLayer.length} / {withPosition.length} nodos en el mapa
-          {withoutPosition > 0 && ` · ${withoutPosition} sin posición`}
+          {visibleByLayer.length} / {withPosition.length} {isMobile ? "nodos" : "nodos en el mapa"}
+          {!isMobile && withoutPosition > 0 && ` · ${withoutPosition} sin posición`}
         </div>
-        <div style={{ ...overlayStyle, top: 10, right: 10, padding: "0.4rem" }}>
-          <LayerToggle layers={layers} onChange={setLayers} showNexusToggle={nexusModeOn} />
-        </div>
-        <div style={{ ...overlayStyle, bottom: 10, left: 10 }}>
-          <Legend />
-        </div>
+        {isMobile ? (
+          // Móvil: las capas viven tras un botón — el panel completo tapaba medio mapa
+          <>
+            <button
+              className="btn"
+              style={{ ...overlayStyle, top: 10, right: 10, cursor: "pointer", color: "var(--text)" }}
+              onClick={() => setLayersOpen((o) => !o)}
+            >
+              {layersOpen ? "✕ Capas" : "☰ Capas"}
+            </button>
+            {layersOpen && (
+              <div
+                style={{
+                  ...overlayStyle,
+                  top: 52,
+                  right: 10,
+                  left: 10,
+                  padding: "0.5rem",
+                  maxHeight: "calc(100% - 120px)",
+                  overflowY: "auto",
+                }}
+              >
+                <LayerToggle layers={layers} onChange={setLayers} showNexusToggle={nexusModeOn} wide />
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ ...overlayStyle, top: 10, right: 10, padding: "0.4rem" }}>
+            <LayerToggle layers={layers} onChange={setLayers} showNexusToggle={nexusModeOn} />
+          </div>
+        )}
+        {!isMobile && (
+          <div style={{ ...overlayStyle, bottom: 10, left: 10 }}>
+            <Legend />
+          </div>
+        )}
       </div>
     );
   }

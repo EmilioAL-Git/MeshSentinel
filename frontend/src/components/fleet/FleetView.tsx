@@ -25,6 +25,7 @@ import { DeleteNodeModal } from "./DeleteNodeModal";
 import { IgnoreNodeModal } from "./IgnoreNodeModal";
 import { FleetBlocks } from "./FleetBlocks";
 import { GroupBar } from "./GroupBar";
+import { MobileFilters } from "../shell/MobileFilters";
 import { computeFleetGroupMetrics } from "./groupStats";
 import { DEFAULT_FLEET_COLUMNS, FLEET_COLUMNS, FleetRow, buildFleetGrid, type FleetColumnId } from "./instruments";
 
@@ -295,7 +296,8 @@ export function FleetView({
             🐱 nexus
           </button>
         )}
-        <span className="sep" />
+        <span className="sep m-hide" />
+        <MobileFilters active={hasFilters}>
         <select className="input" value={filters.hw_model ?? ""} onChange={(e) => set({ hw_model: e.target.value || undefined })}>
           <option value="">hardware</option>
           {hwModels.map((h) => (
@@ -357,6 +359,7 @@ export function FleetView({
             ✕ limpiar
           </button>
         )}
+        </MobileFilters>
         <span style={{ marginLeft: "auto" }} />
         <select
           className="input"
@@ -456,24 +459,24 @@ export function FleetView({
         {/* Barra de armado: solo existe cuando hay selección */}
         {checkedIds.size > 0 && (
           <div
-            className="toolbar"
+            className="toolbar selbar"
             style={{ borderTop: "1px solid var(--accent)", borderBottom: "none", background: "var(--surface-2)" }}
           >
             <span className="microlabel" style={{ color: "var(--accent)" }}>
               {checkedIds.size} nodo{checkedIds.size !== 1 ? "s" : ""} seleccionado{checkedIds.size !== 1 ? "s" : ""}
             </span>
             <button
-              className="btn ghost"
+              className="btn ghost m-hide"
               title="Selecciona todos los nodos que se ven ahora en la lista (respeta los filtros)"
               onClick={() => onCheckedChange(new Set([...checkedIds, ...summaries.map((s) => s.node.node_id)]))}
             >
               Seleccionar todos
             </button>
             <button className="btn ghost" onClick={() => onCheckedChange(new Set())}>
-              Deseleccionar todos
+              Deseleccionar
             </button>
             <button
-              className="btn ghost"
+              className="btn ghost m-hide"
               onClick={() => {
                 const next = new Set(checkedIds);
                 for (const s of summaries) {

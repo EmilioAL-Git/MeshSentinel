@@ -16,6 +16,7 @@ import { fetchActivityLog, type GatewayOut, type NodeSummaryOut } from "../api/c
 import { useActiveGroup, useGroupNodeIds } from "../context/GroupContext";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { useUrlList, useUrlString } from "../hooks/useUrlState";
+import { MobileFilters } from "./shell/MobileFilters";
 import { NodeSelect } from "./NodeSelect";
 
 /**
@@ -355,7 +356,8 @@ export function ActivityConsole({
             📁 {activeGroup.name}
           </span>
         )}
-        <span className="sep" />
+        <span className="sep m-hide" />
+        <MobileFilters active={search !== "" || nodeFilter !== "" || gatewayFilter !== "" || batchFilter !== ""}>
         <input
           className="input"
           style={{ minWidth: 190, fontFamily: "var(--font-mono)" }}
@@ -389,6 +391,7 @@ export function ActivityConsole({
             </button>
           ))}
         </span>
+        </MobileFilters>
         <span style={{ marginLeft: "auto" }} />
         <button
           className="btn ghost"
@@ -417,7 +420,7 @@ export function ActivityConsole({
       </div>
 
       {/* Resumen de tráfico reciente: último minuto, en memoria */}
-      <div className="toolbar" style={{ gap: "1rem", flexWrap: "wrap", paddingTop: 0 }}>
+      <div className="toolbar m-hide" style={{ gap: "1rem", flexWrap: "wrap", paddingTop: 0 }}>
         <span className="microlabel" style={{ color: "var(--text-faint)" }}>
           Últimos 60 s
         </span>

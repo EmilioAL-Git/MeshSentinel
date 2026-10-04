@@ -45,6 +45,7 @@ export function NexusJobRow({
   return (
     <div className={flash ? "noc-flash" : undefined} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
       <div
+        className="job-row"
         onClick={() => setOpen(!open)}
         title={`por ${op.created_by ?? "sistema"} · ${op.text}`}
         style={{ display: "flex", alignItems: "center", gap: 8, padding: "0.25rem 0.5rem", fontSize: 12, cursor: "pointer" }}

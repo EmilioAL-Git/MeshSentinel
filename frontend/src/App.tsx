@@ -544,7 +544,7 @@ export default function App() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "100vh",
+        height: "100dvh",
         overflow: "hidden",
         background: "var(--chassis)",
         color: t.text,
@@ -554,6 +554,7 @@ export default function App() {
       {/* Cabecera del chasis: marca + workspace actual + ⌘K + Focus + HUD.
           La navegación vive en el riel; aquí solo identidad y constantes. */}
       <header
+        className="app-header"
         style={{
           display: "flex",
           alignItems: "center",
@@ -570,6 +571,7 @@ export default function App() {
           alt="MeshSentinel"
           onClick={() => setView("ops")}
           title="Centro de Operaciones"
+          className="app-logo"
           style={{
             height: "3rem",
             width: "auto",
@@ -578,7 +580,7 @@ export default function App() {
           }}
         />
         <span
-          className="mono"
+          className="mono app-viewlabel"
           style={{ color: t.textFaint, fontSize: 11, letterSpacing: "0.1em", whiteSpace: "nowrap" }}
         >
           ／ {currentView?.label.toUpperCase()}
@@ -586,7 +588,7 @@ export default function App() {
         <button
           onClick={() => setPaletteOpen(true)}
           title="Búsqueda global (Ctrl+K / ⌘K)"
-          className="btn ghost"
+          className="btn ghost app-search"
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -595,8 +597,8 @@ export default function App() {
             border: `1px solid ${t.borderSubtle}`,
           }}
         >
-          <span>⌕ Buscar…</span>
-          <span className="mono" style={{ marginLeft: "auto", fontSize: "0.72rem", color: t.textFaint }}>⌘K</span>
+          <span>⌕<span className="app-search-text"> Buscar…</span></span>
+          <span className="mono app-search-text" style={{ marginLeft: "auto", fontSize: "0.72rem", color: t.textFaint }}>⌘K</span>
         </button>
         <GroupSelector />
         <span style={{ marginLeft: "auto" }} />
@@ -611,6 +613,7 @@ export default function App() {
           />
         )}
         <Hud
+          className="app-hud"
           summary={shellSummary}
           gateways={shellGateways}
           alertCounts={alertCounts.data}
@@ -658,7 +661,7 @@ export default function App() {
       />
 
       {/* Cuerpo: riel de navegación + workspace activo, todo a sangre */}
-      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+      <div className="app-body" style={{ flex: 1, minHeight: 0, display: "flex" }}>
         <NavRail items={railItems} active={view} onNavigate={(v) => setView(resolveView(v))} />
 
         <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>

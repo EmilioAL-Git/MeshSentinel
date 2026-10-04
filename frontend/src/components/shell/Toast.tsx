@@ -43,6 +43,7 @@ export function ToastHost() {
   if (toasts.length === 0) return null;
   return (
     <div
+      className="toast-host"
       style={{
         position: "fixed",
         right: 16,

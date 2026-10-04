@@ -695,13 +695,14 @@ export function Inspector({
       {/* Cuerpo en dos columnas: caja grande de pestañas+comandos a la
           izquierda, panel de detalles/info fijo a la derecha (pedido
           explícito del usuario — antes todo apilado verticalmente). */}
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
+      <div className="insp-body" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
         {/* Columna izquierda: pestañas + contenido (comandos) */}
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${t.border}` }}>
+        <div className="insp-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${t.border}` }}>
           {/* Tira de pestañas: botones claros en varias líneas si no caben
               en una sola (antes una fila con scroll horizontal, difícil de
               descubrir — pedido explícito del usuario). */}
           <div
+            className="insp-tabs"
             style={{
               display: "flex",
               flexWrap: "wrap",
@@ -737,7 +738,7 @@ export function Inspector({
           </div>
 
           {/* Cuerpo: contenido de la pestaña activa */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem" }}>
+          <div className="insp-content" style={{ flex: 1, overflowY: "auto", padding: "0.75rem" }}>
             {node.isError && <p style={{ color: t.crit }}>Error cargando {nodeId}</p>}
 
         {locked && <LockedNotice what={`La pestaña «${TAB_LABEL[effectiveTab]}»`} />}
@@ -1422,6 +1423,7 @@ export function Inspector({
 
         {/* Columna derecha: detalles / info del nodo, fija */}
         <div
+          className="insp-info"
           style={{
             width: 340,
             flexShrink: 0,
@@ -1504,7 +1506,7 @@ export function Inspector({
             <Vital label="PASARELA" value={primaryGatewayName ?? "—"} />
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
+          <div className="insp-actions" style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
             <button style={{ ...actionBtn, width: "100%" }} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Añade metadata.get a la cola (solo lectura)">
               ⚙ Pedir metadata
             </button>
@@ -1552,7 +1554,7 @@ export function Inspector({
               `display:flex` (pensada para una fila ancha) — en esta
               columna estrecha 5 ítems en fila cortaban el texto; se
               fuerza grid de 2 columnas aquí. */}
-          <div className="kpis" style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+          <div className="kpis insp-kpis" style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr" }}>
             <div className="kpi">
               <div className="v" style={{ color: batteryColor ?? t.text }}>
                 {batteryText}

@@ -49,7 +49,7 @@ export function GroupSelector() {
   }, [open]);
 
   return (
-    <div ref={rootRef} style={{ position: "relative", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+    <div ref={rootRef} className="gs-root" style={{ position: "relative", display: "flex", alignItems: "center", gap: "0.35rem" }}>
       <button
         className="btn ghost"
         onClick={() => setOpen((o) => !o)}
@@ -64,12 +64,12 @@ export function GroupSelector() {
           whiteSpace: "nowrap",
         }}
       >
-        <span style={{ color: activeGroup ? t.accent : t.textFaint, fontSize: 11 }}>GRUPO</span>
-        <span>{activeGroup ? `${activeGroup.name} (${activeGroup.member_count})` : "Toda la red"}</span>
+        <span className="gs-word" style={{ color: activeGroup ? t.accent : t.textFaint, fontSize: 11 }}>GRUPO</span>
+        <span className="gs-name">{activeGroup ? `${activeGroup.name} (${activeGroup.member_count})` : "Toda la red"}</span>
         <span style={{ color: t.textFaint, fontSize: 10 }}>▾</span>
       </button>
       <button
-        className="btn ghost"
+        className="btn ghost gs-clear"
         onClick={clearActiveGroup}
         disabled={activeGroupId == null}
         title="Volver al modo global — todos los nodos"
@@ -85,6 +85,7 @@ export function GroupSelector() {
 
       {open && (
         <div
+          className="gs-menu"
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",
