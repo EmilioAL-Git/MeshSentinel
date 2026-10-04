@@ -541,6 +541,7 @@ export default function App() {
 
   return (
     <div
+      className="app-root"
       style={{
         display: "flex",
         flexDirection: "column",
