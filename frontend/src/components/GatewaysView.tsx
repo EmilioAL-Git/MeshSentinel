@@ -677,9 +677,19 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
               </button>
               <span style={{ marginLeft: "auto", display: "flex", gap: "0.4rem" }}>
                 {gateway.status === "connected" || gateway.status === "connecting" || gateway.status === "reconnecting" ? (
-                  <button className="btn" disabled={doDisconnect.isPending} onClick={() => doDisconnect.mutate()}>
-                    Desconectar
-                  </button>
+                  <>
+                    <button
+                      className="btn"
+                      disabled={doConnect.isPending}
+                      onClick={() => doConnect.mutate()}
+                      title="Cierra la conexión actual y la abre de nuevo (útil si el nodo se queda colgado)"
+                    >
+                      {doConnect.isPending ? "Reconectando…" : "Reconectar"}
+                    </button>
+                    <button className="btn" disabled={doDisconnect.isPending} onClick={() => doDisconnect.mutate()}>
+                      Desconectar
+                    </button>
+                  </>
                 ) : (
                   <button className="btn" disabled={doConnect.isPending} onClick={() => doConnect.mutate()}>
                     Conectar
