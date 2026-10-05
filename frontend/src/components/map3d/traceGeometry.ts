@@ -80,46 +80,65 @@ export function disc(center: LngLat, r: number, sides = 14): LngLat[] {
 }
 
 export interface Ribbon {
-  /** índice global creciente a lo largo de toda la animación */
-  order: number;
   hop: number;
   leg: 0 | 1;
+  /** posición del prisma a lo largo del salto, 0..1 */
+  t: number;
+  /** semiancho del prisma en `t` (para saber si la cabeza cae dentro) */
+  dt: number;
   ring: LngLat[];
   base: number;
   height: number;
   color: string;
 }
 
-/**
- * Cinta de prismas para un tramo a→b. El arco nace en lo alto de los pilares
- * (`pillarH`), sube `peak` metros hacia el centro y vuelve a bajar. `side`
- * separa lateralmente ida y vuelta para que no se solapen.
- */
-export function buildArc(
-  a: LngLat,
-  b: LngLat,
-  o: { steps: number; pillarH: number; peak: number; halfW: number; side: number; hop: number; leg: 0 | 1; color: string; orderStart: number },
-): Ribbon[] {
-  const { steps, pillarH, peak, halfW } = o;
-  // vector perpendicular en metros (este/norte) para el desplazamiento lateral
+/** Forma de un arco a→b (en metros). El arco nace en lo alto de los pilares
+ * (`pillarH`), sube `peak` metros hacia el centro y vuelve a bajar; `side`
+ * separa lateralmente ida y vuelta para que no se solapen. */
+export interface ArcSpec {
+  a: LngLat;
+  b: LngLat;
+  pillarH: number;
+  peak: number;
+  halfW: number;
+  side: number;
+}
+
+/** Vector unitario perpendicular al salto (este/norte) para el desplazamiento lateral. */
+function perpendicular(a: LngLat, b: LngLat): [number, number] {
   const dxm = (b[0] - a[0]) * M_PER_DEG_LAT * Math.cos(toRad(a[1]));
   const dym = (b[1] - a[1]) * M_PER_DEG_LAT;
   const len = Math.hypot(dxm, dym) || 1;
-  const nx = -dym / len;
-  const ny = dxm / len;
-  const pts: { p: LngLat; z: number }[] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const base: LngLat = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-    const lift = Math.sin(Math.PI * t); // 0 en los extremos, 1 en el centro
-    pts.push({
-      p: offset(base, nx * o.side * lift, ny * o.side * lift),
-      z: pillarH + peak * lift,
-    });
-  }
+  return [-dym / len, dxm / len];
+}
+
+/** Punto (lng/lat + altura en metros) del arco en la fracción `t` (0..1). */
+export function arcPointAt(spec: ArcSpec, t: number): { lngLat: LngLat; z: number } {
+  const [nx, ny] = perpendicular(spec.a, spec.b);
+  const lift = Math.sin(Math.PI * t); // 0 en los extremos, 1 en el centro
+  const base: LngLat = [spec.a[0] + (spec.b[0] - spec.a[0]) * t, spec.a[1] + (spec.b[1] - spec.a[1]) * t];
+  return { lngLat: offset(base, nx * spec.side * lift, ny * spec.side * lift), z: spec.pillarH + spec.peak * lift };
+}
+
+/**
+ * Cinta de prismas para la VENTANA [t0, t1] del arco. Pedir solo la parte
+ * visible, con tantos prismas como hagan falta para que cada uno mida un
+ * número razonable de píxeles, evita las barras gigantes que salían al
+ * acercarse a un salto largo dividido en un número fijo de trozos.
+ */
+export function buildArcWindow(
+  spec: ArcSpec,
+  t0: number,
+  t1: number,
+  steps: number,
+  meta: { hop: number; leg: 0 | 1; color: string },
+): Ribbon[] {
+  const { halfW } = spec;
+  const pts = [];
+  for (let i = 0; i <= steps; i++) pts.push({ t: t0 + ((t1 - t0) * i) / steps, ...arcPointAt(spec, t0 + ((t1 - t0) * i) / steps) });
   const ribbons: Ribbon[] = [];
   for (let i = 0; i < steps; i++) {
-    const [p0, p1] = [pts[i].p, pts[i + 1].p];
+    const [p0, p1] = [pts[i].lngLat, pts[i + 1].lngLat];
     const sx = (p1[0] - p0[0]) * M_PER_DEG_LAT * Math.cos(toRad(p0[1]));
     const sy = (p1[1] - p0[1]) * M_PER_DEG_LAT;
     const sl = Math.hypot(sx, sy) || 1;
@@ -128,23 +147,15 @@ export function buildArc(
     ring.push(ring[0]);
     const zMid = (pts[i].z + pts[i + 1].z) / 2;
     ribbons.push({
-      order: o.orderStart + i,
-      hop: o.hop,
-      leg: o.leg,
+      hop: meta.hop,
+      leg: meta.leg,
+      t: (pts[i].t + pts[i + 1].t) / 2,
+      dt: Math.abs(pts[i + 1].t - pts[i].t) / 2,
       ring,
       base: Math.max(0, zMid - halfW),
       height: zMid + halfW,
-      color: o.color,
+      color: meta.color,
     });
   }
   return ribbons;
-}
-
-/** Posición (lng/lat/z) de la "cabeza" del pulso para la cinta `order`. */
-export function ribbonCenter(r: Ribbon): { lngLat: LngLat; z: number } {
-  const xs = r.ring.slice(0, 4);
-  return {
-    lngLat: [xs.reduce((s, p) => s + p[0], 0) / 4, xs.reduce((s, p) => s + p[1], 0) / 4],
-    z: (r.base + r.height) / 2,
-  };
 }

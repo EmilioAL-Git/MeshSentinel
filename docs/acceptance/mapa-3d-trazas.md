@@ -32,3 +32,17 @@ La altura de los arcos es ilustrativa, no la trayectoria de radio real.
   existían en el Registro. Recupera la ida y su SNR; la vuelta no se guardaba. Es
   idempotente (repetirlo no duplica) y omite los ya registrados en vivo.
 - Próximamente (tarjetas atenuadas): Comparador de trazas, Perfil de elevación.
+
+## Mapa base y relieve
+- Selector sobre el mapa: **Oscuro** (CARTO + sombreado fuerte), **Satélite** (Sentinel-2 cloudless de
+  EOX, ~10 m/px, se desenfoca por encima de z13) y **Relieve** (rampa de color por altitud).
+  Los tres llevan el terreno 3D real (Mapterhorn). Se recuerda la elección.
+- Exageración vertical 1× (altura real) / 1,6× / 2,5× / 4×. En zonas llanas (La Mancha) casi no hay
+  relieve que ver; en sierras (Guadarrama, Sierra Nevada) se nota mucho.
+- Licencias: EOX Sentinel-2 cloudless es CC BY-NC 4.0 (uso no comercial, con atribución).
+- Las bases se superponen: la imagen/relieve va de fondo y encima quedan agua, ríos, límites, carreteras,
+  edificios y nombres (aclarados para que se vean sobre la imagen). «+ Relieve color» superpone la rampa de
+  altitud, semitransparente, al fondo elegido; «Referencias» oculta carreteras/límites y sus nombres.
+- Elevación: Mapterhorn (zoom hasta 17, teselas 512 px; AWS Terrain Tiles queda como reserva en
+  `map3dConfig.ts`). Exageración 1×/2×/3×/5× (2× por defecto). El modo «Relieve» usa bandas de color cada
+  100 m (como curvas de nivel) para que se distinga la altura incluso en mesetas casi llanas.
