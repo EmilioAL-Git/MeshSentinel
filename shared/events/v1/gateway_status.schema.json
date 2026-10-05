@@ -10,7 +10,7 @@
       "type": "string",
       "enum": ["unassigned", "connecting", "reconnecting", "connected", "disconnected", "error"]
     },
-    "transport": { "type": "string", "enum": ["usb", "serial", "tcp", "http", "simulated"] },
+    "transport": { "type": "string", "enum": ["usb", "serial", "tcp", "http", "mqtt", "simulated"] },
     "local_node_id": { "type": ["string", "null"], "description": "ID del nodo central al que está conectada" },
     "detail": { "type": ["string", "null"], "description": "Mensaje de error u observación" },
     "local_short_name": { "type": ["string", "null"], "description": "Nombre corto del nodo local (M5, refrescado al conectar)" },
@@ -20,6 +20,8 @@
     "last_device_response_at": { "type": ["string", "null"], "format": "date-time", "description": "Última respuesta real del nodo conectado por el enlace API (USB/TCP): la pasarela está viva. Independiente del tráfico LoRa." },
     "last_lora_rx_at": { "type": ["string", "null"], "format": "date-time", "description": "Último paquete de OTRO nodo recibido por radio (tráfico RX)" },
     "last_lora_tx_at": { "type": ["string", "null"], "format": "date-time", "description": "Última transmisión a la malla ordenada por la pasarela (tráfico TX)" },
+    "tx_enabled": { "type": ["boolean", "null"], "description": "¿Puede transmitir a la malla? false = solo recepción (lora.tx_enabled=false o fuente sin radio, p. ej. MQTT). Opcional, aditivo (ADR 0032)." },
+    "virtual_node": { "type": ["object", "null"], "description": "Nodo virtual activo (ADR 0033): puerto, clientes conectados y si se permite administración. null = desactivado. Opcional, aditivo.", "properties": { "port": { "type": "integer" }, "clients": { "type": "integer" }, "allow_admin": { "type": "boolean" } } },
     "channels": {
       "type": ["array", "null"],
       "description": "Canales configurados en el nodo local (índice+nombre), refrescados al conectar",

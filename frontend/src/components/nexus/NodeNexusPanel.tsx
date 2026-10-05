@@ -58,7 +58,7 @@ export function NodeNexusPanel({
 }) {
   const queryClient = useQueryClient();
   const gatewaysQuery = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
-  const gateways = (gatewaysQuery.data ?? []).filter((g) => g.status === "connected");
+  const gateways = (gatewaysQuery.data ?? []).filter((g) => g.status === "connected" && g.can_transmit);
   // Ajuste "direccionar por defecto" (ADR 0027 §13, id vs shortname): decide
   // con qué -kind/-value habla ESTE panel con SU nodo — nunca cambia lo que
   // el operador puede elegir en el formulario genérico de Ajustes, solo el
@@ -81,6 +81,7 @@ export function NodeNexusPanel({
       (id): id is string => !!id && connected.has(id),
     );
     if (preferred) setGatewayId(preferred);
+    else if (gateways.find((g) => g.is_primary)) setGatewayId(gateways.find((g) => g.is_primary)!.gateway_id);
     else if (gateways.length === 1) setGatewayId(gateways[0]!.gateway_id);
   }, [gatewayId, gateways, defaultGatewayId, settingsQuery.data]);
   const [command, setCommand] = useState("");

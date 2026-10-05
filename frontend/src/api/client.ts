@@ -168,6 +168,14 @@ export interface GatewayOut {
   last_disconnected_at: string | null;
   last_error: string | null;
   last_error_at: string | null;
+  // ADR 0032: solo recepción (manual o reportada), primaria designada y orden
+  receive_only: boolean;
+  tx_enabled: boolean | null;
+  can_transmit: boolean;
+  is_primary: boolean;
+  sort_order: number;
+  /** ADR 0033: nodo virtual activo en el gateway (null = desactivado) */
+  virtual_node: { port: number; clients: number; allow_admin: boolean } | null;
 }
 
 // ── Interceptor global de 401 (autenticación) ───────────────────────────────
@@ -272,7 +280,7 @@ export const fetchLauncherDevices = () => get<DeviceOut[]>("/gateways/devices");
 export interface CreateGatewayIn {
   gateway_id: string;
   name: string;
-  transport_type: "usb" | "tcp" | "simulated";
+  transport_type: "usb" | "tcp" | "http" | "mqtt" | "simulated";
   connection_params: Record<string, unknown>;
 }
 /** "+ Añadir gateway" → "Crear un contenedor nuevo": pide al lanzador crear
@@ -311,6 +319,14 @@ export const connectGateway = (gatewayId: string) =>
   send<GatewayOut>("POST", `/gateways/${encodeURIComponent(gatewayId)}/connect`);
 export const disconnectGateway = (gatewayId: string) =>
   send<GatewayOut>("POST", `/gateways/${encodeURIComponent(gatewayId)}/disconnect`);
+export const resyncGateway = (gatewayId: string) =>
+  send<GatewayOut>("POST", `/gateways/${encodeURIComponent(gatewayId)}/resync`);
+export const setGatewayReceiveOnly = (gatewayId: string, receive_only: boolean) =>
+  send<GatewayOut>("PUT", `/gateways/${encodeURIComponent(gatewayId)}/receive-only`, { receive_only });
+export const setGatewayPrimary = (gatewayId: string, primary: boolean) =>
+  send<GatewayOut>("PUT", `/gateways/${encodeURIComponent(gatewayId)}/primary`, { primary });
+export const reorderGateways = (gatewayIds: string[]) =>
+  send<void>("POST", "/gateways/reorder", { gateway_ids: gatewayIds });
 export const deleteGateway = (gatewayId: string) =>
   send<void>("DELETE", `/gateways/${encodeURIComponent(gatewayId)}`);
 

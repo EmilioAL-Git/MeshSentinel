@@ -19,10 +19,35 @@ class Settings(BaseSettings):
     # "unassigned" hasta que "+ Añadir gateway" lo reclama con un
     # command.gateway_connect real (mismo mecanismo que M5, sin código nuevo
     # en TransportManager/CommandConsumer).
-    transport: Literal["usb", "tcp", "http", "simulated", "idle"] = "simulated"
+    transport: Literal["usb", "tcp", "http", "mqtt", "simulated", "idle"] = "simulated"
     tcp_host: str = ""
     tcp_port: int = 4403
-    http_url: str = ""
+    # HTTP de nodo Meshtastic (ADR 0032): API del firmware por WiFi (/api/v1/*).
+    # Sin el límite de un único cliente TCP del puerto 4403.
+    http_host: str = ""
+    http_port: int = 80
+
+    # Nodo virtual (ADR 0033): expone la conexión de este nodo a clientes
+    # Meshtastic (app móvil, CLI) por un puerto TCP propio. Apagado por defecto.
+    vn_enabled: bool = False
+    vn_port: int = 4404
+    vn_allow_admin: bool = False
+
+    # Fuente MQTT (ADR 0032): SOLO ingesta — se suscribe a un broker y mete lo
+    # que oye en el mismo pipeline. Nunca transmite.
+    mqtt_host: str = ""
+    mqtt_port: int = 1883
+    mqtt_username: str = ""
+    mqtt_password: str = ""
+    mqtt_tls: bool = False
+    mqtt_topic: str = "msh/#"
+    # PSK base64 por defecto de los canales ("AQ==" = clave por defecto de
+    # Meshtastic) y excepciones por nombre de canal {"MiCanal": "<base64>"}
+    mqtt_psk: str = "AQ=="
+    mqtt_channel_keys: dict[str, str] = Field(default_factory=dict)
+    # Caja geográfica [sur, oeste, norte, este]: los nodos que reportan una
+    # posición fuera de ella se ignoran. Vacío = sin filtro.
+    mqtt_geo_bbox: list[float] = Field(default_factory=list)
 
     # USB (librería oficial; sin baudrate: lo gestiona la propia librería)
     # Vacío = autodetección con meshtastic.util.findPorts()

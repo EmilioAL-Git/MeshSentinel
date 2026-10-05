@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from noc.adapters.api.deps import RequireManagerDep, SessionDep
+from noc.adapters.persistence.repositories import SqlGatewayRepository
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.nexus.builder import NexusCommandError
 from noc.application.nexus.catalog import COMMANDS, CommandSpec, describe
@@ -197,11 +198,25 @@ async def patch_nexus_settings(
     return SettingsOut(**merge_settings(overrides))
 
 
+async def _require_can_transmit(session: SessionDep, gateway_id: str) -> None:
+    """ADR 0032: una pasarela de solo recepción no puede emitir comandos Nexus
+    (todos viajan como texto a la malla)."""
+    gateway = await SqlGatewayRepository(session).get(gateway_id)
+    if gateway is not None and not gateway.can_transmit:
+        raise HTTPException(
+            status_code=409,
+            detail=f"La pasarela {gateway_id} es de solo recepción: no puede transmitir a la malla.",
+        )
+
+
 @router.post("/scan", response_model=ScanOut)
-async def scan(body: ScanIn, request: Request, current_user: RequireManagerDep) -> ScanOut:
+async def scan(
+    body: ScanIn, request: Request, current_user: RequireManagerDep, session: SessionDep
+) -> ScanOut:
     service = _service(request)
     if not await service.is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    await _require_can_transmit(session, body.gateway_id)
     issued_by = current_user.username if current_user else "system"
     try:
         candidates = await service.scan(body.gateway_id, issued_by, body.window_seconds)
@@ -323,11 +338,12 @@ async def preview_operation(body: OperationIn, request: Request, current_user: R
 
 @router.post("/operations", response_model=OperationOut)
 async def create_operation(
-    body: OperationIn, request: Request, current_user: RequireManagerDep
+    body: OperationIn, request: Request, current_user: RequireManagerDep, session: SessionDep
 ) -> OperationOut:
     service = _service(request)
     if not await service.is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    await _require_can_transmit(session, body.gateway_id)
     issued_by = current_user.username if current_user else "system"
     try:
         op = await _operations(request).create(
@@ -349,7 +365,7 @@ class BatchOperationIn(BaseModel):
 
 @router.post("/operations/batch", response_model=list[OperationOut])
 async def create_operation_batch(
-    body: BatchOperationIn, request: Request, current_user: RequireManagerDep
+    body: BatchOperationIn, request: Request, current_user: RequireManagerDep, session: SessionDep
 ) -> list[OperationOut]:
     """Lote: una operación `-node <shortname>` por cada nodo seleccionado en
     Flota, espaciadas entre sí por `interval_seconds` (ADR 0027 §14) — para
@@ -358,6 +374,7 @@ async def create_operation_batch(
     service = _service(request)
     if not await service.is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
+    await _require_can_transmit(session, body.gateway_id)
     issued_by = current_user.username if current_user else "system"
     try:
         ops = await _operations(request).create_batch(

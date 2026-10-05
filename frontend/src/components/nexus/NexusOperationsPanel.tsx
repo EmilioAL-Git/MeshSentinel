@@ -62,7 +62,7 @@ const TARGET_KINDS: { value: NexusTargetKind; label: string; needsValue: boolean
 export function NexusOperationsPanel() {
   const queryClient = useQueryClient();
   const gatewaysQuery = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
-  const gateways = (gatewaysQuery.data ?? []).filter((g) => g.status === "connected");
+  const gateways = (gatewaysQuery.data ?? []).filter((g) => g.status === "connected" && g.can_transmit);
   const settingsQuery = useQuery({ queryKey: ["nexus-settings"], queryFn: fetchNexusSettings });
   const settings = settingsQuery.data;
   // Confirmación reforzada de difusión destructiva (ADR 0027): en vez de

@@ -6,6 +6,8 @@ outcome de una nueva)."""
 
 import asyncio
 
+import pytest
+
 from gateway.config import Settings
 from gateway.transport_manager import TransportManager
 
@@ -88,12 +90,9 @@ async def _test_connect_unsupported_type_preserves_active_transport() -> None:
     active = manager.transport
     assert active is not None
 
-    try:
-        await manager.connect("http", {"url": "http://x"})
-    except NotImplementedError:
-        pass
-    else:  # pragma: no cover
-        raise AssertionError("expected NotImplementedError")
+    # tipo con params inválidos (http sin host): ValueError al construir
+    with pytest.raises(ValueError):
+        await manager.connect("http", {})
 
     assert manager.transport is active  # la conexión activa sobrevive intacta
     await manager.teardown()

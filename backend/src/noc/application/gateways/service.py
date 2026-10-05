@@ -59,6 +59,10 @@ class GatewayAlreadyExistsError(Exception):
     existente, para eso está "Editar" en su propio panel."""
 
 
+class VirtualNodeConfigError(Exception):
+    """Puerto de nodo virtual inválido o ya en uso por otra pasarela (ADR 0033)."""
+
+
 class LauncherUnavailableError(Exception):
     """`gateway-launcher` (ADR 0028) no respondió o rechazó la operación —
     la fila en BD no se toca: ni se crea al provisionar, ni se borra al
@@ -160,6 +164,7 @@ class GatewayService:
         el lanzador — nunca se reconfigura un enlace existente por esta vía."""
         if self._launcher is None:
             raise LauncherUnavailableError("gateway-launcher no está configurado en este despliegue")
+        await self.check_virtual_node(gateway_id, connection_params)
         existing = await self.get(gateway_id)
         if existing is not None and existing.managed:
             raise GatewayAlreadyExistsError(f"«{gateway_id}» ya está configurado — elige otro identificador")
@@ -194,6 +199,7 @@ class GatewayService:
         con los parámetros definitivos — incluso si una prueba previa ya dejó
         una conexión activa: una reconexión de más es aceptable a cambio de no
         duplicar el camino de conexión (ADR 0021 §3)."""
+        await self.check_virtual_node(gateway_id, connection_params)
         async with self._session_factory() as session, session.begin():
             info = await SqlGatewayRepository(session).configure(
                 gateway_id,
@@ -230,6 +236,30 @@ class GatewayService:
                 desired_status="connected",
             )
 
+    async def check_virtual_node(self, gateway_id: str, params: dict[str, Any]) -> None:
+        """ADR 0033: el puerto del nodo virtual debe ser válido y no estar en
+        uso por otra pasarela (cada una lo publica en el host)."""
+        if not params.get("vn_enabled"):
+            return
+        port = params.get("vn_port")
+        if not isinstance(port, int) or isinstance(port, bool) or not 1024 <= port <= 65535:
+            raise VirtualNodeConfigError("El puerto del nodo virtual debe ser un número entre 1024 y 65535")
+        async with self._session_factory() as session:
+            others = await SqlGatewayRepository(session).list_all()
+        for other in others:
+            if other.gateway_id == gateway_id:
+                continue
+            if other.connection_params.get("vn_enabled") and other.connection_params.get("vn_port") == port:
+                raise VirtualNodeConfigError(
+                    f"El puerto {port} ya lo usa el nodo virtual de «{other.name or other.gateway_id}»"
+                )
+
+    @staticmethod
+    def _vn_publish_signature(params: dict[str, Any] | None) -> tuple[bool, Any]:
+        params = params or {}
+        enabled = bool(params.get("vn_enabled"))
+        return (enabled, params.get("vn_port") if enabled else None)
+
     async def update(
         self,
         gateway_id: str,
@@ -239,6 +269,24 @@ class GatewayService:
         enabled: bool | None = None,
         priority: int | None = None,
     ) -> GatewayInfo | None:
+        if connection_params is not None:
+            await self.check_virtual_node(gateway_id, connection_params)
+            before = await self.get(gateway_id)
+            # El puerto publicado es del CONTENEDOR (no se puede cambiar en
+            # caliente): activar/desactivar o mover el puerto lo recrea.
+            if (
+                before is not None
+                and before.container_managed
+                and self._launcher is not None
+                and self._vn_publish_signature(before.connection_params)
+                != self._vn_publish_signature(connection_params)
+            ):
+                try:
+                    await self._launcher.create_container(
+                        gateway_id, transport_type or before.transport_type or "tcp", connection_params
+                    )
+                except LauncherError as exc:
+                    raise LauncherUnavailableError(str(exc)) from exc
         desired_status = "connected" if enabled is True else "disconnected" if enabled is False else None
         async with self._session_factory() as session, session.begin():
             info = await SqlGatewayRepository(session).update_config(
@@ -266,6 +314,27 @@ class GatewayService:
                 {"transport_type": info.transport_type, "connection_params": info.connection_params},
             )
         return info
+
+    async def resync(self, gateway_id: str) -> GatewayInfo | None:
+        """Pide al proceso gateway que relea el nodo local y republique el
+        snapshot de su NodeDB sin cortar el enlace (ADR 0032)."""
+        async with self._session_factory() as session:
+            info = await SqlGatewayRepository(session).get(gateway_id)
+        if info is not None:
+            await self._send_command(gateway_id, "command.gateway_resync", {})
+        return info
+
+    async def set_receive_only(self, gateway_id: str, receive_only: bool) -> GatewayInfo | None:
+        async with self._session_factory() as session, session.begin():
+            return await SqlGatewayRepository(session).set_receive_only(gateway_id, receive_only)
+
+    async def set_primary(self, gateway_id: str, primary: bool) -> GatewayInfo | None:
+        async with self._session_factory() as session, session.begin():
+            return await SqlGatewayRepository(session).set_primary(gateway_id, primary)
+
+    async def reorder(self, gateway_ids: list[str]) -> None:
+        async with self._session_factory() as session, session.begin():
+            await SqlGatewayRepository(session).reorder(gateway_ids)
 
     async def disconnect(self, gateway_id: str) -> GatewayInfo | None:
         async with self._session_factory() as session, session.begin():

@@ -31,6 +31,7 @@ from noc.application.gateways.service import (
     GatewayService,
     GatewayStillConnectedError,
     LauncherUnavailableError,
+    VirtualNodeConfigError,
 )
 from noc.config import get_settings
 
@@ -58,7 +59,7 @@ class DeviceOut(BaseModel):
 
 
 class TestConnectionIn(BaseModel):
-    transport_type: str = Field(pattern="^(usb|tcp|http|simulated)$")
+    transport_type: str = Field(pattern="^(usb|tcp|http|mqtt|simulated)$")
     connection_params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -74,7 +75,7 @@ class TestConnectionOut(BaseModel):
 
 class GatewayConfigureIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
-    transport_type: str = Field(pattern="^(usb|tcp|http|simulated)$")
+    transport_type: str = Field(pattern="^(usb|tcp|http|mqtt|simulated)$")
     connection_params: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
     priority: int = 0
@@ -82,7 +83,7 @@ class GatewayConfigureIn(BaseModel):
 
 class GatewayUpdateIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
-    transport_type: str | None = Field(default=None, pattern="^(usb|tcp|http|simulated)$")
+    transport_type: str | None = Field(default=None, pattern="^(usb|tcp|http|mqtt|simulated)$")
     connection_params: dict[str, Any] | None = None
     enabled: bool | None = None
     priority: int | None = None
@@ -94,7 +95,7 @@ class GatewayCreateIn(BaseModel):
 
     gateway_id: str = Field(min_length=1, max_length=63, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$")
     name: str = Field(min_length=1, max_length=128)
-    transport_type: str = Field(pattern="^(usb|tcp|simulated)$")
+    transport_type: str = Field(pattern="^(usb|tcp|http|mqtt|simulated)$")
     connection_params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -120,7 +121,7 @@ async def create_gateway(body: GatewayCreateIn, request: Request, current_user: 
         info = await _service(request).provision(
             body.gateway_id, body.name, body.transport_type, body.connection_params
         )
-    except GatewayAlreadyExistsError as exc:
+    except (GatewayAlreadyExistsError, VirtualNodeConfigError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LauncherUnavailableError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -222,9 +223,12 @@ async def test_connection(
 async def configure_gateway(
     gateway_id: str, body: GatewayConfigureIn, request: Request, current_user: RequireAdminDep
 ) -> GatewayOut:
-    info = await _service(request).configure(
-        gateway_id, body.name, body.transport_type, body.connection_params, body.enabled, body.priority
-    )
+    try:
+        info = await _service(request).configure(
+            gateway_id, body.name, body.transport_type, body.connection_params, body.enabled, body.priority
+        )
+    except VirtualNodeConfigError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await _narrate("configure", gateway_id, info.name, current_user)
     return GatewayOut.from_entity(info)
 
@@ -242,9 +246,14 @@ async def import_gateway(gateway_id: str, request: Request, current_user: Requir
 async def update_gateway(
     gateway_id: str, body: GatewayUpdateIn, request: Request, current_user: RequireAdminDep
 ) -> GatewayOut:
-    info = await _service(request).update(
-        gateway_id, body.name, body.transport_type, body.connection_params, body.enabled, body.priority
-    )
+    try:
+        info = await _service(request).update(
+            gateway_id, body.name, body.transport_type, body.connection_params, body.enabled, body.priority
+        )
+    except VirtualNodeConfigError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LauncherUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     if info is None:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")
     await _narrate("update", gateway_id, info.name, current_user)
@@ -266,6 +275,55 @@ async def disconnect_gateway(gateway_id: str, request: Request, current_user: Re
     if info is None:
         raise HTTPException(status_code=404, detail="Gateway not configured yet")
     await _narrate("disconnect", gateway_id, info.name, current_user)
+    return GatewayOut.from_entity(info)
+
+
+class ReceiveOnlyIn(BaseModel):
+    receive_only: bool
+
+
+class PrimaryIn(BaseModel):
+    primary: bool
+
+
+class ReorderIn(BaseModel):
+    gateway_ids: list[str] = Field(min_length=1)
+
+
+# Registrado ANTES de las rutas /{gateway_id}/...: "reorder" no es un gateway_id.
+@router.post("/reorder", status_code=204)
+async def reorder_gateways(body: ReorderIn, request: Request, _user: RequireAdminDep) -> None:
+    await _service(request).reorder(body.gateway_ids)
+
+
+@router.post("/{gateway_id}/resync", response_model=GatewayOut)
+async def resync_gateway(gateway_id: str, request: Request, current_user: RequireAdminDep) -> GatewayOut:
+    info = await _service(request).resync(gateway_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="Gateway not found")
+    await _narrate("resync", gateway_id, info.name, current_user)
+    return GatewayOut.from_entity(info)
+
+
+@router.put("/{gateway_id}/receive-only", response_model=GatewayOut)
+async def set_receive_only(
+    gateway_id: str, body: ReceiveOnlyIn, request: Request, current_user: RequireAdminDep
+) -> GatewayOut:
+    info = await _service(request).set_receive_only(gateway_id, body.receive_only)
+    if info is None:
+        raise HTTPException(status_code=404, detail="Gateway not found")
+    await _narrate("receive_only_on" if body.receive_only else "receive_only_off", gateway_id, info.name, current_user)
+    return GatewayOut.from_entity(info)
+
+
+@router.put("/{gateway_id}/primary", response_model=GatewayOut)
+async def set_primary(
+    gateway_id: str, body: PrimaryIn, request: Request, current_user: RequireAdminDep
+) -> GatewayOut:
+    info = await _service(request).set_primary(gateway_id, body.primary)
+    if info is None:
+        raise HTTPException(status_code=404, detail="Gateway not found")
+    await _narrate("primary_on" if body.primary else "primary_off", gateway_id, info.name, current_user)
     return GatewayOut.from_entity(info)
 
 

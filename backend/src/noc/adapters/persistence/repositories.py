@@ -561,6 +561,8 @@ class SqlGatewayRepository:
         existing.local_hw_model = info.local_hw_model
         existing.local_firmware_version = info.local_firmware_version
         existing.channels = info.channels
+        existing.tx_enabled = info.tx_enabled
+        existing.virtual_node = info.virtual_node
         # Los sellos de actividad solo avanzan: tras reiniciar el proceso el
         # gateway los emite a None hasta la primera señal y no debe borrar lo
         # último que se vio.
@@ -587,7 +589,7 @@ class SqlGatewayRepository:
     async def list_all(self, include_deleted: bool = False) -> list[GatewayInfo]:
         # Orden explícito: sin él PostgreSQL devuelve el orden físico de las
         # filas, que cambia con cada heartbeat (UPDATE) y la UI "baila".
-        stmt = select(GatewayModel).order_by(GatewayModel.id)
+        stmt = select(GatewayModel).order_by(GatewayModel.sort_order, GatewayModel.id)
         if not include_deleted:
             stmt = stmt.where(GatewayModel.deleted_at.is_(None))
         rows = await self._session.scalars(stmt)
@@ -596,6 +598,36 @@ class SqlGatewayRepository:
     async def get(self, gateway_id: str) -> GatewayInfo | None:
         row = await self._session.get(GatewayModel, gateway_id)
         return _to_entity(row, GatewayInfo, {"gateway_id": "id"}) if row else None
+
+    async def set_receive_only(self, gateway_id: str, receive_only: bool) -> GatewayInfo | None:
+        row = await self._session.get(GatewayModel, gateway_id)
+        if row is None:
+            return None
+        row.receive_only = receive_only
+        await self._session.flush()
+        return _to_entity(row, GatewayInfo, {"gateway_id": "id"})
+
+    async def set_primary(self, gateway_id: str, primary: bool) -> GatewayInfo | None:
+        """Una única pasarela primaria: designar una quita la marca a las demás."""
+        row = await self._session.get(GatewayModel, gateway_id)
+        if row is None:
+            return None
+        if primary:
+            await self._session.execute(
+                update(GatewayModel).where(GatewayModel.id != gateway_id).values(is_primary=False)
+            )
+        row.is_primary = primary
+        await self._session.flush()
+        return _to_entity(row, GatewayInfo, {"gateway_id": "id"})
+
+    async def reorder(self, gateway_ids: list[str]) -> None:
+        """Fija el orden de presentación según la lista (posición = sort_order).
+        Las no incluidas conservan su valor y quedan detrás."""
+        for position, gateway_id in enumerate(gateway_ids):
+            row = await self._session.get(GatewayModel, gateway_id)
+            if row is not None:
+                row.sort_order = position
+        await self._session.flush()
 
     async def configure(
         self,
@@ -644,6 +676,8 @@ class SqlGatewayRepository:
         row.local_hw_model = None
         row.local_firmware_version = None
         row.channels = []
+        row.tx_enabled = None
+        row.virtual_node = None
         row.last_connected_at = None
         row.last_disconnected_at = None
         row.last_error = None

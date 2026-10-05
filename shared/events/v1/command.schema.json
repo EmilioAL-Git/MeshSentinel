@@ -17,7 +17,8 @@
         "command.gateway_discover",
         "command.gateway_test_connection",
         "command.gateway_connect",
-        "command.gateway_disconnect"
+        "command.gateway_disconnect",
+        "command.gateway_resync"
       ]
     },
     "command_id": { "type": "string", "format": "uuid" },

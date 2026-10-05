@@ -50,6 +50,7 @@ def _eligible_gateways(
         if g.status == "connected"
         and g.enabled
         and g.deleted_at is None
+        and g.can_transmit  # ADR 0032: las de solo recepción no emiten a la malla
         and not is_stale(g.updated_at, stale_after_seconds, now=now)
     }
 
@@ -61,7 +62,7 @@ def _fallback_allowed(fallback_gateway_id: str | None, known: dict[str, GatewayI
     if not fallback_gateway_id:
         return None
     info = known.get(fallback_gateway_id)
-    if info is not None and (info.deleted_at is not None or not info.enabled):
+    if info is not None and (info.deleted_at is not None or not info.enabled or not info.can_transmit):
         return None
     return fallback_gateway_id
 
@@ -72,6 +73,7 @@ def _select(
     offline_after_seconds: int,
     now: datetime,
     fallback_gateway_id: str | None,
+    primary_gateway_id: str | None = None,
 ) -> str | None:
     candidates = [
         GatewayLinkCandidate(
@@ -88,7 +90,12 @@ def _select(
         and not is_stale(link.last_heard_at, offline_after_seconds, now=now)
     ]
     winner = select_primary_link(candidates)
-    return winner.gateway_id if winner is not None else fallback_gateway_id
+    if winner is not None:
+        return winner.gateway_id
+    # Sin enlace válido: la caché nodes.gateway_id (mono-pasarela = comportamiento
+    # de siempre) y, si tampoco hay, la pasarela PRIMARIA designada (ADR 0032),
+    # que solo se usa si está operativa (está en `eligible`).
+    return fallback_gateway_id or primary_gateway_id
 
 
 async def select_gateways_for_nodes(
@@ -109,6 +116,7 @@ async def select_gateways_for_nodes(
     gateways = await SqlGatewayRepository(session).list_all(include_deleted=True)
     known = {g.gateway_id: g for g in gateways}
     eligible = _eligible_gateways(gateways, settings.gateway_stale_after_seconds, now)
+    primary_id = next((gid for gid, g in eligible.items() if g.is_primary), None)
     return {
         node_id: _select(
             links_by_node.get(node_id, []),
@@ -116,6 +124,7 @@ async def select_gateways_for_nodes(
             settings.node_offline_after_seconds,
             now,
             _fallback_allowed(fallback, known),
+            primary_id,
         )
         for node_id, fallback in fallbacks.items()
     }
@@ -184,6 +193,10 @@ async def resolve_gateways_for_nodes(
         return {}
 
     if forced_gateway_id:
+        forced = await SqlGatewayRepository(session).get(forced_gateway_id)
+        if forced is not None and not forced.can_transmit:
+            note = f"La pasarela {forced_gateway_id} es de solo recepción: no puede transmitir a la malla."
+            return {nid: GatewayResolution(gateway_id=None, source="forced", note=note) for nid in node_ids}
         return {nid: GatewayResolution(gateway_id=forced_gateway_id, source="forced") for nid in node_ids}
 
     nodes_by_id = {n.node_id: n for n in await SqlNodeRepository(session).list_for_ids(node_ids)}

@@ -50,7 +50,7 @@ export function NexusFleetOpsModal({
 }) {
   const queryClient = useQueryClient();
   const gatewaysQuery = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
-  const gateways = (gatewaysQuery.data ?? []).filter((g: GatewayOut) => g.status === "connected");
+  const gateways = (gatewaysQuery.data ?? []).filter((g: GatewayOut) => g.status === "connected" && g.can_transmit);
 
   const byId = useMemo(() => new Map(allSummaries.map((s) => [s.node.node_id, s])), [allSummaries]);
   const selectedShortNames = useMemo(() => {
@@ -81,6 +81,7 @@ export function NexusFleetOpsModal({
     if (gatewayId) return;
     const preferred = settingsQuery.data?.default_gateway_id;
     if (preferred && gateways.some((g) => g.gateway_id === preferred)) setGatewayId(preferred);
+    else if (gateways.find((g) => g.is_primary)) setGatewayId(gateways.find((g) => g.is_primary)!.gateway_id);
     else if (gateways.length === 1) setGatewayId(gateways[0]!.gateway_id);
   }, [gatewayId, gateways, settingsQuery.data]);
 

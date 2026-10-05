@@ -453,6 +453,8 @@ class IngestService:
                 local_hw_model=p.get("local_hw_model"),
                 local_firmware_version=p.get("local_firmware_version"),
                 channels=p.get("channels") or [],
+                tx_enabled=p.get("tx_enabled"),
+                virtual_node=p.get("virtual_node"),
                 last_device_response_at=_parse_dt(p.get("last_device_response_at")),
                 last_lora_rx_at=_parse_dt(p.get("last_lora_rx_at")),
                 last_lora_tx_at=_parse_dt(p.get("last_lora_tx_at")),

@@ -475,3 +475,57 @@ async def test_list_launcher_devices_proxies_to_launcher(session_factory):
     service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
     devices = await service.list_launcher_devices()
     assert devices[0]["port"] == "/dev/ttyACM0"
+
+
+# ── Nodo virtual (ADR 0033) ──────────────────────────────────────────────────
+
+
+async def test_virtual_node_port_must_be_valid_and_unique(session_factory):
+    from noc.application.gateways.service import VirtualNodeConfigError
+
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.provision("gw-a", "A", "tcp", {"host": "10.0.0.5", "vn_enabled": True, "vn_port": 4404})
+
+    with pytest.raises(VirtualNodeConfigError, match="4404"):
+        await service.provision("gw-b", "B", "tcp", {"host": "10.0.0.6", "vn_enabled": True, "vn_port": 4404})
+    with pytest.raises(VirtualNodeConfigError):
+        await service.provision("gw-b", "B", "tcp", {"host": "10.0.0.6", "vn_enabled": True, "vn_port": 80})
+    # sin activar no se valida; con otro puerto, sí se permite
+    await service.provision("gw-b", "B", "tcp", {"host": "10.0.0.6", "vn_port": 4404})
+    await service.provision("gw-c", "C", "tcp", {"host": "10.0.0.7", "vn_enabled": True, "vn_port": 4405})
+    # la propia pasarela puede conservar su puerto al editarse
+    await service.update("gw-a", connection_params={"host": "10.0.0.5", "vn_enabled": True, "vn_port": 4404})
+
+
+async def test_changing_virtual_node_publication_recreates_container_but_admin_flag_does_not(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.provision(GW, "Oficina", "tcp", {"host": "10.0.0.5"})
+    assert len(launcher.created) == 1
+
+    # activar el nodo virtual cambia el puerto publicado: hay que recrear
+    await service.update(GW, connection_params={"host": "10.0.0.5", "vn_enabled": True, "vn_port": 4404})
+    assert len(launcher.created) == 2
+    assert launcher.created[-1][2]["vn_enabled"] is True
+
+    # cambiar solo la política de administración se aplica en caliente: sin recrear
+    await service.update(
+        GW, connection_params={"host": "10.0.0.5", "vn_enabled": True, "vn_port": 4404, "vn_allow_admin": True}
+    )
+    assert len(launcher.created) == 2
+
+    # mover el puerto vuelve a recrear
+    await service.update(GW, connection_params={"host": "10.0.0.5", "vn_enabled": True, "vn_port": 4410})
+    assert len(launcher.created) == 3
+
+
+async def test_virtual_node_runtime_status_is_persisted_from_heartbeat(session_factory):
+    ingest = IngestService(session_factory)
+    await ingest.handle_event(
+        envelope("gateway.status", {"status": "connected", "transport": "tcp",
+                                    "virtual_node": {"port": 4404, "clients": 2, "allow_admin": False}})
+    )
+    service = GatewayService(session_factory, FakeQueue())
+    info = await service.get(GW)
+    assert info.virtual_node == {"port": 4404, "clients": 2, "allow_admin": False}

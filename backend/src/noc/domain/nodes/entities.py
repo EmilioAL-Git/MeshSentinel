@@ -152,6 +152,22 @@ class GatewayInfo:
     last_disconnected_at: datetime | None = None
     last_error: str | None = None
     last_error_at: datetime | None = None
+    # ADR 0032: solo recepción manual (`receive_only`) o reportada por el
+    # firmware / fuente sin radio (`tx_enabled=False`); primaria designada
+    # (pasarela de último recurso del enrutado); orden de presentación.
+    receive_only: bool = False
+    tx_enabled: bool | None = None
+    is_primary: bool = False
+    sort_order: int = 0
+    # ADR 0033: estado runtime del nodo virtual {port, clients, allow_admin}
+    virtual_node: dict | None = None
+
+    @property
+    def can_transmit(self) -> bool:
+        """False si es solo recepción, sea por decisión del operador o porque
+        el propio nodo/fuente no puede transmitir. Es lo que el enrutado de
+        operaciones que emiten a la malla (admin, Nexus) debe respetar."""
+        return not self.receive_only and self.tx_enabled is not False
 
 
 @dataclass(slots=True)

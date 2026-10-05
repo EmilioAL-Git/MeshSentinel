@@ -17,6 +17,7 @@ propia (ADR 0023: sin forks de comportamiento entre transportes).
 import asyncio
 import logging
 import random
+import threading
 import time
 from abc import abstractmethod
 from collections import Counter
@@ -27,6 +28,7 @@ from pubsub import pub
 from gateway.config import Settings
 from gateway.decoder.meshtastic import decode_nodedb_entry, decode_packet
 from gateway.transports.base import EmitFn, Transport
+from gateway.virtual_node import VirtualNodeServer
 
 logger = logging.getLogger("gateway.transport")
 
@@ -72,6 +74,8 @@ class MeshtasticStreamTransport(Transport):
         self._local_node_num: int | None = None
         # Instante (monotónico) del último snapshot de NodeDB publicado
         self._last_snapshot_at: float | None = None
+        # Nodo virtual (ADR 0033): servidor TCP para clientes Meshtastic
+        self._vn: VirtualNodeServer | None = None
 
     # ── Hooks de subclase: la ÚNICA diferencia entre transportes ────────────
 
@@ -112,6 +116,9 @@ class MeshtasticStreamTransport(Transport):
 
         def handle_from_radio(*a: Any, **kw: Any) -> Any:
             self.mark_device_response()
+            vn = self._vn
+            if vn is not None and a and isinstance(a[0], (bytes, bytearray)):
+                vn.feed(bytes(a[0]))  # difunde a los clientes del nodo virtual
             return orig_rx(*a, **kw)
 
         def send_packet(*a: Any, **kw: Any) -> Any:
@@ -135,6 +142,49 @@ class MeshtasticStreamTransport(Transport):
         except Exception:
             logger.warning("%s.probe_failed", self.name, exc_info=True)
 
+    # ── Nodo virtual (ADR 0033) ──────────────────────────────────────────────
+
+    async def _start_virtual_node(self) -> None:
+        if not self._settings.vn_enabled or self._vn is not None:
+            return
+        vn = VirtualNodeServer(
+            port=self._settings.vn_port,
+            allow_admin=self._settings.vn_allow_admin,
+            get_iface=lambda: self._iface if self.status == "connected" else None,
+            send_to_radio=self._vn_send_to_radio,
+            on_change=lambda: asyncio.get_running_loop().create_task(self.emit_status()),
+        )
+        try:
+            await vn.start()
+        except OSError as exc:
+            # Puerto ocupado u otro fallo: la pasarela sigue funcionando sin él
+            logger.error("%s.virtual_node_failed port=%s error=%r", self.name, self._settings.vn_port, exc)
+            return
+        self._vn = vn
+
+    async def _stop_virtual_node(self) -> None:
+        vn, self._vn = self._vn, None
+        if vn is not None:
+            await vn.stop()
+
+    async def _vn_send_to_radio(self, to_radio: Any) -> None:
+        iface = self._iface
+        if iface is None or self.status != "connected":
+            raise ConnectionError(f"{self.name} link not ready")
+        await asyncio.to_thread(iface._sendToRadio, to_radio)
+        if to_radio.WhichOneof("payload_variant") == "packet":
+            self.mark_lora_tx()
+
+    def virtual_node_info(self) -> dict[str, Any] | None:
+        return self._vn.status() if self._vn is not None else None
+
+    async def resync(self) -> bool:
+        if self._iface is None or self.status != "connected":
+            return False
+        self._last_snapshot_at = None  # forzar: ignora la ventana anti-flap
+        await self._on_connected()
+        return True
+
     def _on_connection_lost(self, interface: Any) -> None:
         # OJO: iface.close() también dispara connection.lost (el hilo lector al
         # salir llama a _disconnected). El evento va etiquetado con SU interface
@@ -149,14 +199,26 @@ class MeshtasticStreamTransport(Transport):
         self._loop = asyncio.get_running_loop()
         pub.subscribe(self._on_receive, "meshtastic.receive")
         pub.subscribe(self._on_connection_lost, "meshtastic.connection.lost")
+        await self._start_virtual_node()
 
         delay = self._settings.reconnect_initial_delay
         sync_loss_step = 0
         while not self._closed.is_set():
             self.status = "reconnecting" if self._ever_connected else "connecting"
             await self.emit_status()
+            connect_future = asyncio.ensure_future(asyncio.to_thread(self._connect_blocking))
             try:
-                self._iface = await asyncio.to_thread(self._connect_blocking)
+                try:
+                    self._iface = await asyncio.shield(connect_future)
+                except asyncio.CancelledError:
+                    # La conexión corre en un hilo y no se puede cancelar: si
+                    # termina después, la interfaz quedaría HUÉRFANA (con su hilo
+                    # lector vivo, compitiendo con la pasarela nueva por las
+                    # tramas del nodo — visto con HTTP al reconectar). Se aborta
+                    # lo que se pueda ahora y se cierra lo que llegue después.
+                    self._abort_pending_connect()
+                    connect_future.add_done_callback(self._close_orphan)
+                    raise
             except Exception as exc:
                 self.status = "error"
                 await self.emit_status(detail=f"connect failed: {exc}")
@@ -195,6 +257,7 @@ class MeshtasticStreamTransport(Transport):
         self.status = "connected"
         self._ever_connected = True
         self.mark_device_response()  # acabamos de leer su NodeDB: responde
+        self.tx_enabled = self._read_tx_enabled()
         try:
             from meshtastic.util import to_node_num
 
@@ -228,6 +291,19 @@ class MeshtasticStreamTransport(Transport):
             decoded = decode_nodedb_entry(node_id_raw, entry)
             if decoded:
                 await self._publish(*decoded)
+
+    def _read_tx_enabled(self) -> bool | None:
+        """`lora.tx_enabled` del nodo local (kill switch del firmware: con
+        False descarta TODO paquete saliente). None si la config LoRa aún no
+        está disponible — el default proto3 de un bool ausente es False y
+        daría un falso "solo recepción"."""
+        try:
+            local_config = self._iface.localNode.localConfig
+            if not local_config.HasField("lora"):
+                return None
+            return bool(local_config.lora.tx_enabled)
+        except Exception:
+            return None
 
     def _local_node_info(
         self,
@@ -328,6 +404,22 @@ class MeshtasticStreamTransport(Transport):
             await asyncio.wait_for(self._closed.wait(), timeout=jitter)
         except asyncio.TimeoutError:
             pass
+
+    def _abort_pending_connect(self) -> None:
+        """Hook: interrumpe una conexión en curso en su hilo (si el transporte puede)."""
+
+    def _close_orphan(self, future: "asyncio.Future[Any]") -> None:
+        if future.cancelled() or future.exception() is not None:
+            return
+        iface = future.result()
+
+        def close() -> None:
+            try:
+                iface.close()
+            except Exception:
+                logger.debug("%s.orphan_close_error", self.name, exc_info=True)
+
+        threading.Thread(target=close, daemon=True, name="orphan-iface-close").start()
 
     def _close_iface(self) -> None:
         if self._iface is not None:
@@ -735,6 +827,8 @@ class MeshtasticStreamTransport(Transport):
 
     async def close(self) -> None:
         self._closed.set()
+        self._abort_pending_connect()
+        await self._stop_virtual_node()
         self._enqueue(_FORCE_DISCONNECT)  # desbloquea _pump_events si estaba esperando
         await asyncio.to_thread(self._close_iface)
         self.status = "disconnected"

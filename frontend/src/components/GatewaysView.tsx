@@ -1,9 +1,17 @@
+import {
+  NetFields, VirtualNodeFields, DEFAULT_PORT, emptyNet, emptyVn, isNetType, netParams, netReady,
+  vnFromParams, vnValid, withVn, type NetState, type VnState,
+} from "./gateways/NetTransport";
 import { useAuth } from "../context/AuthContext";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   configureGateway,
   connectGateway,
+  reorderGateways,
+  resyncGateway,
+  setGatewayPrimary,
+  setGatewayReceiveOnly,
   createGateway,
   deleteGateway,
   disconnectGateway,
@@ -78,6 +86,7 @@ const TRANSPORT_LABEL: Record<string, string> = {
   serial: "USB",
   tcp: "TCP",
   http: "HTTP",
+  mqtt: "MQTT",
   simulated: "SIM",
   idle: "Inactivo",
 };
@@ -119,19 +128,20 @@ function ActivitySignals({ gateway, lastHeardFallback, spaced }: { gateway: Gate
  * M6.3 (retirados) — una única llamada a POST /gateways. */
 function CreateContainerStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
   const queryClient = useQueryClient();
-  const [transportType, setTransportType] = useState<"usb" | "tcp" | "simulated">("simulated");
+  const [transportType, setTransportType] = useState<"usb" | "tcp" | "http" | "mqtt" | "simulated">("simulated");
   const [devices, setDevices] = useState<DeviceOut[] | null>(null);
   const [selectedPort, setSelectedPort] = useState("");
-  const [tcpHost, setTcpHost] = useState("");
-  const [tcpPort, setTcpPort] = useState("4403");
+  const [net, setNet] = useState<NetState>(emptyNet());
+  const [vn, setVn] = useState<VnState>(emptyVn());
   const [name, setName] = useState("");
   const [gatewayId, setGatewayId] = useState("");
   const [idEdited, setIdEdited] = useState(false);
 
   const connectionParams = (): Record<string, unknown> => {
-    if (transportType === "usb") return selectedPort ? { device: selectedPort } : {};
-    if (transportType === "tcp") return { host: tcpHost.trim(), port: Number(tcpPort) || 4403 };
-    return {};
+    let base: Record<string, unknown> = {};
+    if (transportType === "usb") base = selectedPort ? { device: selectedPort } : {};
+    else if (isNetType(transportType)) base = netParams(transportType, net);
+    return withVn(base, transportType, vn);
   };
 
   const discover = useMutation({
@@ -153,7 +163,7 @@ function CreateContainerStep({ onCancel, onCreated }: { onCancel: () => void; on
     },
   });
 
-  const paramsReady = transportType === "tcp" ? tcpHost.trim() !== "" : true;
+  const paramsReady = (isNetType(transportType) ? netReady(transportType, net) : true) && vnValid(vn);
   const idValid = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/.test(gatewayId);
 
   return (
@@ -165,11 +175,15 @@ function CreateContainerStep({ onCancel, onCreated }: { onCancel: () => void; on
 
       <div style={{ marginBottom: "0.8rem" }}>
         <span className="seg">
-          {(["simulated", "usb", "tcp"] as const).map((tt) => (
+          {(["simulated", "usb", "tcp", "http", "mqtt"] as const).map((tt) => (
             <button
               key={tt}
               className={transportType === tt ? "on" : undefined}
-              onClick={() => { setTransportType(tt); setDevices(null); }}
+              onClick={() => {
+                setTransportType(tt);
+                setDevices(null);
+                if (isNetType(tt)) setNet((prev) => ({ ...prev, port: DEFAULT_PORT[tt] }));
+              }}
             >
               {TRANSPORT_LABEL[tt]}
             </button>
@@ -177,33 +191,8 @@ function CreateContainerStep({ onCancel, onCreated }: { onCancel: () => void; on
         </span>
       </div>
 
-      {transportType === "tcp" && (
-        <div style={{ marginBottom: "0.8rem", display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", fontSize: 12 }}>
-          <label>
-            Host{" "}
-            <input
-              className="input"
-              style={{ width: 190, fontFamily: "var(--font-mono)" }}
-              placeholder="192.168.1.50 o meshtastic.local"
-              value={tcpHost}
-              onChange={(e) => setTcpHost(e.target.value)}
-            />
-          </label>
-          <label>
-            Puerto{" "}
-            <input
-              className="input"
-              style={{ width: 80 }}
-              type="number"
-              value={tcpPort}
-              onChange={(e) => setTcpPort(e.target.value)}
-            />
-          </label>
-          <span style={{ color: "var(--text-faint)" }}>
-            El firmware solo admite un cliente TCP a la vez — cierra la app oficial si está conectada.
-          </span>
-        </div>
-      )}
+      {isNetType(transportType) && <NetFields type={transportType} net={net} onChange={setNet} />}
+      {transportType !== "mqtt" && transportType !== "simulated" && <VirtualNodeFields vn={vn} onChange={setVn} />}
 
       {transportType === "usb" && (
         <div style={{ marginBottom: "0.8rem" }}>
@@ -301,17 +290,16 @@ function RegisterExternalStep({
 }) {
   const queryClient = useQueryClient();
   const [gatewayId, setGatewayId] = useState("");
-  const [transportType, setTransportType] = useState<"usb" | "tcp">("usb");
+  const [transportType, setTransportType] = useState<"usb" | "tcp" | "http" | "mqtt">("usb");
   const [devices, setDevices] = useState<DeviceOut[] | null>(null);
   const [selectedPort, setSelectedPort] = useState("");
-  const [tcpHost, setTcpHost] = useState("");
-  const [tcpPort, setTcpPort] = useState("4403");
+  const [net, setNet] = useState<NetState>(emptyNet());
   const [testResult, setTestResult] = useState<TestConnectionResultOut | null>(null);
   const [name, setName] = useState("");
 
   const connectionParams = (): Record<string, unknown> => {
     if (transportType === "usb") return selectedPort ? { device: selectedPort } : {};
-    return { host: tcpHost.trim(), port: Number(tcpPort) || 4403 };
+    return netParams(transportType, net);
   };
 
   const discover = useMutation({
@@ -345,7 +333,7 @@ function RegisterExternalStep({
     },
   });
 
-  const paramsReady = transportType === "usb" ? selectedPort !== "" : tcpHost.trim() !== "";
+  const paramsReady = transportType === "usb" ? selectedPort !== "" : netReady(transportType, net);
 
   // Un gateway_id que nunca ha reportado heartbeat se puede guardar sin
   // probar conexión: es un pre-registro a la espera de que el proceso
@@ -375,11 +363,15 @@ function RegisterExternalStep({
           />
         </label>
         <span className="seg">
-          {(["usb", "tcp"] as const).map((tt) => (
+          {(["usb", "tcp", "http", "mqtt"] as const).map((tt) => (
             <button
               key={tt}
               className={transportType === tt ? "on" : undefined}
-              onClick={() => { setTransportType(tt); setTestResult(null); }}
+              onClick={() => {
+                setTransportType(tt);
+                setTestResult(null);
+                if (isNetType(tt)) setNet((prev) => ({ ...prev, port: DEFAULT_PORT[tt] }));
+              }}
             >
               {TRANSPORT_LABEL[tt]}
             </button>
@@ -387,31 +379,8 @@ function RegisterExternalStep({
         </span>
       </div>
 
-      {transportType === "tcp" && (
-        <div style={{ marginBottom: "0.8rem" }}>
-          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", fontSize: 12 }}>
-            <label>
-              Host{" "}
-              <input
-                className="input"
-                style={{ width: 190, fontFamily: "var(--font-mono)" }}
-                placeholder="192.168.1.50 o meshtastic.local"
-                value={tcpHost}
-                onChange={(e) => { setTcpHost(e.target.value); setTestResult(null); }}
-              />
-            </label>
-            <label>
-              Puerto{" "}
-              <input
-                className="input"
-                style={{ width: 80 }}
-                type="number"
-                value={tcpPort}
-                onChange={(e) => { setTcpPort(e.target.value); setTestResult(null); }}
-              />
-            </label>
-          </div>
-        </div>
+      {isNetType(transportType) && (
+        <NetFields type={transportType} net={net} onChange={(n) => { setNet(n); setTestResult(null); }} />
       )}
 
       {transportType === "usb" && (
@@ -494,7 +463,7 @@ function RegisterExternalStep({
           disabled={
             managedConflict ||
             (isKnownCandidate && !testResult?.ok) ||
-            (transportType === "tcp" && !paramsReady) ||
+            (transportType !== "usb" && !paramsReady) ||
             !name.trim() ||
             !gatewayId.trim() ||
             save.isPending
@@ -505,7 +474,7 @@ function RegisterExternalStep({
               ? "Ya hay un enlace configurado con este identificador"
               : isKnownCandidate && !testResult?.ok
                 ? "Prueba la conexión con éxito antes de guardar"
-                : transportType === "tcp" && !paramsReady
+                : transportType !== "usb" && !paramsReady
                   ? "Introduce el host del nodo TCP"
                   : undefined
           }
@@ -559,13 +528,21 @@ function AddGatewayWizard({
 
 // ── Módulo del rack: un gateway ya reportado (gestionado o no) ───────────────
 
-function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: GatewayStatsOut }) {
+function GatewayModule({
+  gateway, stats, onMove,
+}: {
+  gateway: GatewayOut;
+  stats?: GatewayStatsOut;
+  /** Reordena el rack (ADR 0032); undefined = ese sentido no es posible. */
+  onMove?: { up?: () => void; down?: () => void };
+}) {
   const { canAdmin: canOperate } = useAuth();
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [editName, setEditName] = useState(gateway.name ?? "");
   const [editPriority, setEditPriority] = useState(String(gateway.priority));
   const [deleteArmed, setDeleteArmed] = useState(false);
+  const [vn, setVn] = useState<VnState>(vnFromParams(gateway.connection_params));
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["gateways"] });
 
@@ -573,9 +550,25 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
   const doConnect = useMutation({ mutationFn: () => connectGateway(gateway.gateway_id), onSuccess: invalidate });
   const doDisconnect = useMutation({ mutationFn: () => disconnectGateway(gateway.gateway_id), onSuccess: invalidate });
   const doDelete = useMutation({ mutationFn: () => deleteGateway(gateway.gateway_id), onSuccess: invalidate });
+  const doResync = useMutation({ mutationFn: () => resyncGateway(gateway.gateway_id), onSuccess: invalidate });
+  const doReceiveOnly = useMutation({
+    mutationFn: (value: boolean) => setGatewayReceiveOnly(gateway.gateway_id, value),
+    onSuccess: invalidate,
+  });
+  const doPrimary = useMutation({
+    mutationFn: (value: boolean) => setGatewayPrimary(gateway.gateway_id, value),
+    onSuccess: invalidate,
+  });
   const doSaveEdit = useMutation({
     mutationFn: () =>
       updateGateway(gateway.gateway_id, { name: editName, priority: Number(editPriority) || 0 }),
+    onSuccess: invalidate,
+  });
+  const doSaveVn = useMutation({
+    mutationFn: () =>
+      updateGateway(gateway.gateway_id, {
+        connection_params: withVn(gateway.connection_params, gateway.transport_type ?? gateway.transport, vn),
+      }),
     onSuccess: invalidate,
   });
   const doToggleEnabled = useMutation({
@@ -589,7 +582,7 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
     <div className="panel" style={{ boxShadow: `inset 3px 0 0 ${gateway.enabled ? statusColor : "var(--border)"}` }}>
       <div
         className="panel-head"
-        style={{ cursor: "pointer" }}
+        style={{ cursor: "pointer", flexWrap: "wrap", rowGap: 4, height: "auto", minHeight: 30, paddingBlock: 5 }}
         onClick={() => setExpanded((v) => !v)}
       >
         <span className="panel-title" style={{ color: "var(--text)" }}>
@@ -600,6 +593,30 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
         {!gateway.managed && <span className="chip" style={{ color: "var(--warn)", borderColor: "var(--warn)" }}>sin configurar</span>}
         {gateway.managed && !gateway.enabled && <span className="chip">deshabilitado</span>}
         {gateway.container_managed && <span className="chip" title="Contenedor creado/destruido por gateway-launcher">contenedor</span>}
+        {gateway.is_primary && <span className="chip" style={{ color: "var(--warn)", borderColor: "var(--warn)" }} title="Pasarela primaria: último recurso del enrutado cuando ninguna ha oído al nodo">★ primaria</span>}
+        {gateway.virtual_node && (
+          <span
+            className="chip"
+            title={`Nodo virtual activo en el puerto ${gateway.virtual_node.port}${gateway.virtual_node.allow_admin ? " (con administración permitida)" : ""}`}
+          >
+            ⇄ :{gateway.virtual_node.port} · {gateway.virtual_node.clients}
+          </span>
+        )}
+        {!gateway.can_transmit && (
+          <span
+            className="chip"
+            style={{ color: "var(--info, var(--accent))", borderColor: "var(--info, var(--accent))" }}
+            title={
+              gateway.receive_only
+                ? "Marcada como solo recepción: no se le encolan operaciones que transmitan"
+                : gateway.transport === "mqtt"
+                  ? "Fuente MQTT: solo ingesta, no tiene radio"
+                  : "El firmware del nodo tiene la transmisión desactivada (lora.tx_enabled = false)"
+            }
+          >
+            👂 solo recepción
+          </span>
+        )}
         <span className="panel-count mono">{gateway.gateway_id} {expanded ? "▲" : "▼"}</span>
       </div>
 
@@ -612,6 +629,46 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
             <Field k="Compartidos" v={stats.nodes_shared} title="Nodos que también oye otra pasarela" />
             <Field k="Primaria de" v={stats.primary_for} title="Nodos cuya pasarela primaria es esta" />
           </div>
+        )}
+
+        {canOperate && (
+          <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center", marginBottom: "0.75rem" }}>
+            <button
+              className="btn"
+              disabled={doResync.isPending || gateway.status !== "connected" || gateway.transport === "mqtt"}
+              onClick={() => doResync.mutate()}
+              title="Relee el nodo local y republica su NodeDB sin cortar el enlace"
+            >
+              {doResync.isPending ? "Pidiendo…" : "↻ Resincronizar"}
+            </button>
+            <button
+              className="btn"
+              disabled={doReceiveOnly.isPending || gateway.transport === "mqtt"}
+              onClick={() => doReceiveOnly.mutate(!gateway.receive_only)}
+              title="Una pasarela de solo recepción sigue ingiriendo, pero no se le encolan operaciones que transmitan a la malla"
+            >
+              {gateway.receive_only ? "📡 Permitir transmitir" : "👂 Marcar solo recepción"}
+            </button>
+            <button
+              className="btn"
+              disabled={doPrimary.isPending}
+              onClick={() => doPrimary.mutate(!gateway.is_primary)}
+              title="La primaria es la pasarela de último recurso: se usa si ninguna ha oído al nodo"
+            >
+              {gateway.is_primary ? "☆ Quitar primaria" : "★ Hacer primaria"}
+            </button>
+            {onMove && (
+              <span style={{ marginLeft: "auto", display: "inline-flex", gap: 2 }}>
+                <button className="btn" disabled={!onMove.up} onClick={onMove.up} title="Subir">▲</button>
+                <button className="btn" disabled={!onMove.down} onClick={onMove.down} title="Bajar">▼</button>
+              </span>
+            )}
+          </div>
+        )}
+        {(doResync.isError || doReceiveOnly.isError || doPrimary.isError) && (
+          <p style={{ color: "var(--crit)", fontSize: 12, marginTop: 0 }}>
+            {String(doResync.error ?? doReceiveOnly.error ?? doPrimary.error)}
+          </p>
         )}
 
         {/* Tres señales distintas (no mezclar): que la pasarela esté viva no
@@ -717,9 +774,28 @@ function GatewayModule({ gateway, stats }: { gateway: GatewayOut; stats?: Gatewa
                 )}
               </span>
             </div>}
-            {(doConnect.isError || doDisconnect.isError || doDelete.isError || doSaveEdit.isError) && (
+            {canOperate && gateway.transport !== "mqtt" && gateway.transport !== "simulated" && (
+              <div>
+                <VirtualNodeFields vn={vn} onChange={setVn} />
+                {JSON.stringify(vnFromParams(gateway.connection_params)) !== JSON.stringify(vn) && (
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginTop: -4 }}>
+                    <button className="btn primary" disabled={doSaveVn.isPending || !vnValid(vn)} onClick={() => doSaveVn.mutate()}>
+                      {doSaveVn.isPending ? "Guardando…" : "Guardar nodo virtual"}
+                    </button>
+                    {gateway.container_managed &&
+                    (vnFromParams(gateway.connection_params).enabled !== vn.enabled ||
+                      vnFromParams(gateway.connection_params).port !== vn.port) ? (
+                      <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                        Activar o mover el puerto recrea el contenedor (unos segundos sin conexión).
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            )}
+            {(doConnect.isError || doDisconnect.isError || doDelete.isError || doSaveEdit.isError || doSaveVn.isError) && (
               <p style={{ color: "var(--crit)", fontSize: 12, margin: 0 }}>
-                {String(doConnect.error ?? doDisconnect.error ?? doDelete.error ?? doSaveEdit.error)}
+                {String(doConnect.error ?? doDisconnect.error ?? doDelete.error ?? doSaveEdit.error ?? doSaveVn.error)}
               </p>
             )}
           </div>
@@ -747,6 +823,11 @@ export function GatewaysView() {
     refetchInterval: 15_000,
   });
   const [wizardOpen, setWizardOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const reorder = useMutation({
+    mutationFn: (ids: string[]) => reorderGateways(ids),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["gateways"] }),
+  });
 
   const all = gateways.data ?? [];
   const list = all.filter((g) => g.deleted_at == null);
@@ -793,9 +874,21 @@ export function GatewaysView() {
               alignItems: "start",
             }}
           >
-            {list.map((g) => (
-              <GatewayModule key={g.gateway_id} gateway={g} stats={statsById.get(g.gateway_id)} />
-            ))}
+            {list.map((g, i) => {
+              const swap = (to: number) => () => {
+                const ids = list.map((x) => x.gateway_id);
+                [ids[i], ids[to]] = [ids[to], ids[i]];
+                reorder.mutate(ids);
+              };
+              return (
+                <GatewayModule
+                  key={g.gateway_id}
+                  gateway={g}
+                  stats={statsById.get(g.gateway_id)}
+                  onMove={{ up: i > 0 ? swap(i - 1) : undefined, down: i < list.length - 1 ? swap(i + 1) : undefined }}
+                />
+              );
+            })}
           </div>
 
           {deleted.length > 0 && (

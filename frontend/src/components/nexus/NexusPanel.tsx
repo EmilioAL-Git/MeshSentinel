@@ -78,7 +78,7 @@ export function NexusPanel() {
 function NexusDetection() {
   const queryClient = useQueryClient();
   const gatewaysQuery = useQuery({ queryKey: ["gateways"], queryFn: () => fetchGateways() });
-  const gateways = (gatewaysQuery.data ?? []).filter((g) => g.status === "connected");
+  const gateways = (gatewaysQuery.data ?? []).filter((g) => g.status === "connected" && g.can_transmit);
   const [gatewayId, setGatewayId] = useState<string>("");
   const [candidates, setCandidates] = useState<NexusCandidateOut[] | null>(null);
 

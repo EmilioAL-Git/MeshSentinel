@@ -40,9 +40,19 @@ def test_tcp_requires_host():
         create_transport(Settings(_env_file=None, transport="tcp"), _noop_emit)
 
 
-def test_http_remains_unimplemented():
-    with pytest.raises(NotImplementedError):
-        create_transport(Settings(_env_file=None, transport="http", http_url="http://x"), _noop_emit)
+def test_http_and_mqtt_are_created_and_validate_their_host():
+    from gateway.transports.http import MeshtasticHttpTransport
+    from gateway.transports.mqtt import MqttIngestTransport
+
+    http = create_transport(Settings(_env_file=None, transport="http", http_host="10.0.0.5"), _noop_emit)
+    assert isinstance(http, MeshtasticHttpTransport) and http.name == "http"
+    assert http._endpoint_description() == "10.0.0.5:80"
+    mqtt = create_transport(Settings(_env_file=None, transport="mqtt", mqtt_host="broker"), _noop_emit)
+    assert isinstance(mqtt, MqttIngestTransport) and mqtt.tx_enabled is False
+    with pytest.raises(ValueError):
+        create_transport(Settings(_env_file=None, transport="http"), _noop_emit)
+    with pytest.raises(ValueError):
+        create_transport(Settings(_env_file=None, transport="mqtt"), _noop_emit)
 
 
 class _FakeTCPBase:

@@ -20,9 +20,20 @@ logger = logging.getLogger("gateway.transport_manager")
 
 # Nombres de campo de Settings que cada transporte acepta desde connection_params
 _PARAM_FIELDS: dict[str, dict[str, str]] = {
-    "usb": {"device": "usb_device"},
-    "tcp": {"host": "tcp_host", "port": "tcp_port"},
-    "http": {"url": "http_url"},
+    "usb": {"device": "usb_device", "vn_enabled": "vn_enabled", "vn_port": "vn_port", "vn_allow_admin": "vn_allow_admin"},
+    "tcp": {"host": "tcp_host", "port": "tcp_port", "vn_enabled": "vn_enabled", "vn_port": "vn_port", "vn_allow_admin": "vn_allow_admin"},
+    "http": {"host": "http_host", "port": "http_port", "vn_enabled": "vn_enabled", "vn_port": "vn_port", "vn_allow_admin": "vn_allow_admin"},
+    "mqtt": {
+        "host": "mqtt_host",
+        "port": "mqtt_port",
+        "username": "mqtt_username",
+        "password": "mqtt_password",
+        "tls": "mqtt_tls",
+        "topic": "mqtt_topic",
+        "psk": "mqtt_psk",
+        "channel_keys": "mqtt_channel_keys",
+        "geo_bbox": "mqtt_geo_bbox",
+    },
     # M6.2: la malla simulada se configura desde la app (seed por instancia,
     # shared_seed común para generar nodos compartidos entre pasarelas)
     "simulated": {
@@ -158,6 +169,12 @@ class TransportManager:
         await self._start(idle_settings)
         if self._transport is not None:
             await self._transport.emit_status(detail="disconnected by user")
+
+    async def resync(self) -> bool:
+        transport = self._transport
+        if transport is None:
+            return False
+        return await transport.resync()
 
     async def discover(self, request_id: str | None = None) -> dict[str, Any]:
         from gateway.transports.usb import MeshtasticUsbTransport

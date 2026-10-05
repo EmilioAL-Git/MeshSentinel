@@ -248,6 +248,13 @@ class GatewayOut(BaseModel):
     last_disconnected_at: datetime | None
     last_error: str | None
     last_error_at: datetime | None
+    # ADR 0032
+    receive_only: bool
+    tx_enabled: bool | None
+    can_transmit: bool
+    is_primary: bool
+    sort_order: int
+    virtual_node: dict | None
 
     @classmethod
     def from_entity(cls, g: GatewayInfo) -> "GatewayOut":

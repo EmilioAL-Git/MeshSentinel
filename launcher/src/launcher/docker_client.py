@@ -10,6 +10,7 @@ asyncio con el cliente Docker.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -77,6 +78,33 @@ def _build_env(settings: Settings, gateway_id: str, transport_type: str, connect
         port = connection_params.get("port")
         if port:
             env["GATEWAY_TCP_PORT"] = str(port)
+    elif transport_type == "http":
+        host = connection_params.get("host")
+        if not host:
+            raise ValueError("transporte http requiere 'host' en connection_params")
+        env["GATEWAY_HTTP_HOST"] = str(host)
+        if connection_params.get("port"):
+            env["GATEWAY_HTTP_PORT"] = str(connection_params["port"])
+    elif transport_type == "mqtt":
+        host = connection_params.get("host")
+        if not host:
+            raise ValueError("transporte mqtt requiere 'host' en connection_params")
+        env["GATEWAY_MQTT_HOST"] = str(host)
+        for key, env_key in (
+            ("port", "GATEWAY_MQTT_PORT"),
+            ("username", "GATEWAY_MQTT_USERNAME"),
+            ("password", "GATEWAY_MQTT_PASSWORD"),
+            ("topic", "GATEWAY_MQTT_TOPIC"),
+            ("psk", "GATEWAY_MQTT_PSK"),
+        ):
+            if connection_params.get(key) not in (None, ""):
+                env[env_key] = str(connection_params[key])
+        if connection_params.get("tls"):
+            env["GATEWAY_MQTT_TLS"] = "true"
+        # dict/list: pydantic-settings los lee como JSON desde el entorno
+        for key, env_key in (("channel_keys", "GATEWAY_MQTT_CHANNEL_KEYS"), ("geo_bbox", "GATEWAY_MQTT_GEO_BBOX")):
+            if connection_params.get(key):
+                env[env_key] = json.dumps(connection_params[key])
     elif transport_type == "simulated":
         for key, env_key in (
             ("seed", "GATEWAY_SIM_SEED"),
@@ -89,7 +117,21 @@ def _build_env(settings: Settings, gateway_id: str, transport_type: str, connect
                 env[env_key] = str(value)
     else:
         raise ValueError(f"transporte no soportado por el lanzador: «{transport_type}»")
+    if transport_type != "mqtt" and connection_params.get("vn_enabled"):
+        # Nodo virtual (ADR 0033): el puerto lo publica el contenedor en el host
+        env["GATEWAY_VN_ENABLED"] = "true"
+        env["GATEWAY_VN_PORT"] = str(connection_params.get("vn_port") or 4404)
+        if connection_params.get("vn_allow_admin"):
+            env["GATEWAY_VN_ALLOW_ADMIN"] = "true"
     return env
+
+
+def _ports_kwarg(transport_type: str, connection_params: dict[str, Any]) -> dict[str, int] | None:
+    """Puerto del nodo virtual publicado en el host (mismo número dentro y fuera)."""
+    if transport_type == "mqtt" or not connection_params.get("vn_enabled"):
+        return None
+    port = int(connection_params.get("vn_port") or 4404)
+    return {f"{port}/tcp": port}
 
 
 def _devices_kwarg(transport_type: str, connection_params: dict[str, Any]) -> list[str] | None:
@@ -154,6 +196,7 @@ class LauncherDockerClient:
                 labels=labels,
                 network=settings.docker_network,
                 devices=devices,
+                ports=_ports_kwarg(transport_type, connection_params),
                 restart_policy={"Name": "unless-stopped"},
                 detach=True,
             )

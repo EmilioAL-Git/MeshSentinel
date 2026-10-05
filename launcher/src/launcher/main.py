@@ -51,7 +51,7 @@ class ContainerOut(BaseModel):
 
 class CreateContainerIn(BaseModel):
     gateway_id: str = Field(min_length=1, max_length=63)
-    transport_type: str = Field(pattern="^(usb|tcp|simulated)$")
+    transport_type: str = Field(pattern="^(usb|tcp|http|mqtt|simulated)$")
     connection_params: dict[str, Any] = Field(default_factory=dict)
 
 

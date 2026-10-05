@@ -161,3 +161,36 @@ async def test_main_exits_zero_on_clean_signal(monkeypatch):
 
     os.kill(os.getpid(), signal.SIGTERM)
     assert await asyncio.wait_for(task, timeout=5) == 0
+
+
+async def test_cancelled_connect_closes_the_orphan_interface_and_aborts_pending():
+    """Una conexión en un hilo no se puede cancelar: si el transporte se
+    sustituye mientras conecta, la interfaz que acabe creándose debe cerrarse
+    (si no, su hilo lector robaría tramas al nodo a la pasarela nueva)."""
+    import threading
+
+    release = threading.Event()
+    closed = threading.Event()
+    aborted: list[bool] = []
+
+    class FakeIface:
+        def close(self):
+            closed.set()
+
+    class Slow(MeshtasticTcpTransport):
+        def _connect_blocking(self):
+            release.wait(5)
+            return FakeIface()
+
+        def _abort_pending_connect(self):
+            aborted.append(True)
+
+    t = Slow(_noop_emit, _settings())
+    task = asyncio.create_task(t.run())
+    await asyncio.sleep(0.2)  # ya está dentro de _connect_blocking
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert aborted == [True]
+    assert not closed.is_set()
+    release.set()  # la conexión termina DESPUÉS de cancelar
+    assert await asyncio.to_thread(closed.wait, 3), "la interfaz huérfana debe cerrarse"

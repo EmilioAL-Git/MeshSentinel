@@ -15,9 +15,16 @@ def create_transport(settings: Settings, emit: EmitFn) -> Transport:
         from gateway.transports.tcp import MeshtasticTcpTransport
 
         return MeshtasticTcpTransport(emit, settings)
+    if settings.transport == "http":
+        from gateway.transports.http import MeshtasticHttpTransport
+
+        return MeshtasticHttpTransport(emit, settings)
+    if settings.transport == "mqtt":
+        from gateway.transports.mqtt import MqttIngestTransport
+
+        return MqttIngestTransport(emit, settings)
     if settings.transport == "idle":
         from gateway.transports.idle import IdleTransport
 
         return IdleTransport(emit, settings)
-    # http: fase futura
     raise NotImplementedError(f"Transport '{settings.transport}' not implemented yet")

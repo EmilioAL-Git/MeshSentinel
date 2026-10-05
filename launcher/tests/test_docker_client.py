@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import json
+
 import pytest
 from docker.errors import NotFound
 
@@ -134,3 +136,40 @@ def test_destroy_container_removes_own_container():
     fake_docker.containers.get.return_value = own
     client.destroy_container("gw-x")
     own.remove.assert_called_once_with(force=True)
+
+
+def test_build_env_http_requires_host_and_maps_port():
+    with pytest.raises(ValueError):
+        _build_env(settings(), "gw-x", "http", {})
+    env = _build_env(settings(), "gw-x", "http", {"host": "10.0.0.5", "port": 8080})
+    assert env["GATEWAY_TRANSPORT"] == "http"
+    assert env["GATEWAY_HTTP_HOST"] == "10.0.0.5" and env["GATEWAY_HTTP_PORT"] == "8080"
+
+
+def test_build_env_mqtt_maps_broker_and_json_fields():
+    with pytest.raises(ValueError):
+        _build_env(settings(), "gw-x", "mqtt", {})
+    env = _build_env(
+        settings(), "gw-x", "mqtt",
+        {"host": "mqtt.example", "username": "u", "password": "p", "tls": True,
+         "channel_keys": {"Mi": "Ag=="}, "geo_bbox": [38.5, -2.5, 39.5, -0.9]},
+    )
+    assert env["GATEWAY_MQTT_HOST"] == "mqtt.example" and env["GATEWAY_MQTT_TLS"] == "true"
+    assert env["GATEWAY_MQTT_USERNAME"] == "u" and env["GATEWAY_MQTT_PASSWORD"] == "p"
+    assert json.loads(env["GATEWAY_MQTT_CHANNEL_KEYS"]) == {"Mi": "Ag=="}
+    assert json.loads(env["GATEWAY_MQTT_GEO_BBOX"]) == [38.5, -2.5, 39.5, -0.9]
+
+
+def test_virtual_node_env_and_published_port():
+    from launcher.docker_client import _ports_kwarg
+
+    params = {"host": "10.0.0.5", "vn_enabled": True, "vn_port": 4410, "vn_allow_admin": True}
+    env = _build_env(settings(), "gw-x", "tcp", params)
+    assert env["GATEWAY_VN_ENABLED"] == "true" and env["GATEWAY_VN_PORT"] == "4410"
+    assert env["GATEWAY_VN_ALLOW_ADMIN"] == "true"
+    assert _ports_kwarg("tcp", params) == {"4410/tcp": 4410}
+    # sin activar: ni variables ni puerto publicado; MQTT nunca (no hay nodo)
+    off = {"host": "10.0.0.5"}
+    assert "GATEWAY_VN_ENABLED" not in _build_env(settings(), "gw-x", "tcp", off)
+    assert _ports_kwarg("tcp", off) is None
+    assert _ports_kwarg("mqtt", {"host": "b", "vn_enabled": True}) is None

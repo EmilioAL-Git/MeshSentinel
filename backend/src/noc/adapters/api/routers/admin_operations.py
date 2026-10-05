@@ -131,7 +131,9 @@ async def create_operation(body: OperationIn, session: SessionDep, current_user:
         use_preference=body.gateway_selection.mode != "auto",
     )
     if not resolution.gateway_id:
-        raise HTTPException(status_code=409, detail="Node has no known gateway to route through")
+        raise HTTPException(
+            status_code=409, detail=resolution.note or "Node has no known gateway to route through"
+        )
 
     op = await SqlAdminOperationRepository(session).create(
         AdminOperation(

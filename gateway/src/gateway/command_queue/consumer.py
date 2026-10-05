@@ -26,6 +26,7 @@ _GATEWAY_COMMANDS = {
     "command.gateway_test_connection",
     "command.gateway_connect",
     "command.gateway_disconnect",
+    "command.gateway_resync",
 }
 
 
@@ -98,6 +99,9 @@ class CommandConsumer:
             await self._manager.connect(payload["transport_type"], payload.get("connection_params") or {})
         elif command_type == "command.gateway_disconnect":
             await self._manager.disconnect()
+        elif command_type == "command.gateway_resync":
+            if not await self._manager.resync():
+                logger.info("gateway_resync ignored (transport not connected or without resync)")
 
     async def _handle_admin(self, command: dict[str, Any]) -> None:
         payload = command.get("payload") or {}

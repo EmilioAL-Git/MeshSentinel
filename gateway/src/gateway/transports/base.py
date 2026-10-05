@@ -33,6 +33,10 @@ class Transport(ABC):
         # Canales del nodo local (índice+nombre), refrescados al conectar —
         # base de los nombres reales de canal en el Registro/Chat.
         self.channels: list[dict[str, Any]] | None = None
+        # ¿Puede transmitir a la malla? None = desconocido; False = solo
+        # recepción (lora.tx_enabled=false en el firmware, o fuente sin radio
+        # como MQTT). ADR 0032.
+        self.tx_enabled: bool | None = None
         # Tres señales independientes (no confundir):
         #  · device_response: el nodo conectado RESPONDE por el enlace API
         #    (USB/TCP) — "la pasarela está viva". Es la que decide si se ha caído.
@@ -60,6 +64,17 @@ class Transport(ABC):
         """Sondeo activo del enlace con el nodo (sin emitir nada a la malla).
         Por defecto no hace nada; los transportes reales piden una respuesta."""
 
+    def virtual_node_info(self) -> dict[str, Any] | None:
+        """Estado del nodo virtual (ADR 0033): {port, clients, allow_admin} o
+        None si no está activo en este transporte."""
+        return None
+
+    async def resync(self) -> bool:
+        """Relee el nodo local y republica el snapshot de su NodeDB sin cortar
+        el enlace (resincronización manual, ADR 0032). False si esta fuente no
+        tiene nada que releer o no está conectada."""
+        return False
+
     async def emit_status(self, detail: str | None = None) -> None:
         await self._emit(
             "gateway.status",
@@ -73,6 +88,8 @@ class Transport(ABC):
                 "local_hw_model": self.local_hw_model,
                 "local_firmware_version": self.local_firmware_version,
                 "channels": self.channels,
+                "tx_enabled": self.tx_enabled,
+                "virtual_node": self.virtual_node_info(),
                 "last_device_response_at": _iso(self.last_device_response_at),
                 "last_lora_rx_at": _iso(self.last_lora_rx_at),
                 "last_lora_tx_at": _iso(self.last_lora_tx_at),

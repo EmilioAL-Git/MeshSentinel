@@ -56,6 +56,12 @@ class GatewayModel(Base):
     last_disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ADR 0032
+    receive_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    tx_enabled: Mapped[bool | None] = mapped_column(Boolean)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    virtual_node: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # ADR 0033
 
 
 class NodeModel(Base):
