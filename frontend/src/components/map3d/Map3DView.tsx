@@ -331,18 +331,27 @@ export function Map3DView({
         null);
   const waitingForOp = tab === "node" && opParam != null && !byOp.data?.length && byOp.isFetching;
 
+  // Nodos sin GPS: ubicación puesta a mano con el asistente. Es un dato local de este
+  // navegador para el visor (no se envía al nodo ni al backend).
+  const [manualPos, setManualPos] = usePersistedState<Record<string, LngLat>>("map3d.manualPos", {});
+  const [locating, setLocating] = useState<string | null>(null);
+  const locatingRef = useRef(locating);
+  locatingRef.current = locating;
+  const locateRef = useRef<(p: LngLat) => void>(() => {});
+
   const info = useMemo(() => {
-    const m = new Map<string, { name: string; pos: LngLat | null }>();
+    const m = new Map<string, { name: string; pos: LngLat | null; manual?: boolean }>();
     for (const s of summaries) {
       const p = s.last_position;
       m.set(s.node.node_id, {
         name: s.node.long_name || s.node.short_name || s.node.node_id,
-        pos: p ? [p.longitude, p.latitude] : null,
+        pos: p ? [p.longitude, p.latitude] : (manualPos[s.node.node_id] ?? null),
+        manual: !p && !!manualPos[s.node.node_id],
       });
     }
     if (isDemo) for (const [id, v] of DEMO_NODE_INFO) m.set(id, v);
     return m;
-  }, [summaries, isDemo]);
+  }, [summaries, isDemo, manualPos]);
   const nameOf = (id: string) => info.get(id)?.name ?? id;
 
   const [legView, setLegView] = useState<LegView>("both");
@@ -542,8 +551,8 @@ export function Map3DView({
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 5, 14, 7],
           "circle-color": ["case", ["get", "online"], "#2ea06a", "#6b7385"],
-          "circle-stroke-color": "#0b0f16",
-          "circle-stroke-width": 1,
+          "circle-stroke-color": ["case", ["get", "manual"], "#f5b73b", "#0b0f16"],
+          "circle-stroke-width": ["case", ["get", "manual"], 2.5, 1],
         },
       });
       map.addLayer({
@@ -558,6 +567,11 @@ export function Map3DView({
         },
       });
       map.on("click", (e) => {
+        // Asistente de ubicación de un nodo sin GPS: el clic fija dónde está
+        if (locatingRef.current) {
+          locateRef.current([e.lngLat.lng, e.lngLat.lat]);
+          return;
+        }
         // Modo «pinchar en el mapa» del perfil topográfico: un clic en vacío fija el punto
         if (!armedRef.current) return;
         if (map.queryRenderedFeatures(e.point, { layers: ["nodes-dots"] }).length) return; // lo atiende el nodo
@@ -993,6 +1007,7 @@ export function Map3DView({
     setOpParam(null);
     setTraceParam(null);
     setNodeParam(id);
+    if (id && needsLocation(id)) startLocating(id);
   };
   const pickNode = (id: string) => {
     if (tab === "profile") {
@@ -1005,6 +1020,7 @@ export function Map3DView({
     } else selectNode(id);
   };
   pickRef.current = (id) => {
+    if (locatingRef.current) return; // el clic ya lo atiende el asistente de ubicación
     setArmed(null);
     pickNode(id);
   };
@@ -1015,31 +1031,62 @@ export function Map3DView({
   };
   useEffect(() => {
     const map = mapRef.current;
-    if (map) map.getCanvas().style.cursor = armed ? "crosshair" : "";
-  }, [armed]);
+    if (map) map.getCanvas().style.cursor = armed || locating ? "crosshair" : "";
+  }, [armed, locating]);
   // Puntos libres y nodos se tratan igual al dibujarlos y nombrarlos
   const posOf = (k: string | null): LngLat | null => (k ? (pointPos(k) ?? info.get(k)?.pos ?? null) : null);
   const labelOf = (k: string) => (isPointKey(k) ? pointLabel(k) : nameOf(k));
+
+  // ── Asistente: situar en el mapa un nodo sin GPS ──────────────────────
+  const needsLocation = (id: string | null) => !!id && !isDemo && !isPointKey(id) && info.has(id) && !info.get(id)!.pos;
+  const startLocating = (id: string) => {
+    setArmed(null);
+    setLocating(id);
+    // Vista cenital y al norte: sin inclinación el punto pinchado coincide con lo que se ve
+    mapRef.current?.easeTo({ pitch: 0, bearing: 0, duration: 600 });
+    if (isMobile) setPanelOpen(false); // que se vea el mapa para pinchar
+  };
+  locateRef.current = (p) => {
+    const id = locatingRef.current;
+    if (!id) return;
+    setManualPos({ ...manualPos, [id]: p });
+    setLocating(null);
+    if (isMobile) setPanelOpen(true);
+  };
+  const clearManual = (id: string) => {
+    const { [id]: _drop, ...rest } = manualPos;
+    setManualPos(rest);
+  };
+  useEffect(() => {
+    if (!locating) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setLocating(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [locating]);
   const setTab = (v: "node" | "profile") => (setArmed(null), setTabParam(v === "profile" ? "profile" : null));
 
   const nodeFeatures = useMemo(() => {
     const feats: GeoJSON.Feature[] = [];
     for (const s of scoped) {
-      if (!s.last_position || s.node.is_ignored) continue;
+      const coords: LngLat | null = s.last_position
+        ? [s.last_position.longitude, s.last_position.latitude]
+        : (manualPos[s.node.node_id] ?? null);
+      if (!coords || s.node.is_ignored) continue;
       feats.push({
         type: "Feature",
         properties: {
           id: s.node.node_id,
           name: s.node.short_name || s.node.node_id.slice(-4),
           online: s.node.online,
+          manual: !s.last_position,
         },
-        geometry: { type: "Point", coordinates: [s.last_position.longitude, s.last_position.latitude] },
+        geometry: { type: "Point", coordinates: coords },
       });
     }
     return feats;
-  }, [scoped]);
+  }, [scoped, manualPos]);
   const nodesSig = useMemo(
-    () => nodeFeatures.map((f) => `${f.properties!.id}${f.properties!.online ? 1 : 0}${(f.geometry as GeoJSON.Point).coordinates}`).join("|"),
+    () => nodeFeatures.map((f) => `${f.properties!.id}${f.properties!.online ? 1 : 0}${f.properties!.manual ? "m" : ""}${(f.geometry as GeoJSON.Point).coordinates}`).join("|"),
     [nodeFeatures],
   );
   useEffect(() => {
@@ -1098,7 +1145,7 @@ export function Map3DView({
     if (!map || !ready || !p || tab !== "node") return;
     map.flyTo({ center: p, zoom: Math.max(map.getZoom(), 11), pitch: 60, duration: 1200 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeParam, ready, tab]);
+  }, [nodeParam, ready, tab, nodeParam ? info.get(nodeParam)?.pos?.join(",") : ""]);
 
   // ── Perfil topográfico ──────────────────────────────────────────────
   const posA = posOf(aParam);
@@ -1248,7 +1295,23 @@ export function Map3DView({
                   <div style={{ flex: 1, fontSize: 13, fontWeight: 650, overflowWrap: "anywhere" }}>
                     {nameOf(nodeParam)}
                     {!info.get(nodeParam)?.pos && (
-                      <div style={{ fontSize: 11, fontWeight: 400, color: "var(--warn)" }}>Sin posición GPS: no se ve en el mapa</div>
+                      <div style={{ fontSize: 11, fontWeight: 400, color: "var(--warn)" }}>
+                        Sin GPS: no se ve en el mapa.{" "}
+                        <button className="btn" style={{ padding: "1px 6px" }} onClick={() => startLocating(nodeParam)}>
+                          📍 Situar en el mapa
+                        </button>
+                      </div>
+                    )}
+                    {info.get(nodeParam)?.manual && (
+                      <div style={{ fontSize: 11, fontWeight: 400, color: t.textDim }}>
+                        Ubicación manual (solo en este navegador){" "}
+                        <button className="btn" style={{ padding: "1px 6px" }} onClick={() => startLocating(nodeParam)}>
+                          Cambiar
+                        </button>{" "}
+                        <button className="btn" style={{ padding: "1px 6px" }} onClick={() => clearManual(nodeParam)}>
+                          Quitar
+                        </button>
+                      </div>
                     )}
                   </div>
                   <button className="btn" onClick={() => onOpenNode(nodeParam)} title="Abrir en el Inspector">
@@ -1406,7 +1469,15 @@ export function Map3DView({
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <span style={{ flex: 1, fontSize: 13, overflowWrap: "anywhere" }}>
                         {labelOf(id)}
-                        {!posOf(id) && <span style={{ color: "var(--warn)", fontSize: 11 }}> · sin GPS</span>}
+                        {!posOf(id) && !isPointKey(id) && (
+                          <>
+                            <span style={{ color: "var(--warn)", fontSize: 11 }}> · sin GPS </span>
+                            <button className="btn" style={{ padding: "1px 6px" }} onClick={() => startLocating(id)}>
+                              📍 Situar
+                            </button>
+                          </>
+                        )}
+                        {info.get(id)?.manual && <span style={{ color: t.textDim, fontSize: 11 }}> · ubicación manual</span>}
                       </span>
                       <button className="btn" onClick={() => set(null)} title="Quitar">
                         ✕
@@ -1417,7 +1488,10 @@ export function Map3DView({
                       summaries={scoped}
                       exclude={other ? [other] : undefined}
                       placeholder="Buscar nodo o pulsarlo en el mapa…"
-                      onPick={(n) => set(n)}
+                      onPick={(n) => {
+                        set(n);
+                        if (needsLocation(n)) startLocating(n);
+                      }}
                     />
                   )}
                   {!id && (
@@ -1645,6 +1719,19 @@ export function Map3DView({
             </button>
           </div>
         </div>
+        {locating && (
+          <div className="m3d-wizard" role="status">
+            <div>
+              <strong>📍 Situar «{nameOf(locating)}»</strong>
+              <div style={{ fontSize: 12, color: t.textDim }}>
+                Este nodo no tiene GPS. Pulsa en el mapa dónde está (solo se guarda en este navegador).
+              </div>
+            </div>
+            <button className="btn" onClick={() => setLocating(null)}>
+              Cancelar
+            </button>
+          </div>
+        )}
         {tab === "profile" && los && aParam && bParam && (
           <div className="m3d-controls" style={{ width: "min(900px, calc(100% - 24px))", display: "block" }}>
             <ProfileChart los={los} nameA={labelOf(aParam)} nameB={labelOf(bParam)} onProbe={setProbeD} />
