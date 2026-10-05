@@ -51,7 +51,7 @@ import { useAuth } from "./context/AuthContext";
 import { LockedNotice } from "./components/shell/LockedNotice";
 import { useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
 import { usePersistedState } from "./hooks/usePersistedState";
-import { useUrlFlag, useUrlNumber, useUrlParam, useUrlString, useUrlView } from "./hooks/useUrlState";
+import { clearUrlParams, useUrlFlag, useUrlNumber, useUrlParam, useUrlString, useUrlView } from "./hooks/useUrlState";
 const Map3DView = lazy(() => import("./components/map3d/Map3DView").then((m) => ({ default: m.Map3DView })));
 import { RAIL_VIEWS, railActive, resolveView, VIEWS, type View } from "./view";
 import { ToolFrame } from "./components/tools/ToolFrame";
@@ -218,7 +218,12 @@ export default function App() {
   });
   // URLs compartibles (ADR 0026): la vista vive en el path, no en memoria.
   // `resolveView` ya traduce alias históricos (`/dashboard`, `/operations`…).
-  const [view, setView] = useUrlView<View>(resolveView, "ops");
+  const [view, setUrlView] = useUrlView<View>(resolveView, "ops");
+  // El Mapa 3D no recuerda nada al salir: la próxima vez se abre limpio
+  const setView = (next: View, opts?: Parameters<typeof setUrlView>[1]) => {
+    if (view === "map3d" && next !== "map3d") clearUrlParams("m3d.");
+    setUrlView(next, opts);
+  };
   const gatewayStats = useQuery({
     queryKey: ["gateway-stats"],
     queryFn: () => fetchGatewayStats(),

@@ -63,6 +63,22 @@ function applyParam(key: string, value: string | null, opts: SetOpts) {
   notify();
 }
 
+/** Borra de la URL todos los parámetros que empiezan por `prefix` (estado de una vista que se abandona). */
+export function clearUrlParams(prefix: string) {
+  const params = getSearchParams();
+  let changed = false;
+  for (const k of [...params.keys()]) {
+    if (k.startsWith(prefix)) {
+      params.delete(k);
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  const search = params.toString();
+  window.history.replaceState(null, "", window.location.pathname + (search ? `?${search}` : ""));
+  notify();
+}
+
 /**
  * Parámetro de query genérico. `defaultValue` nunca se escribe en la URL
  * (§2 del diseño: "ningún parámetro se escribe si coincide con el
