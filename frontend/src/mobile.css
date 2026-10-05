@@ -170,7 +170,7 @@
     gap: 1px;
     background: var(--border-subtle);
     border-top: 1px solid var(--border);
-    margin-bottom: calc(var(--statusbar-height) + 45px + max(env(safe-area-inset-bottom), 12px));
+    margin-bottom: calc(var(--statusbar-height) + 45px + max(env(safe-area-inset-bottom), 4px));
   }
   .navmore button {
     background: var(--surface);
@@ -217,7 +217,7 @@
     scrollbar-width: none;
     /* La barra de estado es lo último de la pantalla: aquí (y solo aquí) se
        reserva el hueco de la barra de gestos/navegación del sistema. */
-    padding-bottom: max(env(safe-area-inset-bottom), 12px);
+    padding-bottom: max(env(safe-area-inset-bottom), 4px);
     box-sizing: content-box;
   }
   footer::-webkit-scrollbar {
@@ -482,7 +482,7 @@
   .toast-host {
     left: 10px !important;
     right: 10px !important;
-    bottom: calc(var(--statusbar-height) + 57px + max(env(safe-area-inset-bottom), 12px)) !important;
+    bottom: calc(var(--statusbar-height) + 57px + max(env(safe-area-inset-bottom), 4px)) !important;
   }
 
   /* Modales / paleta / login: más arriba (teclado en pantalla) y casi a ancho completo */
