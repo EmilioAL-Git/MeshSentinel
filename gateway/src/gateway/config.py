@@ -48,6 +48,16 @@ class Settings(BaseSettings):
         default=20.0,
         validation_alias=AliasChoices("MESHTASTIC_CONNECT_TIMEOUT", "GATEWAY_CONNECT_TIMEOUT"),
     )
+    # Una reconexión dentro de esta ventana NO vuelve a publicar el snapshot de
+    # la NodeDB (cientos de eventos node.seen a Redis/backend por cada flap de
+    # un enlace inestable). La primera conexión del transporte siempre lo
+    # publica; 0 = publicarlo siempre (comportamiento anterior).
+    snapshot_min_interval_seconds: float = Field(
+        default=600.0,
+        validation_alias=AliasChoices(
+            "MESHTASTIC_SNAPSHOT_MIN_INTERVAL", "GATEWAY_SNAPSHOT_MIN_INTERVAL_SECONDS"
+        ),
+    )
     # Espera entre enviar un SET y leer la verificación (M1.3)
     set_settle_seconds: float = 3.0
 

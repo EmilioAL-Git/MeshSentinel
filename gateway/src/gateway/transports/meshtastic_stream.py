@@ -17,6 +17,7 @@ propia (ADR 0023: sin forks de comportamiento entre transportes).
 import asyncio
 import logging
 import random
+import time
 from abc import abstractmethod
 from collections import Counter
 from typing import Any
@@ -30,6 +31,25 @@ from gateway.transports.base import EmitFn, Transport
 logger = logging.getLogger("gateway.transport")
 
 LOCAL_CACHE_READS = frozenset({"nodeinfo.get", "config.get", "module_config.get"})
+
+# Escalera de reconexión tras perder el enlace A MITAD de la sincronización
+# inicial (el nodo se calla o cierra mientras vuelca su NodeDB). Ese fallo es
+# casi siempre transitorio y el reintento inmediato suele completar en pocos
+# segundos, mientras que el backoff largo es lo que hace sentir la malla
+# "rota". Si también falla, se escala: no martillear a un nodo que ya ha
+# dicho dos veces que no puede terminar (cada reintento le hace volver a
+# volcar toda la NodeDB). Un nodo inalcanzable (OSError al conectar) NO usa
+# la escalera: sigue con el backoff exponencial normal.
+SYNC_LOSS_RETRY_LADDER = (3.0, 10.0, 30.0)
+
+
+def _is_sync_loss(exc: BaseException) -> bool:
+    """True si el fallo ocurrió con el socket/puerto ya abierto, es decir, en
+    la espera de la configuración (la librería lanza MeshInterfaceError
+    "Timed out waiting for connection completion"), no al alcanzar el nodo
+    (ConnectionRefused, timeout de conexión, host inalcanzable: OSError)."""
+    return not isinstance(exc, OSError)
+
 
 # Centinela de cierre forzoso (close() del transporte): termina el pump siempre
 _FORCE_DISCONNECT = object()
@@ -50,6 +70,8 @@ class MeshtasticStreamTransport(Transport):
         # "reconectando" en el estado emitido (M5, ADR 0021 §4)
         self._ever_connected = False
         self._local_node_num: int | None = None
+        # Instante (monotónico) del último snapshot de NodeDB publicado
+        self._last_snapshot_at: float | None = None
 
     # ── Hooks de subclase: la ÚNICA diferencia entre transportes ────────────
 
@@ -129,6 +151,7 @@ class MeshtasticStreamTransport(Transport):
         pub.subscribe(self._on_connection_lost, "meshtastic.connection.lost")
 
         delay = self._settings.reconnect_initial_delay
+        sync_loss_step = 0
         while not self._closed.is_set():
             self.status = "reconnecting" if self._ever_connected else "connecting"
             await self.emit_status()
@@ -137,12 +160,22 @@ class MeshtasticStreamTransport(Transport):
             except Exception as exc:
                 self.status = "error"
                 await self.emit_status(detail=f"connect failed: {exc}")
+                if _is_sync_loss(exc) and sync_loss_step < len(SYNC_LOSS_RETRY_LADDER):
+                    wait = SYNC_LOSS_RETRY_LADDER[sync_loss_step]
+                    sync_loss_step += 1
+                    logger.error(
+                        "%s.connect_failed error=%r sync_loss_retry=%d/%d retry_in=%.0fs",
+                        self.name, exc, sync_loss_step, len(SYNC_LOSS_RETRY_LADDER), wait,
+                    )
+                    await self._sleep(wait)
+                    continue
                 logger.error("%s.connect_failed error=%r retry_in=%.0fs", self.name, exc, delay)
                 await self._sleep(delay)
                 delay = min(delay * 2, self._settings.reconnect_max_delay)
                 continue
 
             delay = self._settings.reconnect_initial_delay  # conexión OK: backoff a cero
+            sync_loss_step = 0
             self._instrument(self._iface)
             await self._on_connected()
             await self._pump_events()  # hasta desconexión o cierre
@@ -177,6 +210,20 @@ class MeshtasticStreamTransport(Transport):
             len(nodes),
         )
         # Snapshot de la NodeDB del dispositivo: puebla el registry al instante.
+        # En una reconexión rápida (enlace que flapea) no se reemite: los nodos
+        # ya están en el registry y los paquetes en vivo siguen llegando.
+        now = time.monotonic()
+        min_interval = self._settings.snapshot_min_interval_seconds
+        if (
+            self._last_snapshot_at is not None
+            and now - self._last_snapshot_at < min_interval
+        ):
+            logger.info(
+                "%s.snapshot_skipped last_snapshot_age=%.0fs min_interval=%.0fs",
+                self.name, now - self._last_snapshot_at, min_interval,
+            )
+            return
+        self._last_snapshot_at = now
         for node_id_raw, entry in nodes.items():
             decoded = decode_nodedb_entry(node_id_raw, entry)
             if decoded:

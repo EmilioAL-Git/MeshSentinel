@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import signal
+import sys
 
 from gateway.command_queue.consumer import CommandConsumer
 from gateway.config import get_settings
@@ -10,7 +11,7 @@ from gateway.transport_manager import TransportManager
 logger = logging.getLogger("gateway")
 
 
-async def main() -> None:
+async def main() -> int:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level)
 
@@ -26,6 +27,30 @@ async def main() -> None:
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
+    exit_code = 0
+
+    def fatal(reason: str) -> None:
+        # Red de seguridad de proceso: un gateway medio muerto (heartbeat vivo
+        # pero sin consumir comandos) es peor que uno reiniciado. Salida != 0
+        # para que la política de reinicio de Docker lo levante limpio.
+        nonlocal exit_code
+        if not stop.is_set():
+            exit_code = 1
+            logger.critical("fatal: %s — shutting down", reason)
+            stop.set()
+
+    def on_loop_exception(_loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        # Tareas fire-and-forget sin dueño que fallan: solo se registran con
+        # contexto completo (matar el proceso por un comando suelto que falla
+        # sería peor que el fallo); las tareas críticas tienen su propio
+        # vigilante más abajo.
+        exc = context.get("exception")
+        logger.error(
+            "unhandled asyncio error: %s", context.get("message"),
+            exc_info=(type(exc), exc, exc.__traceback__) if exc else None,
+        )
+
+    loop.set_exception_handler(on_loop_exception)
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
 
@@ -54,6 +79,14 @@ async def main() -> None:
         asyncio.create_task(consumer.run(), name="commands"),
         asyncio.create_task(heartbeat(), name="heartbeat"),
     ]
+    def watch_critical(task: asyncio.Task) -> None:
+        if task.cancelled() or stop.is_set():
+            return
+        exc = task.exception()
+        fatal(f"critical task {task.get_name()!r} ended" + (f": {exc!r}" if exc else " unexpectedly"))
+
+    for task in tasks[1:]:  # commands + heartbeat nunca terminan solas
+        task.add_done_callback(watch_critical)
     logger.info("Gateway %s started (transport=%s)", settings.gateway_id, settings.transport)
 
     await stop.wait()
@@ -64,7 +97,8 @@ async def main() -> None:
     await manager.teardown()
     await consumer.close()
     await publisher.close()
+    return exit_code
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))
