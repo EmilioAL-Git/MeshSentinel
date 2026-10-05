@@ -418,6 +418,11 @@ export function Map3DView({
   const [mastA, setMastA] = usePersistedState<number>("map3d.mastA", 2);
   const [mastB, setMastB] = usePersistedState<number>("map3d.mastB", 2);
   const [freqMHz, setFreqMHz] = usePersistedState<number>("map3d.freq", 868);
+  // Presupuesto de enlace (valores típicos de Meshtastic; todos editables)
+  const [txDbm, setTxDbm] = usePersistedState<number>("map3d.tx", 22);
+  const [gainA, setGainA] = usePersistedState<number>("map3d.gainA", 3);
+  const [gainB, setGainB] = usePersistedState<number>("map3d.gainB", 3);
+  const [sensDbm, setSensDbm] = usePersistedState<number>("map3d.sens", -132);
   const [samples, setSamples] = useState<ProfileSample[] | null | "loading">(null);
   const [probeD, setProbeD] = useState<number | null>(null);
 
@@ -1208,16 +1213,8 @@ export function Map3DView({
         className="panel"
         style={isMobile ? { maxHeight: panelOpen ? "42%" : undefined, flexShrink: 0 } : { width: 310, flexShrink: 0 }}
       >
-        <div className="panel-head" style={{ flexWrap: "wrap", rowGap: 6 }}>
+        <div className="panel-head">
           <span className="panel-title">Mapa 3D</span>
-          <span className="seg" role="group" aria-label="Herramienta">
-            <button className={tab === "node" ? "on" : undefined} onClick={() => setTab("node")}>
-              Nodo y trazas
-            </button>
-            <button className={tab === "profile" ? "on" : undefined} onClick={() => setTab("profile")}>
-              Perfil topográfico
-            </button>
-          </span>
           {isMobile && (
             <button
               className="btn"
@@ -1229,6 +1226,16 @@ export function Map3DView({
               {panelOpen ? "▴" : "▾"}
             </button>
           )}
+        </div>
+        <div style={{ display: isMobile && !panelOpen ? "none" : "block", padding: "8px 10px 0" }}>
+          <span className="seg" role="group" aria-label="Herramienta" style={{ display: "flex" }}>
+            <button style={{ flex: 1 }} className={tab === "node" ? "on" : undefined} onClick={() => setTab("node")}>
+              Nodo y trazas
+            </button>
+            <button style={{ flex: 1 }} className={tab === "profile" ? "on" : undefined} onClick={() => setTab("profile")}>
+              Perfil topográfico
+            </button>
+          </span>
         </div>
         <div
           className="ws-scroll"
@@ -1473,6 +1480,22 @@ export function Map3DView({
                       </select>
                     </label>
                   </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 11, color: t.textDim }}>
+                    {(
+                      [
+                        ["Potencia TX (dBm)", txDbm, setTxDbm, 0, 36, "Potencia con la que transmite A (típico 14–27 dBm)"],
+                        ["Sensibilidad (dBm)", sensDbm, setSensDbm, -160, -90, "Señal mínima que decodifica la radio: LongFast ≈ −132, LongSlow ≈ −137"],
+                        ["Ganancia ant. A (dBi)", gainA, setGainA, -5, 30, "Ganancia de la antena de A"],
+                        ["Ganancia ant. B (dBi)", gainB, setGainB, -5, 30, "Ganancia de la antena de B"],
+                      ] as const
+                    ).map(([label, value, set, min, max, tip]) => (
+                      <label key={label} title={tip}>
+                        {label}
+                        <input className="input" type="number" min={min} max={max} value={value} style={{ width: "100%" }}
+                          onChange={(e) => set(Number(e.target.value) || 0)} />
+                      </label>
+                    ))}
+                  </div>
                   {(!posA || !posB) && (
                     <div style={{ fontSize: 11.5, color: "var(--warn)" }}>Un extremo no tiene posición GPS: no se puede calcular.</div>
                   )}
@@ -1491,6 +1514,19 @@ export function Map3DView({
                       <div title="Pérdida en espacio libre: 20·log10(d km) + 20·log10(f MHz) + 32,44. Es el mínimo teórico sin obstáculos; el terreno, la vegetación y los edificios añaden más pérdida.">
                         <strong>FSPL: {los.fsplDb.toFixed(1)} dB</strong>{" "}
                         <span style={{ color: t.textDim }}>a {los.freqMHz} MHz (espacio libre)</span>
+                      </div>
+                      <div title="RSSI esperado = potencia TX + ganancia A + ganancia B − FSPL. Es el mejor caso (sin obstáculos ni cables): el real será igual o peor.">
+                        <strong>RSSI esperado: {(txDbm + gainA + gainB - los.fsplDb).toFixed(0)} dBm</strong>{" "}
+                        <span style={{ color: t.textDim }}>en espacio libre</span>
+                      </div>
+                      <div
+                        style={{
+                          color: txDbm + gainA + gainB - los.fsplDb - sensDbm > 10 ? t.ok : txDbm + gainA + gainB - los.fsplDb - sensDbm > 0 ? t.warn : t.crit,
+                        }}
+                        title="Margen = RSSI esperado − sensibilidad. Debe cubrir pérdidas por obstáculos, vegetación, cables y desvanecimiento."
+                      >
+                        Margen sobre sensibilidad: {(txDbm + gainA + gainB - los.fsplDb - sensDbm).toFixed(0)} dB
+                        {!los.clear && " · con obstrucción será menor"}
                       </div>
                       <div>
                         Peor punto: {Math.round(los.worst.clearance)} m de holgura a{" "}
