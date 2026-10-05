@@ -35,12 +35,18 @@ class MeshtasticTcpTransport(MeshtasticStreamTransport):
 
         timeout = self._settings.connect_timeout
         # La librería usa create_connection SIN timeout (un SYN descartado
-        # bloquea minutos): se sondea antes con tope propio y se acota también
-        # la espera de configuración. Falla rápido -> error visible + backoff.
-        socket.create_connection(
-            (self._settings.tcp_host, self._settings.tcp_port), timeout=timeout
-        ).close()
-        return TCPInterface(
+        # bloquea minutos). NO se sondea antes con una conexión aparte: el
+        # firmware solo admite UN cliente y tarda segundos en liberar la
+        # plaza tras cerrar el sondeo, así que la conexión real era rechazada
+        # y, al reintentar con otro sondeo, nunca se recuperaba. El tope se
+        # aplica en la propia conexión.
+        class _BoundedTCPInterface(TCPInterface):
+            def myConnect(self) -> None:  # noqa: N802 - override de la librería
+                sock = socket.create_connection((self.hostname, self.portNumber), timeout=timeout)
+                sock.settimeout(None)
+                self.socket = sock
+
+        return _BoundedTCPInterface(
             hostname=self._settings.tcp_host,
             portNumber=self._settings.tcp_port,
             timeout=int(timeout),

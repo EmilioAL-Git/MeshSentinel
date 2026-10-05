@@ -45,38 +45,48 @@ def test_http_remains_unimplemented():
         create_transport(Settings(_env_file=None, transport="http", http_url="http://x"), _noop_emit)
 
 
-def test_connect_blocking_builds_tcp_interface(monkeypatch):
-    created: dict = {}
-    probes: list = []
+class _FakeTCPBase:
+    """Réplica mínima de TCPInterface: el constructor conecta vía myConnect()."""
 
-    class FakeTCPInterface:
-        def __init__(self, hostname, portNumber, timeout):  # noqa: N803
-            created["hostname"] = hostname
-            created["portNumber"] = portNumber
-            created["timeout"] = timeout
+    def __init__(self, hostname, portNumber, timeout):  # noqa: N803
+        self.hostname = hostname
+        self.portNumber = portNumber
+        self.timeout = timeout
+        self.socket = None
+        self.myConnect()
+
+
+def test_connect_blocking_opens_a_single_bounded_connection(monkeypatch):
+    connections: list = []
 
     class FakeSock:
-        def close(self):
-            pass
+        def __init__(self):
+            self.timeout = "unset"
+
+        def settimeout(self, value):
+            self.timeout = value
 
     def fake_create_connection(addr, timeout=None):
-        probes.append((addr, timeout))
+        connections.append((addr, timeout))
         return FakeSock()
 
-    monkeypatch.setattr("meshtastic.tcp_interface.TCPInterface", FakeTCPInterface)
+    monkeypatch.setattr("meshtastic.tcp_interface.TCPInterface", _FakeTCPBase)
     monkeypatch.setattr("gateway.transports.tcp.socket.create_connection", fake_create_connection)
     t = MeshtasticTcpTransport(_noop_emit, make_settings(tcp_port=4404, GATEWAY_CONNECT_TIMEOUT=15))
     iface = t._connect_blocking()
-    assert isinstance(iface, FakeTCPInterface)
-    assert created == {"hostname": "192.168.1.50", "portNumber": 4404, "timeout": 15}
-    # El sondeo previo lleva timeout propio (la librería no lo tiene)
-    assert probes == [(("192.168.1.50", 4404), 15)]
+    assert (iface.hostname, iface.portNumber, iface.timeout) == ("192.168.1.50", 4404, 15)
+    # UNA sola conexión (el firmware admite un único cliente: un sondeo previo
+    # ocupaba la plaza y rechazaba la real), con tope de conexión propio y
+    # sin timeout de lectura después (el stream es de larga duración).
+    assert connections == [(("192.168.1.50", 4404), 15)]
+    assert iface.socket.timeout is None
 
 
 def test_connect_blocking_fails_fast_when_unreachable(monkeypatch):
     def boom(addr, timeout=None):  # noqa: ARG001
         raise TimeoutError("timed out")
 
+    monkeypatch.setattr("meshtastic.tcp_interface.TCPInterface", _FakeTCPBase)
     monkeypatch.setattr("gateway.transports.tcp.socket.create_connection", boom)
     t = MeshtasticTcpTransport(_noop_emit, make_settings())
     with pytest.raises(TimeoutError):
