@@ -23,6 +23,15 @@ MODULE_CONFIG_SECTIONS = [s.name for s in _SCHEMA_MODULE_CONFIG_SECTIONS]
 OWNER_SHORT_NAME_MAX = 4
 OWNER_LONG_NAME_MAX = 39
 
+# Peticiones por radio SIN administración (las «Solicitar…» de la app oficial):
+# un paquete normal con want_response; el nodo contesta con su dato y la
+# respuesta se ingiere como cualquier otro paquete oído.
+REQUEST_KINDS = [
+    "user_info", "position", "device_metrics", "environment_metrics",
+    "air_quality_metrics", "power_metrics", "local_stats", "health_metrics",
+    "host_metrics", "pax_metrics",
+]
+
 NODE_ID_PATTERN = re.compile(r"^![0-9a-f]{8}$")
 
 
@@ -99,6 +108,14 @@ OPERATIONS: dict[str, OperationSpec] = {
             "Traceroute activo hacia el nodo (ruta y SNR por salto, ida y vuelta)",
             kind="get", allow_bulk=False, destructive=False, required_role="operator",
             param_fields=[ParamField("hop_limit", "number", minimum=1, maximum=7)],
+        ),
+        # Solicitudes sin admin: no necesitan clave PKC; cada una cuesta un
+        # paquete (y la respuesta), por eso sin lotes.
+        OperationSpec(
+            "request.send",
+            "Solicitar un dato al nodo por radio (info de usuario, posición, métricas)",
+            kind="get", allow_bulk=False, destructive=False, required_role="operator",
+            param_choices={"kind": REQUEST_KINDS},
         ),
         OperationSpec(
             "owner.set",
@@ -255,6 +272,16 @@ def _validate_traceroute(params: dict[str, Any]) -> dict[str, Any]:
     return {"hop_limit": hop_limit}
 
 
+def _validate_request(params: dict[str, Any]) -> dict[str, Any]:
+    unknown = set(params) - {"kind"}
+    if unknown:
+        raise ValueError(f"Unknown parameters for request.send: {sorted(unknown)}")
+    kind = params.get("kind")
+    if kind not in REQUEST_KINDS:
+        raise ValueError(f"kind must be one of {REQUEST_KINDS}")
+    return {"kind": kind}
+
+
 def _validate_subject_node_id(params: dict[str, Any]) -> dict[str, Any]:
     subject = params.get("subject_node_id")
     if not isinstance(subject, str) or not NODE_ID_PATTERN.match(subject):
@@ -277,6 +304,7 @@ def _validate_contact_add(params: dict[str, Any]) -> dict[str, Any]:
 _VALIDATORS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "owner.set": _validate_owner_set,
     "traceroute.run": _validate_traceroute,
+    "request.send": _validate_request,
     "position.set_fixed": _validate_fixed_position,
     "config.set": _validate_generic_set(CONFIG_SECTIONS),
     "module_config.set": _validate_generic_set(MODULE_CONFIG_SECTIONS),

@@ -256,6 +256,8 @@ class SimulatedTransport(Transport):
                 "route_back": via,
                 "snr_back": [round(snr - 1.5, 2)] * (len(via) + 1),
             }
+        if op_type == "request.send":
+            return {"kind": params.get("kind"), "reached": True}
         if op_type == "metadata.get":
             return {
                 "firmwareVersion": "2.7.0",

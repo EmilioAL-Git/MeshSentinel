@@ -29,6 +29,8 @@ from gateway.transports.base import EmitFn, Transport
 
 logger = logging.getLogger("gateway.transport")
 
+LOCAL_CACHE_READS = frozenset({"nodeinfo.get", "config.get", "module_config.get"})
+
 # Centinela de cierre forzoso (close() del transporte): termina el pump siempre
 _FORCE_DISCONNECT = object()
 
@@ -348,13 +350,82 @@ class MeshtasticStreamTransport(Transport):
 
         if op_type == "traceroute.run":
             return await self._execute_traceroute(node_id, params, operation)
+        if op_type == "request.send":
+            return await self._execute_request(node_id, params, operation)
         if op_type in SET_OPERATIONS:
             return await self._execute_set(node_id, op_type, params, operation)
         if op_type in ACK_ONLY_OPERATIONS:
             return await self._execute_ack_set(node_id, op_type, params, operation)
 
+        # Nodo local del gateway: la radio ya descargó su config al conectar
+        # (want_config); se lee de esa caché, sin AdminMessage ni tráfico LoRa.
+        if node_id == (self.local_node_id or "").lower() and op_type in LOCAL_CACHE_READS:
+            local = await asyncio.to_thread(self._read_local_cache, op_type, params)
+            if local is not None:
+                logger.info("%s.admin_local_cache op=%s type=%s", self.name, operation.get("operation_id"), op_type)
+                return local
+
         message, response_key = build_admin_request(op_type, params)
         return await self._admin_roundtrip(node_id, message, response_key)
+
+    def _read_local_cache(self, op_type: str, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Lectura de la config del nodo local desde la caché de la librería.
+
+        Devuelve None si la caché no tiene el dato (cae al camino admin normal).
+        Misma forma que la respuesta admin: asDict camelCase, defaults omitidos.
+        """
+        from google.protobuf import json_format
+
+        iface = self._iface
+        node = getattr(iface, "localNode", None) if iface is not None else None
+        if node is None:
+            return None
+        if op_type == "nodeinfo.get":
+            user = (iface.getMyUser() or {}) if hasattr(iface, "getMyUser") else {}
+            return dict(user) if user.get("shortName") or user.get("longName") else None
+        section = params["section"]
+        container = node.localConfig if op_type == "config.get" else node.moduleConfig
+        if not container.HasField(section):
+            return None
+        sub = getattr(container, section)
+        return {section: json_format.MessageToDict(sub)}
+
+    async def _execute_request(
+        self, node_id: str, params: dict[str, Any], operation: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Solicitud por radio sin admin (como las «Solicitar…» de la app
+        oficial): UN paquete con want_response, sin reintentos en el gateway.
+        La respuesta se ingiere por el camino pasivo normal; aquí solo se
+        informa de si llegó. Sin respuesta = resultado, no error."""
+        from gateway.decoder.requests import build_request
+
+        assert self._loop is not None
+        loop = self._loop
+        kind = str(params.get("kind"))
+        op_timeout = float(operation.get("timeout_seconds") or 120)
+        wait = max(10.0, min(45.0, op_timeout - 10.0))
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        def on_response(packet: dict[str, Any]) -> None:
+            if not future.done():
+                loop.call_soon_threadsafe(future.set_result, packet)
+
+        def send() -> None:
+            payload, portnum = build_request(kind, self._iface)
+            self._iface.sendData(
+                payload,
+                destinationId=node_id,
+                portNum=portnum,
+                wantResponse=True,
+                onResponse=on_response,
+            )
+
+        await asyncio.to_thread(send)
+        try:
+            await asyncio.wait_for(future, timeout=wait)
+        except (TimeoutError, asyncio.TimeoutError):
+            return {"kind": kind, "reached": False, "error_reason": "NO_RESPONSE", "waited_seconds": wait}
+        return {"kind": kind, "reached": True}
 
     async def _execute_traceroute(
         self, node_id: str, params: dict[str, Any], operation: dict[str, Any]

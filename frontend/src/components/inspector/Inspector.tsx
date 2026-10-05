@@ -232,6 +232,18 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+const RADIO_REQUESTS = [
+  { kind: "user_info", label: "Info de usuario", hint: "Nombre, hardware y clave del nodo." },
+  { kind: "position", label: "Posición", hint: "Última posición del nodo." },
+  { kind: "device_metrics", label: "Métricas del dispositivo", hint: "Batería, uso de canal, aire TX, uptime." },
+  { kind: "environment_metrics", label: "Métricas de entorno", hint: "Temperatura, humedad, presión." },
+  { kind: "air_quality_metrics", label: "Calidad del aire", hint: "Partículas PM y CO₂." },
+  { kind: "power_metrics", label: "Métricas de energía", hint: "Tensión y corriente por canal." },
+  { kind: "local_stats", label: "Estadísticas locales", hint: "Paquetes, ruido y colisiones del nodo." },
+  { kind: "host_metrics", label: "Métricas del host", hint: "Memoria y carga (nodos Linux)." },
+  { kind: "pax_metrics", label: "Contador de personas", hint: "Dispositivos WiFi/BLE cercanos (paxcounter)." },
+] as const;
+
 export function Inspector({
   nodeId,
   summary,
@@ -450,6 +462,16 @@ export function Inspector({
     onSuccess: (op) => {
       trackOperations([op.id]);
       toast(`Traceroute añadido a la cola (op #${op.id})`);
+    },
+    onError: (e) => toast(`No se pudo añadir a la cola: ${e.message}`, { kind: "error" }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
+  });
+  const radioRequest = useMutation({
+    mutationFn: (r: { kind: string; label: string }) =>
+      createOperation({ node_id: nodeId, operation_type: "request.send", params: { kind: r.kind } }),
+    onSuccess: (op, r) => {
+      trackOperations([op.id]);
+      toast(`Solicitud «${r.label}» enviada a la cola (op #${op.id})`);
     },
     onError: (e) => toast(`No se pudo añadir a la cola: ${e.message}`, { kind: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
@@ -1006,6 +1028,33 @@ export function Inspector({
 
         {effectiveTab === "config" && (
           <>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ color: t.textFaint, fontSize: 10.5, letterSpacing: 0.6, marginBottom: 4 }}>
+                SOLICITAR POR RADIO · sin administración
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                {RADIO_REQUESTS.map((r) => (
+                  <button
+                    key={r.kind}
+                    style={actionBtn}
+                    disabled={radioRequest.isPending}
+                    title={`${r.hint} Transmite un paquete; el nodo contesta con su dato y se registra solo.`}
+                    onClick={() => radioRequest.mutate(r)}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+                <button style={actionBtn} disabled={runTraceroute.isPending} onClick={() => runTraceroute.mutate()} title="Ruta y SNR por salto, ida y vuelta.">
+                  Traceroute
+                </button>
+                <button style={actionBtn} disabled={askMetadata.isPending} onClick={() => askMetadata.mutate()} title="Firmware, hardware y capacidades (usa administración).">
+                  Metadata
+                </button>
+              </div>
+              <div style={{ color: t.textFaint, fontSize: 10.5, marginTop: 4 }}>
+                La calidad de señal (SNR/RSSI) no se solicita: se mide en cada paquete recibido. La configuración completa solo existe por administración (botón «Leer configuración»).
+              </div>
+            </div>
             {configState.isLoading && <div style={{ color: t.textFaint, fontSize: 12 }}>Cargando…</div>}
             {configState.data && (
               <>
