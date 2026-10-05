@@ -13,6 +13,9 @@ export type View =
   | "activity"
   | "gateways"
   | "stats"
+  | "map3d"
+  | "tools"
+  | "traces"
   | "settings";
 
 /**
@@ -21,7 +24,7 @@ export type View =
  * estado siempre presentes). El Dashboard clásico y la vista Mapa suelta
  * han muerto: el Centro de Operaciones ES el mapa y ES el dashboard.
  */
-export const VIEWS: { id: View; label: string; icon: string }[] = [
+export const VIEWS: { id: View; label: string; icon: string; short?: string }[] = [
   { id: "ops", label: "Centro", icon: "◉" },
   { id: "nodes", label: "Flota", icon: "⬡" },
   { id: "jobs", label: "Trabajos", icon: "▶" },
@@ -31,6 +34,9 @@ export const VIEWS: { id: View; label: string; icon: string }[] = [
   { id: "activity", label: "Registro", icon: "▤" },
   { id: "gateways", label: "Gateways", icon: "⛭" },
   { id: "stats", label: "Top", icon: "✦" },
+  { id: "tools", label: "Herramientas", short: "Herram.", icon: "⚒" },
+  { id: "traces", label: "Historial de trazas", icon: "⌁" },
+  { id: "map3d", label: "Mapa 3D", icon: "◈" },
   // "Ajustes" agrupa Usuarios/Accesos (autenticación) junto al resto de
   // configuración — mismo criterio de visibilidad de antes (RequireAdminDep
   // en el backend para Usuarios). Icono "@wrench": sentinel que NavRail
@@ -51,4 +57,15 @@ export function resolveView(v: string): View {
   if (v === "users" || v === "login-log") return "settings";
   if (VIEW_IDS.has(v)) return v as View;
   return "ops";
+}
+
+/** Vistas que viven DENTRO de Herramientas: no tienen entrada propia en el riel. */
+export const TOOL_VIEWS: readonly View[] = ["traces", "map3d", "config"];
+
+/** Vistas con entrada propia en el riel (las herramientas cuelgan de «Herramientas»). */
+export const RAIL_VIEWS = VIEWS.filter((v) => !TOOL_VIEWS.includes(v.id));
+
+/** Entrada del riel que se ilumina para la vista actual. */
+export function railActive(view: View): View {
+  return TOOL_VIEWS.includes(view) ? "tools" : view;
 }

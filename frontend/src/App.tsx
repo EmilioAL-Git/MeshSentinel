@@ -1,6 +1,6 @@
 import { poll, setLiveConnected } from "./api/livePolling";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ACTIVITY_LIMIT, toEntry, type ActivityEntry } from "./activity";
 import {
   fetchActivityLog,
@@ -52,7 +52,11 @@ import { LockedNotice } from "./components/shell/LockedNotice";
 import { useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
 import { usePersistedState } from "./hooks/usePersistedState";
 import { useUrlFlag, useUrlNumber, useUrlParam, useUrlString, useUrlView } from "./hooks/useUrlState";
-import { resolveView, VIEWS, type View } from "./view";
+const Map3DView = lazy(() => import("./components/map3d/Map3DView").then((m) => ({ default: m.Map3DView })));
+import { RAIL_VIEWS, railActive, resolveView, VIEWS, type View } from "./view";
+import { ToolFrame } from "./components/tools/ToolFrame";
+import { ToolsHub } from "./components/tools/ToolsHub";
+import { TracesView } from "./components/tools/TracesView";
 import { computeFleetGroupMetrics, computeGroupAttention, computeGroupStatus, scopeGatewaysToGroup } from "./components/fleet/groupStats";
 import { consumeFinished, onTracerouteFinished, type TracerouteOutcome } from "./opTracker";
 import { t } from "./tokens";
@@ -250,6 +254,8 @@ export default function App() {
   // Resultado de un traceroute lanzado desde esta sesión: ventana sobre cualquier vista
   const [traceOutcome, setTraceOutcome] = useState<TracerouteOutcome | null>(null);
   useEffect(() => onTracerouteFinished(setTraceOutcome), []);
+  const [, setM3dOp] = useUrlNumber("m3d.op");
+  const [, setM3dTrace] = useUrlNumber("m3d.trace");
   const traceGateway = (gateways.data ?? []).find((g) => g.gateway_id === traceOutcome?.gatewayId) ?? null;
   const traceLookup = useCallback(
     (id: string): TraceNodeInfo | null => {
@@ -545,7 +551,7 @@ export default function App() {
   const activeAlertCount = alertCounts.data?.active ?? 0;
   const hasCritAlert = (alertCounts.data?.critical_active ?? 0) > 0;
   const activeOpsCount = operationCounts.data?.active ?? 0;
-  const railItems = VIEWS.filter((v) => {
+  const railItems = RAIL_VIEWS.filter((v) => {
     if (v.id === "settings") return !authState.protectedMode || authState.isAdmin || authState.isAuthenticated;
     return true;
   }).map((v) => ({
@@ -679,7 +685,7 @@ export default function App() {
 
       {/* Cuerpo: riel de navegación + workspace activo, todo a sangre */}
       <div className="app-body" style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        <NavRail items={railItems} active={view} onNavigate={(v) => setView(resolveView(v))} />
+        <NavRail items={railItems} active={railActive(view)} onNavigate={(v) => setView(resolveView(v))} />
 
         <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
           {view === "ops" && (
@@ -764,6 +770,32 @@ export default function App() {
 
           {view === "stats" && <StatsView onOpenNode={setSelected} />}
 
+          {view === "tools" && <ToolsHub onGoTo={(v) => setView(v)} />}
+
+          {view === "traces" && (
+            <ToolFrame title="Historial de trazas" onBack={() => setView("tools")}>
+              <TracesView
+                summaries={summaries}
+                gateways={gateways.data ?? []}
+                canOperate={authState.canOperate}
+                onOpenNode={setSelected}
+                onView3D={(id) => {
+                  setM3dTrace(id);
+                  setM3dOp(null);
+                  setView("map3d");
+                }}
+              />
+            </ToolFrame>
+          )}
+
+          {view === "map3d" && (
+            <ToolFrame title="Mapa 3D" onBack={() => setView("tools")}>
+              <Suspense fallback={<div className="empty">Cargando mapa 3D…</div>}>
+                <Map3DView summaries={summaries} onOpenNode={setSelected} />
+              </Suspense>
+            </ToolFrame>
+          )}
+
           {view === "alerts" && <AlertsView onOpenNode={setSelected} />}
 
           {view === "jobs" && (
@@ -782,15 +814,17 @@ export default function App() {
           )}
 
           {view === "config" && (
-            <div className="ws">
-              <div className="ws-scroll legacy-chrome" style={{ padding: "0.9rem" }}>
-                {authState.canOperate ? (
-                  <ConfigEditor summaries={summaries} />
-                ) : (
-                  <LockedNotice what="La administración remota" />
-                )}
+            <ToolFrame title="Administración remota" onBack={() => setView("tools")}>
+              <div className="ws">
+                <div className="ws-scroll legacy-chrome" style={{ padding: "0.9rem" }}>
+                  {authState.canOperate ? (
+                    <ConfigEditor summaries={summaries} />
+                  ) : (
+                    <LockedNotice what="La administración remota" />
+                  )}
+                </div>
               </div>
-            </div>
+            </ToolFrame>
           )}
 
           {view === "profiles" && (
@@ -881,6 +915,11 @@ export default function App() {
           originNodeId={traceGateway?.local_node_id ?? null}
           originGatewayName={traceGateway?.name ?? traceOutcome.gatewayId}
           onOpenNode={setSelected}
+          onView3D={(op) => {
+            setM3dTrace(null);
+            setM3dOp(op);
+            setView("map3d");
+          }}
           onClose={() => setTraceOutcome(null)}
         />
       )}

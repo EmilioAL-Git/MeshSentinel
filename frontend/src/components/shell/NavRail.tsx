@@ -12,6 +12,8 @@ export interface RailItem {
   id: string;
   icon: string;
   label: string;
+  /** Etiqueta corta bajo el icono si `label` no cabe en los 52 px del riel. */
+  short?: string;
   badge?: number;
   badgeCrit?: boolean;
 }
@@ -65,7 +67,7 @@ function NavButton({
       <span aria-hidden>
         <RailIcon icon={it.icon} />
       </span>
-      <span className="navlabel">{it.label}</span>
+      <span className="navlabel">{it.short ?? it.label}</span>
     </button>
   );
 }

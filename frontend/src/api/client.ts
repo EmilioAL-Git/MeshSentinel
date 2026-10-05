@@ -1596,3 +1596,48 @@ export interface DigestSendOut {
 }
 export const fetchDigestStatus = () => get<{ last_sent_at: string | null }>("/maintenance/digest");
 export const sendDigestNow = () => send<DigestSendOut>("POST", "/maintenance/digest/send");
+
+/** Traza de la red (traceroute), activa o pasiva — ADR 0031. */
+export interface TraceOut {
+  id: number;
+  gateway_id: string | null;
+  origin_id: string;
+  target_id: string;
+  source: "active" | "passive";
+  kind: "reply" | "request" | "no_response";
+  reached: boolean;
+  /** Saltos INTERMEDIOS origen → destino (vacío = directo). */
+  route: string[];
+  route_back: string[];
+  snr_towards: (number | null)[];
+  snr_back: (number | null)[];
+  operation_id: number | null;
+  received_at: string;
+}
+
+export function fetchTraces(
+  opts: {
+    nodeId?: string;
+    operationId?: number;
+    gatewayId?: string;
+    source?: "active" | "passive";
+    reached?: boolean;
+    sinceHours?: number;
+    limit?: number;
+  } = {},
+): Promise<TraceOut[]> {
+  const params = new URLSearchParams({ limit: String(opts.limit ?? 50) });
+  if (opts.nodeId) params.set("node_id", opts.nodeId);
+  if (opts.operationId != null) params.set("operation_id", String(opts.operationId));
+  if (opts.gatewayId) params.set("gateway_id", opts.gatewayId);
+  if (opts.source) params.set("source", opts.source);
+  if (opts.reached != null) params.set("reached", String(opts.reached));
+  if (opts.sinceHours != null) params.set("since_hours", String(opts.sinceHours));
+  return get<TraceOut[]>(`/traces?${params}`);
+}
+
+export const fetchTrace = (id: number) => get<TraceOut>(`/traces/${id}`);
+
+/** Rescata los traceroutes anteriores al registro de trazas desde el Registro. */
+export const importLegacyTraces = () =>
+  send<{ scanned: number; imported: number; skipped: number }>("POST", "/traces/import-legacy");

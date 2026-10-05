@@ -18,6 +18,8 @@ interface Props {
   originNodeId: string | null;
   originGatewayName: string;
   onOpenNode: (nodeId: string) => void;
+  /** Abre el mapa 3D con la traza de esta operación. */
+  onView3D?: (operationId: number) => void;
   onClose: () => void;
 }
 
@@ -114,7 +116,7 @@ function Path({
   );
 }
 
-export function TracerouteDialog({ outcome, lookup, originNodeId, originGatewayName, onOpenNode, onClose }: Props) {
+export function TracerouteDialog({ outcome, lookup, originNodeId, originGatewayName, onOpenNode, onView3D, onClose }: Props) {
   const { result, nodeId } = outcome;
   const destInfo = lookup(nodeId);
   const destName = destInfo?.longName || destInfo?.shortName || nodeId;
@@ -169,6 +171,11 @@ export function TracerouteDialog({ outcome, lookup, originNodeId, originGatewayN
         </div>
 
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          {onView3D && (
+            <button className="btn" onClick={() => { onView3D(outcome.operationId); onClose(); }}>
+              ◈ Ver en mapa 3D
+            </button>
+          )}
           <button className="btn ghost" onClick={() => { onOpenNode(nodeId); onClose(); }}>Abrir nodo destino</button>
           <button className="btn" onClick={onClose}>Cerrar</button>
         </div>
