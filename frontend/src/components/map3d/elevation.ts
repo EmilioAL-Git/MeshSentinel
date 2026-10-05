@@ -1,5 +1,5 @@
 /**
- * Perfil de elevación entre dos puntos y análisis de línea de visión (LOS).
+ * Perfil topográfico entre dos puntos y análisis de línea de visión (LOS).
  *
  * La elevación se lee de las MISMAS teselas DEM que dibuja el mapa (`DEM`,
  * formato Terrarium) pero decodificándolas aquí, no consultando el terreno del
@@ -140,6 +140,17 @@ export interface LosResult {
   heightB: number;
   /** sin datos de terreno en parte del trayecto */
   gaps: number;
+  /** frecuencia usada (MHz) */
+  freqMHz: number;
+  /** pérdida en espacio libre, dB: 20·log10(d_km) + 20·log10(f_MHz) + 32,44 */
+  fsplDb: number;
+  /** radio de la 1.ª zona de Fresnel en el punto medio del trayecto (m) */
+  fresnelMidM: number;
+}
+
+/** Pérdida de trayecto en espacio libre (FSPL) en dB, con d en metros y f en MHz. */
+export function fspl(distanceM: number, freqMHz: number): number {
+  return 20 * Math.log10(Math.max(distanceM, 1) / 1000) + 20 * Math.log10(freqMHz) + 32.44;
 }
 
 export function analyzeLos(
@@ -177,5 +188,8 @@ export function analyzeLos(
     heightA: hA,
     heightB: hB,
     gaps: samples.length - known.length,
+    freqMHz: opts.freqMHz,
+    fsplDb: fspl(D, opts.freqMHz),
+    fresnelMidM: Math.sqrt((lambda * (D / 2) * (D / 2)) / D),
   };
 }

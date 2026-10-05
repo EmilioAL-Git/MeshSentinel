@@ -26,8 +26,8 @@ const TOOLS: Tool[] = [
   {
     id: "map3d",
     icon: "⛰",
-    title: "Perfil de elevación",
-    text: "Terreno entre dos nodos y línea de visión con curvatura terrestre y zona de Fresnel: ¿hay una montaña de por medio?",
+    title: "Perfil topográfico",
+    text: "Corte del relieve entre dos puntos (nodos, un clic en el mapa o coordenadas): altura del terreno a lo largo del trayecto, línea de visión, curvatura terrestre y zona de Fresnel. Sirve para saber si hay una montaña de por medio.",
     params: { "m3d.tab": "profile" },
   },
   {

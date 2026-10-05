@@ -706,3 +706,33 @@ select.input {
   flex: 1;
   padding: 2px 4px;
 }
+
+.m3d-tilt-toggle {
+  position: absolute;
+  top: 124px;
+  right: 10px;
+  width: 40px;
+  height: 40px;
+  z-index: 2;
+}
+@media (max-width: 820px), (max-height: 500px) and (pointer: coarse) {
+  /* Fondo y ajustes más compactos para no tapar el mapa */
+  .m3d-base {
+    right: 60px;
+  }
+  .m3d-base .input,
+  .m3d-base .seg button,
+  .m3d-check {
+    font-size: 13px !important;
+  }
+  .m3d-tilt {
+    top: 170px;
+    z-index: 3;
+  }
+}
+@media (max-width: 820px), (max-height: 500px) and (pointer: coarse) {
+  /* El gráfico del perfil ocupa menos del mapa en el teléfono */
+  .m3d-controls svg {
+    height: 130px !important;
+  }
+}

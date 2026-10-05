@@ -78,7 +78,7 @@ traceroutes por nodo, y una traza sin respuesta es un resultado, no un error
 ## 3. Mapa 3D general: siguientes herramientas (anotado 2026-10-05)
 
 El Mapa 3D ya es un mapa general (nodos + búsqueda → trazas del nodo) con
-Perfil de elevación/LOS entre dos nodos. Ideas pendientes, sin implementar:
+Perfil topográfico (línea de visión) entre dos puntos. Ideas pendientes, sin implementar:
 
 1. **Viewshed de un nodo**: zona visible desde un nodo con su mástil, sobre el DEM
    (también para un punto planeado: dónde colocar un nodo nuevo).

@@ -9,7 +9,7 @@ const PAD = { l: 44, r: 10, t: 10, b: 22 };
 const fmtKm = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(m >= 10_000 ? 0 : 1)} km` : `${Math.round(m)} m`);
 
 /**
- * Perfil de terreno (área), línea de visión (recta entre antenas) y banda del
+ * Perfil topográfico: terreno (área), línea de visión (recta entre antenas) y banda del
  * 60 % de la 1.ª zona de Fresnel. Al pasar el ratón se informa de la posición
  * (`onProbe` permite marcarla en el mapa).
  */

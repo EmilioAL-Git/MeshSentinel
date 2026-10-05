@@ -8,6 +8,7 @@ import type { ExpressionSpecification, GeoJSONSource, Map as MlMap } from "mapli
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { fetchTrace, fetchTraces, type NodeSummaryOut, type TraceOut } from "../../api/client";
+import { useActiveGroup, useGroupNodeIds } from "../../context/GroupContext";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { useUrlNumber, useUrlString } from "../../hooks/useUrlState";
@@ -46,7 +47,7 @@ import { t } from "../../tokens";
  *  - Nodo y trazas: buscas un nodo y SOLO entonces aparecen sus traceroutes;
  *    la traza elegida se dibuja con pilares, arcos por SNR y un pulso que
  *    recorre la ida y la vuelta (`?m3d.node=` / `?m3d.trace=` / `?m3d.op=`).
- *  - Perfil de elevación: terreno y línea de visión entre dos nodos
+ *  - Perfil topográfico: terreno y línea de visión entre dos nodos
  *    (`?m3d.tab=profile&m3d.a=…&m3d.b=…`).
  */
 
@@ -280,6 +281,14 @@ export function Map3DView({
   const [tabParam, setTabParam] = useUrlString("m3d.tab");
   const [aParam, setAParam] = useUrlString("m3d.a");
   const [bParam, setBParam] = useUrlString("m3d.b");
+  // El grupo activo acota lo que se ofrece (puntos y buscador); las trazas y los
+  // nodos de una selección siguen saliendo aunque estén fuera del grupo
+  const { activeGroupId } = useActiveGroup();
+  const groupNodeIds = useGroupNodeIds(summaries);
+  const scoped = useMemo(
+    () => (groupNodeIds ? summaries.filter((s) => groupNodeIds.has(s.node.node_id)) : summaries),
+    [summaries, groupNodeIds],
+  );
   const tab: "node" | "profile" = tabParam === "profile" ? "profile" : "node";
 
   // ── Datos ────────────────────────────────────────────────────────────
@@ -398,6 +407,11 @@ export function Map3DView({
   const pickRef = useRef<(id: string) => void>(() => {});
   const pointRef = useRef<(key: string) => void>(() => {});
   const [cam, setCam] = useState({ pitch: 60, bearing: -20 });
+  // Móvil: el panel lateral se pliega para dejar sitio al mapa, y los ajustes de
+  // fondo y de cámara quedan tras un botón
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [optsOpen, setOptsOpen] = useState(false);
+  const [tiltOpen, setTiltOpen] = useState(false);
   const [armed, setArmed] = useState<"A" | "B" | null>(null);
   const armedRef = useRef(armed);
   armedRef.current = armed;
@@ -539,7 +553,7 @@ export function Map3DView({
         },
       });
       map.on("click", (e) => {
-        // Modo «pinchar en el mapa» del perfil: un clic en vacío fija el punto
+        // Modo «pinchar en el mapa» del perfil topográfico: un clic en vacío fija el punto
         if (!armedRef.current) return;
         if (map.queryRenderedFeatures(e.point, { layers: ["nodes-dots"] }).length) return; // lo atiende el nodo
         pointRef.current(pointKey(e.lngLat.lat, e.lngLat.lng));
@@ -1005,7 +1019,7 @@ export function Map3DView({
 
   const nodeFeatures = useMemo(() => {
     const feats: GeoJSON.Feature[] = [];
-    for (const s of summaries) {
+    for (const s of scoped) {
       if (!s.last_position || s.node.is_ignored) continue;
       feats.push({
         type: "Feature",
@@ -1018,7 +1032,7 @@ export function Map3DView({
       });
     }
     return feats;
-  }, [summaries]);
+  }, [scoped]);
   const nodesSig = useMemo(
     () => nodeFeatures.map((f) => `${f.properties!.id}${f.properties!.online ? 1 : 0}${(f.geometry as GeoJSON.Point).coordinates}`).join("|"),
     [nodeFeatures],
@@ -1037,7 +1051,7 @@ export function Map3DView({
     map.setLayoutProperty("nodes-names", "visibility", trace ? "none" : "visible");
   }, [trace, ready]);
 
-  // Anillos de selección: nodo buscado (acento) o extremos A/B del perfil
+  // Anillos de selección: nodo buscado (acento) o extremos A/B del perfil topográfico
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
@@ -1051,6 +1065,27 @@ export function Map3DView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, nodeParam, aParam, bParam, ready, nodesSig]);
 
+  // Encuadre inicial: el mapa abre ocupando justo los nodos que se ofrecen (los
+  // del grupo activo, o toda la red). Solo si no se llega con una selección
+  // (traza, nodo o perfil por enlace): ahí manda la escena. Se repite al cambiar de grupo.
+  const fittedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || nodeFeatures.length === 0) return;
+    const key = String(activeGroupId ?? "all");
+    if (fittedFor.current === key) return;
+    fittedFor.current = key;
+    if (nodeParam || traceParam != null || opParam != null || aParam || bParam) return;
+    const bounds = new maplibregl.LngLatBounds();
+    for (const f of nodeFeatures) bounds.extend((f.geometry as GeoJSON.Point).coordinates as LngLat);
+    map.fitBounds(bounds, {
+      padding: { top: 60, bottom: 60, left: isMobile ? 30 : 60, right: isMobile ? 30 : 60 },
+      maxZoom: 12,
+      duration: 900,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, nodesSig, activeGroupId]);
+
   // Al buscar un nodo la cámara va a él (si luego llegan trazas, la escena reencuadra)
   useEffect(() => {
     const map = mapRef.current;
@@ -1060,7 +1095,7 @@ export function Map3DView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeParam, ready, tab]);
 
-  // ── Perfil de elevación ──────────────────────────────────────────────
+  // ── Perfil topográfico ──────────────────────────────────────────────
   const posA = posOf(aParam);
   const posB = posOf(bParam);
   const posKey = `${posA?.join(",") ?? ""}|${posB?.join(",") ?? ""}`;
@@ -1143,6 +1178,16 @@ export function Map3DView({
     };
   }, [ready]);
 
+  // Al plegar/desplegar el panel (móvil) o girar el teléfono cambia el tamaño del
+  // contenedor: MapLibre solo reacciona al redimensionado de ventana
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !ready) return;
+    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [ready]);
+
   // El relleno inferior del encuadre del perfil no debe quedarse al salir de él
   useEffect(() => {
     const map = mapRef.current;
@@ -1161,20 +1206,34 @@ export function Map3DView({
     <div className="ws" style={{ flexDirection: isMobile ? "column" : "row" }}>
       <aside
         className="panel"
-        style={isMobile ? { maxHeight: "34%", flexShrink: 0 } : { width: 310, flexShrink: 0 }}
+        style={isMobile ? { maxHeight: panelOpen ? "42%" : undefined, flexShrink: 0 } : { width: 310, flexShrink: 0 }}
       >
-        <div className="panel-head">
+        <div className="panel-head" style={{ flexWrap: "wrap", rowGap: 6 }}>
           <span className="panel-title">Mapa 3D</span>
           <span className="seg" role="group" aria-label="Herramienta">
             <button className={tab === "node" ? "on" : undefined} onClick={() => setTab("node")}>
               Nodo y trazas
             </button>
             <button className={tab === "profile" ? "on" : undefined} onClick={() => setTab("profile")}>
-              Perfil
+              Perfil topográfico
             </button>
           </span>
+          {isMobile && (
+            <button
+              className="btn"
+              style={{ marginLeft: "auto" }}
+              onClick={() => setPanelOpen((o) => !o)}
+              aria-expanded={panelOpen}
+              title={panelOpen ? "Ocultar panel para ver el mapa" : "Mostrar panel"}
+            >
+              {panelOpen ? "▴" : "▾"}
+            </button>
+          )}
         </div>
-        <div className="ws-scroll" style={{ padding: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div
+          className="ws-scroll"
+          style={{ padding: 10, display: isMobile && !panelOpen ? "none" : "flex", flexDirection: "column", gap: 10 }}
+        >
           {tab === "node" && (
             <>
               {nodeParam ? (
@@ -1193,7 +1252,7 @@ export function Map3DView({
                   </button>
                 </div>
               ) : (
-                <NodeSearch summaries={summaries} onPick={selectNode} />
+                <NodeSearch summaries={scoped} onPick={selectNode} />
               )}
 
               {nodeParam && (
@@ -1323,6 +1382,9 @@ export function Map3DView({
 
           {tab === "profile" && (
             <>
+              <div style={{ fontSize: 11.5, color: t.textDim, lineHeight: 1.4 }}>
+                Relieve entre dos puntos: ¿hay línea de visión?
+              </div>
               {(
                 [
                   ["A", "Desde", aParam, setAParam, bParam],
@@ -1345,7 +1407,7 @@ export function Map3DView({
                     </div>
                   ) : (
                     <NodeSearch
-                      summaries={summaries}
+                      summaries={scoped}
                       exclude={other ? [other] : undefined}
                       placeholder="Buscar nodo o pulsarlo en el mapa…"
                       onPick={(n) => set(n)}
@@ -1403,7 +1465,7 @@ export function Map3DView({
                     <label>
                       Banda
                       <select className="input" value={freqMHz} style={{ width: "100%" }} onChange={(e) => setFreqMHz(Number(e.target.value))}>
-                        {[433, 868, 915, 2400].map((f) => (
+                        {[170, 433, 868, 915, 2400].map((f) => (
                           <option key={f} value={f}>
                             {f} MHz
                           </option>
@@ -1426,10 +1488,15 @@ export function Map3DView({
                           : "● Obstruida por el terreno"}
                       </div>
                       <div>Distancia: {los.distanceM >= 1000 ? `${(los.distanceM / 1000).toFixed(2)} km` : `${Math.round(los.distanceM)} m`}</div>
+                      <div title="Pérdida en espacio libre: 20·log10(d km) + 20·log10(f MHz) + 32,44. Es el mínimo teórico sin obstáculos; el terreno, la vegetación y los edificios añaden más pérdida.">
+                        <strong>FSPL: {los.fsplDb.toFixed(1)} dB</strong>{" "}
+                        <span style={{ color: t.textDim }}>a {los.freqMHz} MHz (espacio libre)</span>
+                      </div>
                       <div>
                         Peor punto: {Math.round(los.worst.clearance)} m de holgura a{" "}
                         {(los.worst.d / 1000).toFixed(2)} km
                       </div>
+                      <div>1.ª zona de Fresnel en el centro: {los.fresnelMidM.toFixed(1)} m de radio</div>
                       <div>
                         Antenas a {Math.round(los.heightA)} m / {Math.round(los.heightB)} m s. n. m.
                       </div>
@@ -1458,6 +1525,13 @@ export function Map3DView({
               </button>
             ))}
           </span>
+          {isMobile && (
+            <button className="btn m3d-chip" onClick={() => setOptsOpen((o) => !o)} aria-expanded={optsOpen} title="Más ajustes del mapa">
+              {optsOpen ? "✕" : "⋯"}
+            </button>
+          )}
+          {(!isMobile || optsOpen) && (
+            <>
           <select
             className="input"
             value={exag}
@@ -1484,8 +1558,20 @@ export function Map3DView({
           <label className="m3d-check m3d-chip" title="Carreteras, límites y sus nombres sobre el fondo">
             <input type="checkbox" checked={refs} disabled={offline} onChange={(e) => setRefs(e.target.checked)} /> Referencias
           </label>
+            </>
+          )}
         </div>
-        <div className="m3d-tilt" role="group" aria-label="Vista de la cámara">
+        {isMobile && !tiltOpen && (
+          <button className="btn m3d-tilt-toggle" onClick={() => setTiltOpen(true)} title="Inclinación y giro">
+            ◭
+          </button>
+        )}
+        <div className="m3d-tilt" role="group" aria-label="Vista de la cámara" style={isMobile && !tiltOpen ? { display: "none" } : undefined}>
+          {isMobile && (
+            <button className="btn" onClick={() => setTiltOpen(false)} aria-label="Cerrar vista de cámara">
+              ✕ Cerrar
+            </button>
+          )}
           <label title="Inclinación de la cámara (0° = desde arriba)">
             <span>Inclinación</span>
             <input
