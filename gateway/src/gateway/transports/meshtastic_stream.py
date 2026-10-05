@@ -407,8 +407,20 @@ class MeshtasticStreamTransport(Transport):
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
 
         def on_response(packet: dict[str, Any]) -> None:
+            # La librería entrega también paquetes de ROUTING: un ACK
+            # (errorReason NONE) solo confirma entrega y el dato puede venir
+            # después; un NAK (p. ej. NO_RESPONSE) significa que el nodo no
+            # tiene ese dato — no es una respuesta.
+            decoded = packet.get("decoded") or {}
+            if decoded.get("portnum") == "ROUTING_APP":
+                reason = (decoded.get("routing") or {}).get("errorReason", "NONE")
+                if reason == "NONE":
+                    return
+                result = {"kind": kind, "reached": False, "error_reason": str(reason), "nak": True}
+            else:
+                result = {"kind": kind, "reached": True}
             if not future.done():
-                loop.call_soon_threadsafe(future.set_result, packet)
+                loop.call_soon_threadsafe(future.set_result, result)
 
         def send() -> None:
             payload, portnum = build_request(kind, self._iface)
@@ -422,10 +434,9 @@ class MeshtasticStreamTransport(Transport):
 
         await asyncio.to_thread(send)
         try:
-            await asyncio.wait_for(future, timeout=wait)
+            return await asyncio.wait_for(future, timeout=wait)
         except (TimeoutError, asyncio.TimeoutError):
             return {"kind": kind, "reached": False, "error_reason": "NO_RESPONSE", "waited_seconds": wait}
-        return {"kind": kind, "reached": True}
 
     async def _execute_traceroute(
         self, node_id: str, params: dict[str, Any], operation: dict[str, Any]
