@@ -396,9 +396,9 @@ export function ActivityConsole({
         <button
           className="btn ghost"
           onClick={() => downloadText(`registro-${stamp()}.csv`, "text/csv", activityCsv(filtered), true)}
-          title="Exporta a CSV las entradas cargadas que cumplen los filtros actuales"
+          title={`Guarda en un CSV (Excel) las ${filtered.length} entradas que ves ahora, con los filtros actuales`}
         >
-          ⤓ CSV ({filtered.length})
+          ⤓ CSV
         </button>
         <button
           className={`btn ghost${groupBursts ? " on" : ""}`}

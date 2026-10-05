@@ -107,6 +107,7 @@ function RankingModal({
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
           <button
             className="btn ghost"
+            title={`Guarda en un CSV (Excel) el ranking completo: ${rows.length} nodos`}
             onClick={() =>
               downloadText(
                 `ranking-${record.key}-${stamp()}.csv`,
@@ -119,7 +120,7 @@ function RankingModal({
               )
             }
           >
-            ⤓ CSV ({rows.length})
+            ⤓ CSV
           </button>
         </div>
       )}

@@ -1,3 +1,4 @@
+import { ExportMenu } from "../shell/ExportMenu";
 import { downloadText, fleetCsv, fleetGeoJson, stamp } from "../../utils/exportData";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -361,21 +362,21 @@ export function FleetView({
         )}
         </MobileFilters>
         <span style={{ marginLeft: "auto" }} />
-        <select
-          className="input"
-          value=""
-          title="Exporta la lista filtrada que ves ahora"
-          onChange={(e) => {
-            const kind = e.target.value;
-            if (kind === "csv") downloadText(`flota-${stamp()}.csv`, "text/csv", fleetCsv(summaries), true);
-            if (kind === "geojson") downloadText(`flota-${stamp()}.geojson`, "application/geo+json", fleetGeoJson(summaries));
-            e.target.value = "";
-          }}
-        >
-          <option value="">⤓ exportar ({summaries.length})</option>
-          <option value="csv">CSV</option>
-          <option value="geojson">GeoJSON (con posición)</option>
-        </select>
+        <ExportMenu
+          title={`Guarda en un fichero los ${summaries.length} nodos que ves ahora (respeta filtros y grupo)`}
+          items={[
+            {
+              label: "CSV",
+              hint: "Tabla para Excel u hojas de cálculo (nombre, batería, señal, posición…)",
+              onSelect: () => downloadText(`flota-${stamp()}.csv`, "text/csv", fleetCsv(summaries), true),
+            },
+            {
+              label: "GeoJSON",
+              hint: "Puntos para QGIS, geojson.io u otros mapas (solo nodos con posición)",
+              onSelect: () => downloadText(`flota-${stamp()}.geojson`, "application/geo+json", fleetGeoJson(summaries)),
+            },
+          ]}
+        />
         <ColumnPicker visible={visibleColumns} onChange={setVisibleColumns} />
       </div>
 
