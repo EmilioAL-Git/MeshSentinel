@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     retention_telemetry_days: int = 90
     retention_positions_days: int = 90
     retention_neighbors_days: int = 30
+    retention_traces_days: int = 180
     retention_chat_days: int = 180
     retention_alerts_days: int = 180
     retention_admin_days: int = 180

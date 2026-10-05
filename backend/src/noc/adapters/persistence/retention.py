@@ -31,6 +31,8 @@ from noc.adapters.persistence.models import (
     NodeModel,
     PositionModel,
     TelemetryModel,
+    TraceHopModel,
+    TraceModel,
     UserFavoriteModel,
 )
 from noc.adapters.persistence.repositories import SqlNodeRepository
@@ -54,6 +56,9 @@ TARGETS: tuple[RetentionTarget, ...] = (
     RetentionTarget("telemetry", "Telemetría", "retention_telemetry_days", ("node_telemetry",)),
     RetentionTarget("positions", "Posiciones", "retention_positions_days", ("node_positions",)),
     RetentionTarget("neighbors", "Vecinos", "retention_neighbors_days", ("node_neighbors",)),
+    RetentionTarget(
+        "traces", "Trazas de la red", "retention_traces_days", ("node_traces", "node_trace_hops")
+    ),
     RetentionTarget("chat", "Mensajes de chat", "retention_chat_days", ("chat_messages",)),
     RetentionTarget("alerts", "Alertas resueltas", "retention_alerts_days", ("alerts",)),
     RetentionTarget(
@@ -74,6 +79,8 @@ TABLE_LABELS: dict[str, str] = {
     "node_positions": "Posiciones",
     "node_neighbors": "Vecinos (NeighborInfo)",
     "node_gateway_links": "Enlaces nodo↔pasarela",
+    "node_traces": "Trazas de la red (traceroute)",
+    "node_trace_hops": "Saltos de trazas",
     "chat_messages": "Mensajes de chat",
     "alerts": "Alertas",
     "admin_operations": "Operaciones de administración",
@@ -91,6 +98,8 @@ OLDEST_COLUMN: dict[str, str] = {
     "node_telemetry": "received_at",
     "node_positions": "received_at",
     "node_neighbors": "received_at",
+    "node_traces": "received_at",
+    "node_trace_hops": "received_at",
     "chat_messages": "received_at",
     "alerts": "fired_at",
     "admin_operations": "created_at",
@@ -124,6 +133,27 @@ async def _delete_in_chunks(
             await session.commit()
         total += len(ids)
         await asyncio.sleep(0)  # cede el turno al resto de tareas
+
+
+async def _prune_traces(session_factory: async_sessionmaker[AsyncSession], cutoff: datetime) -> int:
+    """Trazas viejas junto con sus saltos (FK node_trace_hops.trace_id)."""
+    total = 0
+    while True:
+        async with session_factory() as session:
+            ids = list(
+                (
+                    await session.scalars(
+                        select(TraceModel.id).where(TraceModel.received_at < cutoff).limit(CHUNK)
+                    )
+                ).all()
+            )
+            if not ids:
+                return total
+            await session.execute(delete(TraceHopModel).where(TraceHopModel.trace_id.in_(ids)))
+            await session.execute(delete(TraceModel).where(TraceModel.id.in_(ids)))
+            await session.commit()
+        total += len(ids)
+        await asyncio.sleep(0)
 
 
 async def _prune_nexus(session_factory: async_sessionmaker[AsyncSession], cutoff: datetime) -> int:
@@ -220,6 +250,7 @@ async def prune_all(
     await run("telemetry", "retention_telemetry_days", simple(TelemetryModel, TelemetryModel.received_at))
     await run("positions", "retention_positions_days", simple(PositionModel, PositionModel.received_at))
     await run("neighbors", "retention_neighbors_days", simple(NeighborModel, NeighborModel.received_at))
+    await run("traces", "retention_traces_days", lambda c: _prune_traces(session_factory, c))
     await run("chat", "retention_chat_days", simple(ChatMessageModel, ChatMessageModel.received_at))
     await run(
         "alerts",

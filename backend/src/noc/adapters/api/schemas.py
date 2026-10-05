@@ -254,3 +254,38 @@ class GatewayOut(BaseModel):
         return cls(**{f: getattr(g, f) for f in cls.model_fields})
 
 
+
+
+class TraceOut(BaseModel):
+    """Una traza de la red (traceroute), activa o pasiva — ADR 0031."""
+
+    id: int
+    gateway_id: str | None
+    origin_id: str
+    target_id: str
+    source: str
+    kind: str
+    reached: bool
+    route: list[str]
+    route_back: list[str]
+    snr_towards: list[float | None]
+    snr_back: list[float | None]
+    operation_id: int | None
+    received_at: datetime
+
+
+class TraceEdgeOut(BaseModel):
+    """Arista dirigida agregada del grafo acumulado de trazas."""
+
+    src_id: str
+    dst_id: str
+    observations: int
+    active_observations: int
+    avg_snr: float | None
+    min_snr: float | None
+    max_snr: float | None
+    last_snr: float | None
+    first_seen: datetime
+    last_seen: datetime
+    # Vigente según el umbral de offline (misma regla que NeighborOut.active)
+    active: bool = False

@@ -35,6 +35,9 @@ en el Inspector (sección de pasarelas por nodo) para marcar la preferida.
 
 ## 2. Traceroute activo como herramienta de DIBUJADO de la red real
 
+> **Actualización 2026-10-05**: puntos 1–2 (persistir trazas + grafo acumulado
+> por API) implementados, ADR 0031. Pendientes: 3 (dibujado), 4 (barrido), 5, 6.
+
 **Decisión del usuario (2026-10-03): implementarlo más adelante, NO ahora.**
 Motivo: el traceroute activo (`traceroute.run`, ya operativo y probado con
 hardware real: X1 → T1000 directo, SNR 14,5 dB ida / 16 dB vuelta) es la única

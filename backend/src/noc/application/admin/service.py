@@ -17,10 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
+from noc.adapters.persistence.repositories import SqlGatewayRepository
+from noc.adapters.persistence.trace_repository import SqlTraceRepository
 from noc.application.activity import activity
 from noc.application.admin.registry import OPERATIONS
 from noc.application.dashboard import ensure_utc
 from noc.application.envelopes import make_command_envelope
+from noc.application.traces import trace_from_operation
 from noc.config import Settings
 from noc.domain.admin.entities import AdminOperation
 
@@ -174,6 +177,22 @@ class AdminOperationService:
                         # El resultado es pequeño y el operador quiere verlo al
                         # instante (toast); el resto de tipos no lo necesita
                         extra["traceroute"] = result
+                        # Alimenta el grafo de la red real (ADR 0031); un
+                        # fallo aquí nunca debe tumbar el cierre de la op
+                        try:
+                            gw = await SqlGatewayRepository(session).get(op.gateway_id)
+                            trace = trace_from_operation(
+                                result,
+                                operation_id=op_id,
+                                gateway_id=op.gateway_id,
+                                local_node_id=gw.local_node_id if gw else None,
+                                target_id=op.target_node_id,
+                                finished_at=now,
+                            )
+                            if trace is not None:
+                                await SqlTraceRepository(session).record(trace)
+                        except Exception:
+                            logger.exception("traces.record_failed op=%s", op_id)
                     await activity.operation(op, "finished", final_status=status, verify=verify, **extra)
                     await self._notify_batch(session, op)
             else:

@@ -20,9 +20,11 @@ from noc.adapters.persistence.repositories import (
     SqlPositionRepository,
     SqlTelemetryRepository,
 )
+from noc.adapters.persistence.trace_repository import SqlTraceRepository
 from noc.application import activity_events
 from noc.application.activity import activity
 from noc.application.dashboard import is_stale
+from noc.application.traces import trace_from_packet
 from noc.application.gateway_link_selection import GatewayLinkCandidate, select_primary_link
 from noc.domain.chat.entities import ChatMessage
 from noc.domain.nodes.entities import (
@@ -400,6 +402,17 @@ class IngestService:
         node_repo = SqlNodeRepository(session)
         node_id = p["node_id"]
         await node_repo.touch_last_seen(node_id, gateway_id, ts)
+        # La traza se persiste ANTES de narrar (mismo orden que vecinos/posición):
+        # alimenta el grafo de la red real (ADR 0031)
+        gateway = await SqlGatewayRepository(session).get(gateway_id) if gateway_id else None
+        trace = trace_from_packet(
+            p,
+            gateway_id=gateway_id,
+            local_node_id=gateway.local_node_id if gateway else None,
+            received_at=ts,
+        )
+        if trace is not None:
+            await SqlTraceRepository(session).record(trace)
         label = _node_label(await node_repo.get(node_id), node_id)
         route_labels = [
             _node_label(await node_repo.get(hop_id), hop_id) for hop_id in p.get("route") or []

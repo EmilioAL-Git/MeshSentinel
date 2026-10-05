@@ -244,7 +244,45 @@ def test_traceroute_direct_with_empty_route_is_emitted():
     event_type, payload = decoded
     assert event_type == "traceroute.completed"
     assert payload["route"] == []
-    assert payload["snr_towards"] == [54]
+    # El firmware manda cuartos de dB: el decoder entrega dB
+    assert payload["snr_towards"] == [13.5]
+
+
+def test_traceroute_reply_carries_full_trace():
+    """La respuesta trae ida Y vuelta, y el destinatario (=quien la lanzó)."""
+    packet = {
+        **BASE_PACKET,
+        "to": 0xA4E1F200,
+        "decoded": {
+            "portnum": "TRACEROUTE_APP",
+            "requestId": 1234,
+            "traceroute": {
+                "route": [0xA4E1F2B1],
+                "snrTowards": [20, -8],
+                "routeBack": [0xA4E1F2B2],
+                "snrBack": [12, -128],
+            },
+        },
+    }
+    decoded = decode_packet(packet)
+    assert_valid(decoded)
+    _, payload = decoded
+    assert payload["is_reply"] is True
+    assert payload["to_node_id"] == "!a4e1f200"
+    assert payload["route_back"] == ["!a4e1f2b2"]
+    assert payload["snr_towards"] == [5.0, -2.0]
+    assert payload["snr_back"] == [3.0, None]
+
+
+def test_traceroute_request_and_broadcast_destination():
+    packet = {
+        **BASE_PACKET,
+        "to": 0xFFFFFFFF,
+        "decoded": {"portnum": "TRACEROUTE_APP", "traceroute": {"snrTowards": [4]}},
+    }
+    _, payload = decode_packet(packet)
+    assert payload["is_reply"] is False
+    assert payload["to_node_id"] is None
 
 
 def test_traceroute_without_payload_dict_is_dropped():

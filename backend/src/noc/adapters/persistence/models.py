@@ -608,3 +608,58 @@ class NexusOperationResponseModel(Base):
     response_text: Mapped[str] = mapped_column(Text)
     response_kind: Mapped[str] = mapped_column(String(16))
     response_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class TraceModel(Base):
+    """Traza de la red (traceroute), append-only — ADR 0031.
+
+    Una fila por traza física observada. Sin FK a `nodes`: los saltos
+    intermedios pueden ser nodos que el registro aún no conoce.
+    """
+
+    __tablename__ = "node_traces"
+    __table_args__ = (
+        Index("ix_node_traces_received", "received_at"),
+        Index("ix_node_traces_target_received", "target_id", "received_at"),
+        Index("ix_node_traces_origin_received", "origin_id", "received_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    gateway_id: Mapped[str | None] = mapped_column(String(64))
+    origin_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    source: Mapped[str] = mapped_column(String(8), nullable=False)  # active|passive
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # reply|request|no_response
+    reached: Mapped[bool] = mapped_column(Boolean, default=True)
+    route: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    route_back: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    snr_towards: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    snr_back: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    operation_id: Mapped[int | None] = mapped_column(Integer)
+    from_packet: Mapped[bool] = mapped_column(Boolean, default=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TraceHopModel(Base):
+    """Un salto dirigido de una traza (src -> dst, SNR medido en dst).
+
+    Desnormalización deliberada: el grafo se agrega con GROUP BY puro sobre
+    esta tabla, sin parsear JSON (válido igual en PostgreSQL y SQLite).
+    `received_at` se copia de la traza para filtrar por ventana sin JOIN.
+    """
+
+    __tablename__ = "node_trace_hops"
+    __table_args__ = (
+        Index("ix_node_trace_hops_pair", "src_id", "dst_id", "received_at"),
+        Index("ix_node_trace_hops_trace", "trace_id"),
+        Index("ix_node_trace_hops_received", "received_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trace_id: Mapped[int] = mapped_column(ForeignKey("node_traces.id"), nullable=False)
+    src_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    dst_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    snr: Mapped[float | None] = mapped_column(Float)
+    direction: Mapped[str] = mapped_column(String(8), nullable=False)  # towards|back
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

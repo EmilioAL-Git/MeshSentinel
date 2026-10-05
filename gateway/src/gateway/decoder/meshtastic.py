@@ -203,17 +203,28 @@ def decode_packet(packet: dict[str, Any]) -> DecodedEvent | None:
         # cerca) llega con route vacío y snr_towards con una entrada —
         # verificado en producción. Antes se descartaba como "sin resolver"
         # y los traceroutes directos eran invisibles en el Registro.
-        route_nums = trace.get("route") or []
-        route = [_node_id_from_num(n) for n in route_nums]
-        if any(r is None for r in route):
+        route = [_node_id_from_num(n) for n in (trace.get("route") or [])]
+        route_back = [_node_id_from_num(n) for n in (trace.get("routeBack") or [])]
+        if any(r is None for r in route) or any(r is None for r in route_back):
             return None
         meta = _radio_metadata(packet)
+        # Destinatario del paquete: junto con `node_id` (emisor) permite al
+        # backend reconstruir la traza completa (quién la lanzó y hacia quién)
+        # a partir del propio paquete, sin depender de que sea la pasarela
+        # quien la haya iniciado. 0xffffffff = difusión, no es un nodo.
+        to_num = packet.get("to")
+        to_node_id = None if to_num == 0xFFFFFFFF else _node_id_from_num(to_num)
         return (
             "traceroute.completed",
             {
                 "node_id": node_id,
+                "to_node_id": to_node_id,
+                # requestId != 0 => RESPUESTA a un traceroute; 0 => la petición
+                "is_reply": bool(decoded.get("requestId")),
                 "route": route,
-                "snr_towards": trace.get("snrTowards"),
+                "snr_towards": _snr_db(trace.get("snrTowards")),
+                "route_back": route_back,
+                "snr_back": _snr_db(trace.get("snrBack")),
                 "snr": meta["snr"],
                 "rssi": meta["rssi"],
             },

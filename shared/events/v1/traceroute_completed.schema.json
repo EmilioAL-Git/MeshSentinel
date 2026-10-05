@@ -11,7 +11,27 @@
       "type": "array",
       "items": { "type": "string", "pattern": "^![0-9a-f]{8}$" }
     },
+    "to_node_id": {
+      "description": "Destinatario del paquete (null si difusión). Con node_id (emisor) e is_reply permite reconstruir origen y destino de la traza.",
+      "type": ["string", "null"],
+      "pattern": "^![0-9a-f]{8}$"
+    },
+    "is_reply": {
+      "description": "true = respuesta a un traceroute (el emisor node_id es el DESTINO de la traza); false = la petición (node_id es el ORIGEN).",
+      "type": "boolean"
+    },
     "snr_towards": {
+      "description": "SNR en dB (null = desconocido) de cada salto en el sentido origen->destino; len = len(route)+1.",
+      "type": "array",
+      "items": { "type": ["number", "null"] }
+    },
+    "route_back": {
+      "description": "Saltos intermedios del camino de vuelta destino->origen (solo en respuestas).",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^![0-9a-f]{8}$" }
+    },
+    "snr_back": {
+      "description": "SNR en dB de cada salto de vuelta; len = len(route_back)+1.",
       "type": "array",
       "items": { "type": ["number", "null"] }
     },

@@ -168,6 +168,12 @@ SETTINGS_REGISTRY: list[SettingSpec] = [
         choices=RETENTION_CHOICES,
     ),
     SettingSpec(
+        "retention_traces_days", "retention", "Trazas de la red (traceroute)",
+        "int", "d", 0,
+        "Trazas y saltos que dibujan la red real. Son pocas y muy valiosas: conviene conservarlas mucho. 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
         "retention_chat_days", "retention", "Mensajes de chat",
         "int", "d", 0,
         "Mensajes de texto oídos por las pasarelas. 0 = conservar siempre.",

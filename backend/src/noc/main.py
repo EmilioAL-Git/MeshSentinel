@@ -27,6 +27,7 @@ from noc.adapters.api.routers import (
     stats as stats_router,
     system,
     topology,
+    traces,
 )
 from noc.adapters.api.ws import hub, router as ws_router
 from noc.adapters.events.command_queue import RedisCommandQueue
@@ -267,6 +268,7 @@ def create_app() -> FastAPI:
     app.include_router(activity_router.router, prefix=settings.api_v1_prefix)
     app.include_router(chat.router, prefix=settings.api_v1_prefix)
     app.include_router(topology.router, prefix=settings.api_v1_prefix)
+    app.include_router(traces.router, prefix=settings.api_v1_prefix)
     app.include_router(settings_router.router, prefix=settings.api_v1_prefix)
     app.include_router(maintenance_router.router, prefix=settings.api_v1_prefix)
     app.include_router(nexus_router.router, prefix=settings.api_v1_prefix)
