@@ -34,32 +34,48 @@ export function consumeFinished(event: NocEvent): { text: string; kind: "ok" | "
   if (!tracked.has(p.operation_id)) return null;
   tracked.delete(p.operation_id);
   if (p.operation_type === "traceroute.run" && p.final_status === "succeeded") {
-    return { ...describeTraceroute(p.traceroute), text: `Traceroute #${p.operation_id}: ${describeTraceroute(p.traceroute).text}` };
+    // El resultado de un traceroute NO es un toast: se abre una ventana con el
+    // esquema de la ruta (TracerouteDialog, montada en App)
+    for (const cb of tracerouteListeners) {
+      cb({
+        operationId: p.operation_id,
+        nodeId: String(p.node_id ?? ""),
+        gatewayId: event.gateway_id,
+        result: (p.traceroute ?? {}) as TracerouteResult,
+      });
+    }
+    return null;
   }
   const label = FINAL_LABEL[String(p.final_status)] ?? { text: `terminada (${String(p.final_status)})`, kind: "ok" as const };
   const type = typeof p.operation_type === "string" ? p.operation_type : "operación";
   return { text: `${type} #${p.operation_id}: ${label.text}`, kind: label.kind };
 }
 
-interface TracerouteResult {
+export interface TracerouteResult {
   reached?: boolean;
+  /** Saltos INTERMEDIOS de ida (vacío = alcance directo). */
   route?: string[];
+  /** SNR en dB de cada enlace de la ida (len = route.length + 1). */
   snr_towards?: (number | null)[];
+  route_back?: string[];
+  snr_back?: (number | null)[];
   error_reason?: string;
+  waited_seconds?: number;
 }
 
-/** Texto de operador para el resultado de un traceroute activo. */
-function describeTraceroute(raw: unknown): { text: string; kind: "ok" | "error" } {
-  const r = (raw ?? {}) as TracerouteResult;
-  if (!r.reached) {
-    const why = r.error_reason === "NO_RESPONSE" ? "sin respuesta (fuera de alcance o saturado)" : `no entregado (${r.error_reason ?? "?"})`;
-    return { text: why, kind: "error" };
-  }
-  const hops = r.route?.length ?? 0;
-  const snr = r.snr_towards?.[r.snr_towards.length - 1];
-  const snrText = typeof snr === "number" ? ` · SNR ${snr} dB` : "";
-  return {
-    text: hops === 0 ? `directo, sin saltos intermedios${snrText}` : `${hops} salto${hops === 1 ? "" : "s"} intermedio${hops === 1 ? "" : "s"}: ${r.route!.join(" → ")}${snrText}`,
-    kind: "ok",
+export interface TracerouteOutcome {
+  operationId: number;
+  nodeId: string;
+  gatewayId: string;
+  result: TracerouteResult;
+}
+
+const tracerouteListeners = new Set<(o: TracerouteOutcome) => void>();
+
+/** Suscripción al final de un traceroute lanzado en esta sesión. */
+export function onTracerouteFinished(cb: (o: TracerouteOutcome) => void): () => void {
+  tracerouteListeners.add(cb);
+  return () => {
+    tracerouteListeners.delete(cb);
   };
 }

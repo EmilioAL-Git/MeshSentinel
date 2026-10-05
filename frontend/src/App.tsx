@@ -46,6 +46,7 @@ import { LoginModal } from "./components/shell/LoginModal";
 import { NavRail } from "./components/shell/NavRail";
 import { StatusBar } from "./components/shell/StatusBar";
 import { toast, ToastHost } from "./components/shell/Toast";
+import { TracerouteDialog, type TraceNodeInfo } from "./components/traceroute/TracerouteDialog";
 import { useAuth } from "./context/AuthContext";
 import { LockedNotice } from "./components/shell/LockedNotice";
 import { useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
@@ -53,7 +54,7 @@ import { usePersistedState } from "./hooks/usePersistedState";
 import { useUrlFlag, useUrlNumber, useUrlParam, useUrlString, useUrlView } from "./hooks/useUrlState";
 import { resolveView, VIEWS, type View } from "./view";
 import { computeFleetGroupMetrics, computeGroupAttention, computeGroupStatus, scopeGatewaysToGroup } from "./components/fleet/groupStats";
-import { consumeFinished } from "./opTracker";
+import { consumeFinished, onTracerouteFinished, type TracerouteOutcome } from "./opTracker";
 import { t } from "./tokens";
 
 const DATA_EVENTS = new Set([
@@ -246,6 +247,21 @@ export default function App() {
   // Inspector abierto: URLs compartibles (ADR 0026) — `node=!...` en la URL,
   // pushState (abrir/cerrar el Inspector es una navegación deliberada).
   const [selected, setSelected] = useUrlString("node", null, { replace: false });
+  // Resultado de un traceroute lanzado desde esta sesión: ventana sobre cualquier vista
+  const [traceOutcome, setTraceOutcome] = useState<TracerouteOutcome | null>(null);
+  useEffect(() => onTracerouteFinished(setTraceOutcome), []);
+  const traceGateway = (gateways.data ?? []).find((g) => g.gateway_id === traceOutcome?.gatewayId) ?? null;
+  const traceLookup = useCallback(
+    (id: string): TraceNodeInfo | null => {
+      const n = (nodes.data ?? []).find((x) => x.node.node_id === id)?.node;
+      if (n) return { longName: n.long_name, shortName: n.short_name, hwModel: n.hw_model };
+      if (traceGateway?.local_node_id === id) {
+        return { longName: traceGateway.local_long_name, shortName: traceGateway.local_short_name, hwModel: traceGateway.local_hw_model };
+      }
+      return null;
+    },
+    [nodes.data, traceGateway],
+  );
   // Selección múltiple para batches (M2)
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   // Cambiar de grupo activo limpia la selección: nodos armados en un grupo
@@ -858,6 +874,16 @@ export default function App() {
         />
       )}
       <ToastHost />
+      {traceOutcome && (
+        <TracerouteDialog
+          outcome={traceOutcome}
+          lookup={traceLookup}
+          originNodeId={traceGateway?.local_node_id ?? null}
+          originGatewayName={traceGateway?.name ?? traceOutcome.gatewayId}
+          onOpenNode={setSelected}
+          onClose={() => setTraceOutcome(null)}
+        />
+      )}
       <LoginModal />
 
       <StatusBar

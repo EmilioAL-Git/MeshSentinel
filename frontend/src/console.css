@@ -505,3 +505,57 @@ select.input {
     transition: none;
   }
 }
+
+/* ── Traceroute: esquema nodo → nodo ─────────────────────────────────────── */
+.trace-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px 0;
+}
+.trace-step {
+  display: flex;
+  align-items: center;
+}
+.trace-node {
+  min-width: 128px;
+  max-width: 170px;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+}
+.trace-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 0.4rem;
+  min-width: 70px;
+}
+.trace-arrow {
+  font-size: 20px;
+  line-height: 1;
+}
+@media (max-width: 640px) {
+  .trace-path {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .trace-step {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .trace-node {
+    max-width: none;
+  }
+  .trace-link {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 0.25rem 0.5rem;
+  }
+  .trace-arrow {
+    transform: rotate(90deg);
+    font-size: 16px;
+  }
+}
