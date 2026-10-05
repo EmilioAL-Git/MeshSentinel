@@ -1,4 +1,5 @@
 import type { View } from "../../view";
+import { useUrlString } from "../../hooks/useUrlState";
 import { t } from "../../tokens";
 
 interface Tool {
@@ -6,6 +7,7 @@ interface Tool {
   icon: string;
   title: string;
   text: string;
+  params?: Record<string, string>;
 }
 
 const TOOLS: Tool[] = [
@@ -19,7 +21,14 @@ const TOOLS: Tool[] = [
     id: "map3d",
     icon: "◈",
     title: "Mapa 3D",
-    text: "Reproduce una traza en relieve 3D: pilares en los nodos, arcos por SNR y un pulso que recorre la ida y la vuelta.",
+    text: "Mapa en relieve 3D con satélite y todos los nodos. Busca un nodo y verás sus traceroutes: pilares, arcos por SNR y un pulso que recorre la ida y la vuelta.",
+  },
+  {
+    id: "map3d",
+    icon: "⛰",
+    title: "Perfil de elevación",
+    text: "Terreno entre dos nodos y línea de visión con curvatura terrestre y zona de Fresnel: ¿hay una montaña de por medio?",
+    params: { "m3d.tab": "profile" },
   },
   {
     id: "config",
@@ -31,10 +40,10 @@ const TOOLS: Tool[] = [
 
 const SOON: Omit<Tool, "id">[] = [
   { icon: "⇄", title: "Comparador de trazas", text: "Dos trazas al mismo destino lado a lado: qué ruta o enlace cambió." },
-  { icon: "⛰", title: "Perfil de elevación", text: "Terreno entre dos nodos y línea de visión: ¿hay una montaña de por medio?" },
 ];
 
 export function ToolsHub({ onGoTo }: { onGoTo: (v: View) => void }) {
+  const [, setM3dTab] = useUrlString("m3d.tab");
   return (
     <div className="ws">
       <div className="panel-head">
@@ -52,7 +61,12 @@ export function ToolsHub({ onGoTo }: { onGoTo: (v: View) => void }) {
             <button
               key={tool.title}
               className="panel tool-card"
-              onClick={() => tool.id && onGoTo(tool.id)}
+              onClick={() => {
+                if (!tool.id) return;
+                // Cada tarjeta del Mapa 3D abre su herramienta (la URL conserva la query)
+                if (tool.id === "map3d") setM3dTab(tool.params?.["m3d.tab"] ?? null);
+                onGoTo(tool.id);
+              }}
               style={{ textAlign: "left", cursor: "pointer", padding: 14, gap: 6, color: "inherit", font: "inherit" }}
             >
               <span style={{ fontSize: 22, color: t.accent }} aria-hidden>

@@ -10,7 +10,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { fetchTrace, fetchTraces, type NodeSummaryOut, type TraceOut } from "../../api/client";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { usePersistedState } from "../../hooks/usePersistedState";
-import { useUrlNumber } from "../../hooks/useUrlState";
+import { useUrlNumber, useUrlString } from "../../hooks/useUrlState";
 import { relativeTime } from "../../time";
 import {
   BASE_STYLE_URL,
@@ -35,15 +35,19 @@ import {
   type LngLat,
   type Ribbon,
 } from "./traceGeometry";
+import { analyzeLos, sampleProfile, type ProfileSample } from "./elevation";
+import { NodeSearch } from "./NodeSearch";
+import { ProfileChart } from "./ProfileChart";
 import { DEMO_NODE_INFO, DEMO_TRACE_ID, demoTrace } from "./demoTrace";
 import { t } from "../../tokens";
 
 /**
- * Mapa 3D de una traza (traceroute): SOLO dibuja los nodos de esa traza —ni el
- * resto de la flota ni el grafo— para no sobrecargar la escena. Pilares en los
- * nodos, arcos elevados entre ellos coloreados por SNR y un pulso que recorre
- * la ida y la vuelta. Se abre desde la ventana de resultado del traceroute
- * (`?m3d.op=<id de operación>`) o eligiendo una traza reciente de la lista.
+ * Mapa 3D general (relieve, satélite, nodos) con dos herramientas encima:
+ *  - Nodo y trazas: buscas un nodo y SOLO entonces aparecen sus traceroutes;
+ *    la traza elegida se dibuja con pilares, arcos por SNR y un pulso que
+ *    recorre la ida y la vuelta (`?m3d.node=` / `?m3d.trace=` / `?m3d.op=`).
+ *  - Perfil de elevación: terreno y línea de visión entre dos nodos
+ *    (`?m3d.tab=profile&m3d.a=…&m3d.b=…`).
  */
 
 maplibregl.setWorkerUrl(workerUrl);
@@ -244,6 +248,24 @@ function buildScene(trace: TraceOut, pos: Map<string, LngLat>, legView: LegView)
   return { hops, missing, hopEnds, bounds, nodeIds: ids, geometry, cursor };
 }
 
+/** Un extremo del perfil es un nodo (`!id`) o un punto libre `lat,lng`. */
+const POINT_RE = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
+const isPointKey = (k: string) => POINT_RE.test(k);
+const pointKey = (lat: number, lng: number) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
+const pointLabel = (k: string) => `Punto ${k.replace(",", ", ")}`;
+function pointPos(k: string): LngLat | null {
+  if (!isPointKey(k)) return null;
+  const [lat, lng] = k.split(",").map(Number);
+  return [lng, lat];
+}
+/** «39.5, -2.4» (también con espacios o ;) → clave de punto, o null si no es válida. */
+function parseCoords(text: string): string | null {
+  const nums = text.match(/-?\d+(?:\.\d+)?/g);
+  if (!nums || nums.length !== 2) return null;
+  const [lat, lng] = nums.map(Number);
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? pointKey(lat, lng) : null;
+}
+
 export function Map3DView({
   summaries,
   onOpenNode,
@@ -254,11 +276,18 @@ export function Map3DView({
   const isMobile = useIsMobile();
   const [opParam, setOpParam] = useUrlNumber("m3d.op");
   const [traceParam, setTraceParam] = useUrlNumber("m3d.trace");
+  const [nodeParam, setNodeParam] = useUrlString("m3d.node");
+  const [tabParam, setTabParam] = useUrlString("m3d.tab");
+  const [aParam, setAParam] = useUrlString("m3d.a");
+  const [bParam, setBParam] = useUrlString("m3d.b");
+  const tab: "node" | "profile" = tabParam === "profile" ? "profile" : "node";
 
   // ── Datos ────────────────────────────────────────────────────────────
-  const recent = useQuery({
-    queryKey: ["traces", "recent"],
-    queryFn: () => fetchTraces({ limit: 40, sinceHours: 24 * 30 }),
+  // Las trazas solo se piden cuando hay un nodo elegido (o se llega con un enlace)
+  const nodeTraces = useQuery({
+    queryKey: ["traces", "node", nodeParam],
+    queryFn: () => fetchTraces({ nodeId: nodeParam!, reached: true, limit: 40, sinceHours: 24 * 30 }),
+    enabled: nodeParam != null,
     refetchInterval: 20_000,
   });
   // La traza de la operación recién terminada puede tardar un instante en
@@ -279,15 +308,19 @@ export function Map3DView({
     retry: false,
   });
 
-  const reached = useMemo(() => (recent.data ?? []).filter((x) => x.reached), [recent.data]);
+  const reached = useMemo(() => nodeTraces.data ?? [], [nodeTraces.data]);
   const demo = useMemo(() => demoTrace(), []);
+  // Sin nodo ni enlace no hay traza: el mapa es solo un mapa. Con un nodo se
+  // dibuja su traza más reciente salvo que se elija otra.
   const trace: TraceOut | null =
-    (isDemo ? demo : undefined) ??
-    byOp.data?.[0] ??
-    (traceParam != null ? (reached.find((x) => x.id === traceParam) ?? byId.data) : undefined) ??
-    (opParam == null && traceParam == null ? reached[0] : undefined) ??
-    null;
-  const waitingForOp = opParam != null && !byOp.data?.length && byOp.isFetching;
+    tab === "profile"
+      ? null
+      : ((isDemo ? demo : undefined) ??
+        byOp.data?.[0] ??
+        (traceParam != null ? (reached.find((x) => x.id === traceParam) ?? byId.data) : undefined) ??
+        (nodeParam != null && opParam == null && traceParam == null ? reached[0] : undefined) ??
+        null);
+  const waitingForOp = tab === "node" && opParam != null && !byOp.data?.length && byOp.isFetching;
 
   const info = useMemo(() => {
     const m = new Map<string, { name: string; pos: LngLat | null }>();
@@ -362,6 +395,17 @@ export function Map3DView({
   exagRef.current = exag;
   const baseRef = useRef(baseMode);
   baseRef.current = baseMode;
+  const pickRef = useRef<(id: string) => void>(() => {});
+  const pointRef = useRef<(key: string) => void>(() => {});
+  const [cam, setCam] = useState({ pitch: 60, bearing: -20 });
+  const [armed, setArmed] = useState<"A" | "B" | null>(null);
+  const armedRef = useRef(armed);
+  armedRef.current = armed;
+  const [mastA, setMastA] = usePersistedState<number>("map3d.mastA", 2);
+  const [mastB, setMastB] = usePersistedState<number>("map3d.mastB", 2);
+  const [freqMHz, setFreqMHz] = usePersistedState<number>("map3d.freq", 868);
+  const [samples, setSamples] = useState<ProfileSample[] | null | "loading">(null);
+  const [probeD, setProbeD] = useState<number | null>(null);
 
   // ── Creación del mapa (una vez) ──────────────────────────────────────
   useEffect(() => {
@@ -467,6 +511,45 @@ export function Map3DView({
             "fill-extrusion-vertical-gradient": true,
           },
         });
+      // Capa general de nodos (puntos planos sobre el terreno): es lo que hace del
+      // visor un mapa y no solo un reproductor de trazas
+      for (const id of ["nodes", "node-sel", "los-line", "probe"]) {
+        map.addSource(id, { type: "geojson", data: EMPTY });
+      }
+      map.addLayer({
+        id: "nodes-dots",
+        type: "circle",
+        source: "nodes",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 5, 14, 7],
+          "circle-color": ["case", ["get", "online"], "#2ea06a", "#6b7385"],
+          "circle-stroke-color": "#0b0f16",
+          "circle-stroke-width": 1,
+        },
+      });
+      map.addLayer({
+        id: "node-sel",
+        type: "circle",
+        source: "node-sel",
+        paint: {
+          "circle-radius": 11,
+          "circle-color": "rgba(0,0,0,0)",
+          "circle-stroke-color": ["get", "color"],
+          "circle-stroke-width": 2.5,
+        },
+      });
+      map.on("click", (e) => {
+        // Modo «pinchar en el mapa» del perfil: un clic en vacío fija el punto
+        if (!armedRef.current) return;
+        if (map.queryRenderedFeatures(e.point, { layers: ["nodes-dots"] }).length) return; // lo atiende el nodo
+        pointRef.current(pointKey(e.lngLat.lat, e.lngLat.lng));
+      });
+      map.on("click", "nodes-dots", (e) => {
+        const id = e.features?.[0]?.properties?.id;
+        if (id) pickRef.current(String(id));
+      });
+      map.on("mouseenter", "nodes-dots", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "nodes-dots", () => (map.getCanvas().style.cursor = ""));
       extrusion("pillars", 0.88);
       // UN solo arco: la estela y la cabeza del pulso son un cambio de color
       // (expresión actualizada en cada fotograma) de estos MISMOS prismas, así
@@ -530,6 +613,36 @@ export function Map3DView({
           });
         }
       }
+      if (map.getStyle().glyphs) {
+        map.addLayer({
+          id: "nodes-names",
+          type: "symbol",
+          source: "nodes",
+          minzoom: 9,
+          layout: {
+            "text-field": ["get", "name"],
+            "text-font": ["Montserrat Medium"],
+            "text-size": 11,
+            "text-offset": [0, 1.1],
+            "text-anchor": "top",
+            "text-optional": true,
+          },
+          paint: { "text-color": "#cfd6e4", "text-halo-color": "rgba(8,11,17,0.95)", "text-halo-width": 1.6 },
+        });
+      }
+      map.addLayer({
+        id: "los-line",
+        type: "line",
+        source: "los-line",
+        layout: { "line-cap": "round" },
+        paint: { "line-color": ["get", "color"], "line-width": 3, "line-dasharray": [2, 1.5] },
+      });
+      map.addLayer({
+        id: "probe",
+        type: "circle",
+        source: "probe",
+        paint: { "circle-radius": 6, "circle-color": "#ffffff", "circle-stroke-color": "#000", "circle-stroke-width": 1.5 },
+      });
       setReady(true);
     };
     map.on("style.load", install);
@@ -856,6 +969,188 @@ export function Map3DView({
     setPlaying(true);
   };
 
+  // ── Nodos del mapa general, selección y herramientas ─────────────────
+  const selectNode = (id: string | null) => {
+    setOpParam(null);
+    setTraceParam(null);
+    setNodeParam(id);
+  };
+  const pickNode = (id: string) => {
+    if (tab === "profile") {
+      if (!aParam) setAParam(id);
+      else if (!bParam && id !== aParam) setBParam(id);
+      else {
+        setAParam(id);
+        setBParam(null);
+      }
+    } else selectNode(id);
+  };
+  pickRef.current = (id) => {
+    setArmed(null);
+    pickNode(id);
+  };
+  pointRef.current = (key) => {
+    if (armedRef.current === "A") setAParam(key);
+    else setBParam(key);
+    setArmed(null);
+  };
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map) map.getCanvas().style.cursor = armed ? "crosshair" : "";
+  }, [armed]);
+  // Puntos libres y nodos se tratan igual al dibujarlos y nombrarlos
+  const posOf = (k: string | null): LngLat | null => (k ? (pointPos(k) ?? info.get(k)?.pos ?? null) : null);
+  const labelOf = (k: string) => (isPointKey(k) ? pointLabel(k) : nameOf(k));
+  const setTab = (v: "node" | "profile") => (setArmed(null), setTabParam(v === "profile" ? "profile" : null));
+
+  const nodeFeatures = useMemo(() => {
+    const feats: GeoJSON.Feature[] = [];
+    for (const s of summaries) {
+      if (!s.last_position || s.node.is_ignored) continue;
+      feats.push({
+        type: "Feature",
+        properties: {
+          id: s.node.node_id,
+          name: s.node.short_name || s.node.node_id.slice(-4),
+          online: s.node.online,
+        },
+        geometry: { type: "Point", coordinates: [s.last_position.longitude, s.last_position.latitude] },
+      });
+    }
+    return feats;
+  }, [summaries]);
+  const nodesSig = useMemo(
+    () => nodeFeatures.map((f) => `${f.properties!.id}${f.properties!.online ? 1 : 0}${(f.geometry as GeoJSON.Point).coordinates}`).join("|"),
+    [nodeFeatures],
+  );
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource("nodes") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: nodeFeatures });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodesSig, ready]);
+
+  // Los nombres de la capa general ceden ante los de la traza dibujada
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !map.getLayer("nodes-names")) return;
+    map.setLayoutProperty("nodes-names", "visibility", trace ? "none" : "visible");
+  }, [trace, ready]);
+
+  // Anillos de selección: nodo buscado (acento) o extremos A/B del perfil
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const ring = (id: string | null, color: string): GeoJSON.Feature[] => {
+      const p = posOf(id);
+      return p ? [{ type: "Feature", properties: { color }, geometry: { type: "Point", coordinates: p } }] : [];
+    };
+    const feats =
+      tab === "profile" ? [...ring(aParam, ROLE_COLOR.origin), ...ring(bParam, ROLE_COLOR.dest)] : ring(nodeParam, "#f5b73b");
+    (map.getSource("node-sel") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: feats });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, nodeParam, aParam, bParam, ready, nodesSig]);
+
+  // Al buscar un nodo la cámara va a él (si luego llegan trazas, la escena reencuadra)
+  useEffect(() => {
+    const map = mapRef.current;
+    const p = nodeParam ? info.get(nodeParam)?.pos : null;
+    if (!map || !ready || !p || tab !== "node") return;
+    map.flyTo({ center: p, zoom: Math.max(map.getZoom(), 11), pitch: 60, duration: 1200 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeParam, ready, tab]);
+
+  // ── Perfil de elevación ──────────────────────────────────────────────
+  const posA = posOf(aParam);
+  const posB = posOf(bParam);
+  const posKey = `${posA?.join(",") ?? ""}|${posB?.join(",") ?? ""}`;
+  useEffect(() => {
+    if (tab !== "profile" || !posA || !posB) {
+      setSamples(null);
+      return;
+    }
+    let cancelled = false;
+    setSamples("loading");
+    sampleProfile(posA, posB).then((r) => !cancelled && setSamples(r));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, posKey]);
+  const los = useMemo(
+    () => (Array.isArray(samples) ? analyzeLos(samples, { mastA, mastB, freqMHz }) : null),
+    [samples, mastA, mastB, freqMHz],
+  );
+  const losColor = los ? (los.clear ? (los.fresnelClear ? "#2ea06a" : "#e0a030") : "#e5484d") : "#4c8dff";
+
+  // Línea A–B (y punto de la zona del gráfico bajo el ratón) sobre el mapa
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const line: GeoJSON.Feature[] =
+      tab === "profile" && posA && posB
+        ? [{ type: "Feature", properties: { color: losColor }, geometry: { type: "LineString", coordinates: [posA, posB] } }]
+        : [];
+    (map.getSource("los-line") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: line });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, posKey, losColor, ready]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const sp = Array.isArray(samples) && probeD != null ? samples.reduce((m, q) => (Math.abs(q.d - probeD) < Math.abs(m.d - probeD) ? q : m)) : null;
+    (map.getSource("probe") as GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features: sp ? [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: sp.lngLat } }] : [],
+    });
+  }, [probeD, samples, ready]);
+  // Al completar el par A/B se encuadra el trayecto
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || tab !== "profile" || !posA || !posB) return;
+    // Zoom calculado por distancia (como en «Seguir»): fitBounds con inclinación y
+    // relleno asimétrico grande puede devolver un zoom absurdo (mundo entero)
+    const bottom = isMobile ? 300 : 280;
+    const box = map.getContainer();
+    const px = Math.max(80, Math.min(box.clientWidth * 0.7, (box.clientHeight - bottom - 100) * 1.4));
+    const dist = Math.max(100, distanceM(posA, posB));
+    const midLat = (posA[1] + posB[1]) / 2;
+    const zoom = clamp(Math.log2((78_271.5 * Math.cos((midLat * Math.PI) / 180) * px) / dist), 4, 14);
+    map.easeTo({
+      center: [(posA[0] + posB[0]) / 2, midLat],
+      zoom,
+      pitch: 55,
+      padding: { top: 60, bottom, left: 0, right: 0 },
+      duration: 1200,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, posKey, ready]);
+
+  // Inclinación y giro de la cámara: el panel de vista los refleja y los controla
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const sync = () =>
+      setCam((c) => {
+        const next = { pitch: Math.round(map.getPitch()), bearing: Math.round(map.getBearing()) };
+        return next.pitch === c.pitch && next.bearing === c.bearing ? c : next;
+      });
+    sync();
+    map.on("pitch", sync);
+    map.on("rotate", sync);
+    return () => {
+      map.off("pitch", sync);
+      map.off("rotate", sync);
+    };
+  }, [ready]);
+
+  // El relleno inferior del encuadre del perfil no debe quedarse al salir de él
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!(tab === "profile" && posA && posB)) map.easeTo({ padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, posKey, ready]);
+
   const hops = useMemo(() => (trace ? hopsOf(trace) : []), [trace]);
   const drawable = scene?.hops.length ?? 0;
   const hasBack = hops.some((h) => h.leg === 1);
@@ -869,43 +1164,85 @@ export function Map3DView({
         style={isMobile ? { maxHeight: "34%", flexShrink: 0 } : { width: 310, flexShrink: 0 }}
       >
         <div className="panel-head">
-          <span className="panel-title">Mapa 3D · traza</span>
+          <span className="panel-title">Mapa 3D</span>
+          <span className="seg" role="group" aria-label="Herramienta">
+            <button className={tab === "node" ? "on" : undefined} onClick={() => setTab("node")}>
+              Nodo y trazas
+            </button>
+            <button className={tab === "profile" ? "on" : undefined} onClick={() => setTab("profile")}>
+              Perfil
+            </button>
+          </span>
         </div>
         <div className="ws-scroll" style={{ padding: 10, display: "flex", flexDirection: "column", gap: 10 }}>
-          <label style={{ fontSize: 11, color: t.textDim }}>
-            TRAZA
-            <select
-              className="input"
-              style={{ width: "100%", marginTop: 4 }}
-              value={trace?.id ?? ""}
-              onChange={(e) => {
-                setOpParam(null);
-                setTraceParam(e.target.value ? Number(e.target.value) : null);
-              }}
-            >
-              {!trace && <option value="">—</option>}
-              <option value={DEMO_TRACE_ID}>★ Demo · 8 nodos (ejemplo, no real)</option>
-              {trace && !isDemo && !reached.some((x) => x.id === trace.id) && (
-                <option value={trace.id}>
-                  {nameOf(trace.origin_id)} → {nameOf(trace.target_id)} · {relativeTime(trace.received_at)}
-                </option>
+          {tab === "node" && (
+            <>
+              {nodeParam ? (
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <div style={{ flex: 1, fontSize: 13, fontWeight: 650, overflowWrap: "anywhere" }}>
+                    {nameOf(nodeParam)}
+                    {!info.get(nodeParam)?.pos && (
+                      <div style={{ fontSize: 11, fontWeight: 400, color: "var(--warn)" }}>Sin posición GPS: no se ve en el mapa</div>
+                    )}
+                  </div>
+                  <button className="btn" onClick={() => onOpenNode(nodeParam)} title="Abrir en el Inspector">
+                    Ficha
+                  </button>
+                  <button className="btn" onClick={() => selectNode(null)} title="Quitar selección y volver al mapa">
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <NodeSearch summaries={summaries} onPick={selectNode} />
               )}
-              {reached.map((x) => (
-                <option key={x.id} value={x.id}>
-                  {nameOf(x.origin_id)} → {nameOf(x.target_id)} · {x.route.length} salto
-                  {x.route.length === 1 ? "" : "s"} · {relativeTime(x.received_at)}
-                </option>
-              ))}
-            </select>
-          </label>
 
-          {waitingForOp && <div className="empty">Esperando a que la traza quede registrada…</div>}
-          {!trace && !waitingForOp && (
-            <div className="empty">
-              Aún no hay trazas con resultado. Lanza un traceroute desde el Inspector de un nodo y vuelve aquí,
-              o elige la traza «★ Demo» del selector para ver cómo luce.
-            </div>
-          )}
+              {nodeParam && (
+                <>
+                  <div style={{ fontSize: 10.5, letterSpacing: "0.08em", fontWeight: 650, color: t.textDim }}>
+                    TRACEROUTES · {reached.length}
+                  </div>
+                  {nodeTraces.isLoading && <div className="empty">Buscando trazas…</div>}
+                  {!nodeTraces.isLoading && reached.length === 0 && !trace && (
+                    <div className="empty">Este nodo no tiene traceroutes con resultado en los últimos 30 días.</div>
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {reached.map((x) => (
+                      <button
+                        key={x.id}
+                        className="btn"
+                        style={{
+                          textAlign: "left",
+                          border: 0,
+                          padding: "4px 6px",
+                          background: trace?.id === x.id ? t.surface2 : "transparent",
+                        }}
+                        onClick={() => {
+                          setOpParam(null);
+                          setTraceParam(x.id);
+                        }}
+                      >
+                        {nameOf(x.origin_id)} → {nameOf(x.target_id)}
+                        <span style={{ color: t.textDim, fontSize: 11 }}>
+                          {" "}
+                          · {x.route.length} salto{x.route.length === 1 ? "" : "s"} · {relativeTime(x.received_at)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {!nodeParam && trace && (
+                <button className="btn" onClick={() => selectNode(null)}>
+                  ← Volver al mapa
+                </button>
+              )}
+              {waitingForOp && <div className="empty">Esperando a que la traza quede registrada…</div>}
+              {!nodeParam && !trace && !waitingForOp && (
+                <div className="empty">
+                  Busca un nodo (o pulsa uno en el mapa) para ver sus traceroutes. Sin selección esto es solo un mapa.
+                </div>
+              )}
 
           {trace && (
             <>
@@ -971,10 +1308,143 @@ export function Map3DView({
               )}
             </>
           )}
-          <div style={{ fontSize: 10.5, color: t.textFaint, marginTop: "auto" }}>
-            Solo se dibujan los nodos de la traza. Color del arco = SNR del salto (verde bueno → rojo
-            muy débil).
-          </div>
+              {!isDemo && (
+                <button className="btn" style={{ alignSelf: "flex-start" }} onClick={() => { setNodeParam(null); setOpParam(null); setTraceParam(DEMO_TRACE_ID); }}>
+                  ★ Ver traza de demostración
+                </button>
+              )}
+              {isDemo && (
+                <button className="btn" style={{ alignSelf: "flex-start" }} onClick={() => setTraceParam(null)}>
+                  ← Salir de la demostración
+                </button>
+              )}
+            </>
+          )}
+
+          {tab === "profile" && (
+            <>
+              {(
+                [
+                  ["A", "Desde", aParam, setAParam, bParam],
+                  ["B", "Hasta", bParam, setBParam, aParam],
+                ] as const
+              ).map(([k, label, id, set, other]) => (
+                <div key={k}>
+                  <div style={{ fontSize: 10.5, letterSpacing: "0.08em", fontWeight: 650, color: k === "A" ? t.accent : t.catGreen, marginBottom: 4 }}>
+                    {label.toUpperCase()} ({k})
+                  </div>
+                  {id ? (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ flex: 1, fontSize: 13, overflowWrap: "anywhere" }}>
+                        {labelOf(id)}
+                        {!posOf(id) && <span style={{ color: "var(--warn)", fontSize: 11 }}> · sin GPS</span>}
+                      </span>
+                      <button className="btn" onClick={() => set(null)} title="Quitar">
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <NodeSearch
+                      summaries={summaries}
+                      exclude={other ? [other] : undefined}
+                      placeholder="Buscar nodo o pulsarlo en el mapa…"
+                      onPick={(n) => set(n)}
+                    />
+                  )}
+                  {!id && (
+                    <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                      <button
+                        className={armed === k ? "btn on" : "btn"}
+                        onClick={() => setArmed(armed === k ? null : k)}
+                        title="Pulsa en el mapa para fijar el punto"
+                      >
+                        {armed === k ? "Pulsa en el mapa…" : "📍 Pinchar en el mapa"}
+                      </button>
+                      <input
+                        className="input"
+                        style={{ flex: 1, minWidth: 130 }}
+                        placeholder="lat, lng (ej. 39.5, -2.4)"
+                        aria-label={`Coordenadas del punto ${k}`}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          const key = parseCoords(e.currentTarget.value);
+                          if (key) set(key);
+                          else e.currentTarget.style.borderColor = "var(--crit)";
+                        }}
+                        onChange={(e) => (e.currentTarget.style.borderColor = "")}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {aParam && bParam && (
+                <>
+                  <button
+                    className="btn"
+                    style={{ alignSelf: "flex-start" }}
+                    onClick={() => {
+                      setAParam(bParam);
+                      setBParam(aParam);
+                    }}
+                  >
+                    ⇄ Intercambiar
+                  </button>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, fontSize: 11, color: t.textDim }}>
+                    <label>
+                      Mástil A (m)
+                      <input className="input" type="number" min={0} max={200} value={mastA} style={{ width: "100%" }}
+                        onChange={(e) => setMastA(Math.max(0, Number(e.target.value) || 0))} />
+                    </label>
+                    <label>
+                      Mástil B (m)
+                      <input className="input" type="number" min={0} max={200} value={mastB} style={{ width: "100%" }}
+                        onChange={(e) => setMastB(Math.max(0, Number(e.target.value) || 0))} />
+                    </label>
+                    <label>
+                      Banda
+                      <select className="input" value={freqMHz} style={{ width: "100%" }} onChange={(e) => setFreqMHz(Number(e.target.value))}>
+                        {[433, 868, 915, 2400].map((f) => (
+                          <option key={f} value={f}>
+                            {f} MHz
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  {(!posA || !posB) && (
+                    <div style={{ fontSize: 11.5, color: "var(--warn)" }}>Un extremo no tiene posición GPS: no se puede calcular.</div>
+                  )}
+                  {samples === "loading" && <div className="empty">Leyendo el relieve…</div>}
+                  {posA && posB && samples === null && <div className="empty">No se pudo leer el relieve (¿sin conexión con el servidor de mapas?).</div>}
+                  {los && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                      <div style={{ fontWeight: 650, color: losColor }}>
+                        {los.clear
+                          ? los.fresnelClear
+                            ? "● Línea de visión despejada"
+                            : "● Visión directa, Fresnel comprometido"
+                          : "● Obstruida por el terreno"}
+                      </div>
+                      <div>Distancia: {los.distanceM >= 1000 ? `${(los.distanceM / 1000).toFixed(2)} km` : `${Math.round(los.distanceM)} m`}</div>
+                      <div>
+                        Peor punto: {Math.round(los.worst.clearance)} m de holgura a{" "}
+                        {(los.worst.d / 1000).toFixed(2)} km
+                      </div>
+                      <div>
+                        Antenas a {Math.round(los.heightA)} m / {Math.round(los.heightB)} m s. n. m.
+                      </div>
+                      {los.gaps > 0 && <div style={{ color: "var(--warn)" }}>Faltan datos de relieve en {los.gaps} muestras.</div>}
+                    </div>
+                  )}
+                </>
+              )}
+              <div style={{ fontSize: 10.5, color: t.textFaint }}>
+                La altura de cada antena se toma del relieve bajo el nodo más el mástil indicado (la altitud GPS
+                suele ser imprecisa). Incluye curvatura terrestre (k = 4/3). Fresnel: 60 % de la 1.ª zona. Orientativo:
+                no considera edificios ni vegetación.
+              </div>
+            </>
+          )}
         </div>
       </aside>
 
@@ -1015,6 +1485,49 @@ export function Map3DView({
             <input type="checkbox" checked={refs} disabled={offline} onChange={(e) => setRefs(e.target.checked)} /> Referencias
           </label>
         </div>
+        <div className="m3d-tilt" role="group" aria-label="Vista de la cámara">
+          <label title="Inclinación de la cámara (0° = desde arriba)">
+            <span>Inclinación</span>
+            <input
+              type="range"
+              min={0}
+              max={80}
+              value={cam.pitch}
+              onChange={(e) => mapRef.current?.setPitch(Number(e.target.value))}
+            />
+            <span className="mono">{cam.pitch}°</span>
+          </label>
+          <label title="Giro del mapa">
+            <span>Giro</span>
+            <input
+              type="range"
+              min={-180}
+              max={180}
+              value={cam.bearing}
+              onChange={(e) => mapRef.current?.setBearing(Number(e.target.value))}
+            />
+            <span className="mono">{cam.bearing}°</span>
+          </label>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button className="btn" onClick={() => mapRef.current?.easeTo({ pitch: 0, bearing: 0, duration: 500 })}>
+              2D
+            </button>
+            <button className="btn" onClick={() => mapRef.current?.easeTo({ pitch: 60, duration: 500 })}>
+              3D
+            </button>
+            <button className="btn" onClick={() => mapRef.current?.easeTo({ pitch: 75, duration: 500 })} title="Casi a ras de suelo">
+              Rasante
+            </button>
+            <button className="btn" onClick={() => mapRef.current?.easeTo({ bearing: 0, duration: 500 })} title="Orientar al norte">
+              N
+            </button>
+          </div>
+        </div>
+        {tab === "profile" && los && aParam && bParam && (
+          <div className="m3d-controls" style={{ width: "min(900px, calc(100% - 24px))", display: "block" }}>
+            <ProfileChart los={los} nameA={labelOf(aParam)} nameB={labelOf(bParam)} onProbe={setProbeD} />
+          </div>
+        )}
         {offline && (
           <div className="m3d-note">
             Sin conexión con el servidor de mapas: fondo plano y sin relieve (el dibujo de la traza sigue funcionando).

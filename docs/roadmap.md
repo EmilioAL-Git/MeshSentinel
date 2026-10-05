@@ -74,3 +74,21 @@ Límites a tener presentes: cada traza inunda la malla hasta `hop_limit`
 saltos (airtime real en EU_868), el firmware limita la frecuencia de
 traceroutes por nodo, y una traza sin respuesta es un resultado, no un error
 (no reintentar). Requiere ADR (modelo de datos nuevo + planificador).
+
+## 3. Mapa 3D general: siguientes herramientas (anotado 2026-10-05)
+
+El Mapa 3D ya es un mapa general (nodos + búsqueda → trazas del nodo) con
+Perfil de elevación/LOS entre dos nodos. Ideas pendientes, sin implementar:
+
+1. **Viewshed de un nodo**: zona visible desde un nodo con su mástil, sobre el DEM
+   (también para un punto planeado: dónde colocar un nodo nuevo).
+2. **Mejor sitio intermedio** para desbloquear un enlace obstruido (parte del perfil).
+3. **Enlaces probables vs reales**: perfil automático de pares cercanos contrastado
+   con vecinos/trazas reales (enlaces que deberían existir y no están, y al revés).
+4. **Capa «Red real» en 3D** (grafo acumulado de trazas, ver §2).
+5. **Capas de la malla en 3D**: cobertura por pasarela, vecinos, calidad de señal.
+6. **Historial temporal**: reproducir un nodo móvil o la evolución de la cobertura.
+7. **Medida y exportación**: regla (distancia/azimut), captura, perfil a PNG/CSV.
+8. **Comparador de trazas** (dos trazas al mismo destino superpuestas).
+
+Recomendación dada al usuario: empezar por 1 y 3 (reutilizan `elevation.ts`).

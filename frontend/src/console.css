@@ -676,3 +676,33 @@ select.input {
   cursor: pointer;
   text-decoration: underline dotted;
 }
+
+.m3d-tilt {
+  position: absolute;
+  top: 124px;
+  right: 10px;
+  width: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border: 1px solid var(--border);
+  z-index: 2;
+}
+.m3d-tilt label {
+  display: grid;
+  grid-template-columns: 62px 1fr 34px;
+  align-items: center;
+  gap: 6px;
+}
+.m3d-tilt input[type="range"] {
+  width: 100%;
+  min-width: 0;
+}
+.m3d-tilt .btn {
+  flex: 1;
+  padding: 2px 4px;
+}
