@@ -585,7 +585,9 @@ class SqlGatewayRepository:
         return _to_entity(existing, GatewayInfo, {"gateway_id": "id"})
 
     async def list_all(self, include_deleted: bool = False) -> list[GatewayInfo]:
-        stmt = select(GatewayModel)
+        # Orden explícito: sin él PostgreSQL devuelve el orden físico de las
+        # filas, que cambia con cada heartbeat (UPDATE) y la UI "baila".
+        stmt = select(GatewayModel).order_by(GatewayModel.id)
         if not include_deleted:
             stmt = stmt.where(GatewayModel.deleted_at.is_(None))
         rows = await self._session.scalars(stmt)
