@@ -1,3 +1,4 @@
+import { useAuth } from "../../context/AuthContext";
 import { useNexusMode } from "../nexus/useNexusMode";
 import { STATUS_COLORS as NEXUS_COLORS, STATUS_LABELS as NEXUS_LABELS } from "../nexus/NexusOperationsPanel";
 import { nexusTargetLabel } from "../jobs/NexusJobRow";
@@ -101,13 +102,14 @@ export function JobsPanel({
     refetchInterval: 30_000,
   });
   const nexusModeOn = useNexusMode();
+  const { canOperate } = useAuth();
   const nexusOps = useQuery({
     queryKey: ["nexus-operations", "jobs"],
     queryFn: () => fetchNexusOperations(undefined, undefined, 200),
-    enabled: nexusModeOn,
+    enabled: nexusModeOn && canOperate,
     refetchInterval: 5_000,
   });
-  const nexusList = nexusModeOn ? (nexusOps.data ?? []) : [];
+  const nexusList = nexusModeOn && canOperate ? (nexusOps.data ?? []) : [];
   const nexusSent = nexusList.filter((o) => o.status === "sent");
   const nexusPending = nexusList.filter((o) => o.status === "pending");
   const nexusRecent = nexusList.filter((o) => o.status === "confirmed" || o.status === "no_response").slice(0, 5);

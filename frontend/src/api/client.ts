@@ -182,9 +182,11 @@ export function onUnauthorized(listener: UnauthorizedListener | null): void {
   unauthorizedListener = listener;
 }
 
+// Las LECTURAS nunca abren el modal: una consulta de fondo a datos protegidos
+// (p. ej. la cola Nexus, que exige gestor) no debe pedir usuario a quien solo
+// mira. El modal lo abren las acciones (`send`) o el botón explícito de sesión.
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`/api/v1${path}`);
-  if (res.status === 401) unauthorizedListener?.();
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${path}`);
   return res.json();
 }
