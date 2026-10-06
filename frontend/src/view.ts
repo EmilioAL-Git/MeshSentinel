@@ -14,6 +14,7 @@ export type View =
   | "gateways"
   | "stats"
   | "map3d"
+  | "coverage"
   | "tools"
   | "traces"
   | "settings";
@@ -37,6 +38,7 @@ export const VIEWS: { id: View; label: string; icon: string; short?: string }[] 
   { id: "tools", label: "Herramientas", short: "Herram.", icon: "⚒" },
   { id: "traces", label: "Historial de trazas", icon: "⌁" },
   { id: "map3d", label: "Mapa 3D", icon: "◈" },
+  { id: "coverage", label: "Cobertura 3D", icon: "◔" },
   // "Ajustes" agrupa Usuarios/Accesos (autenticación) junto al resto de
   // configuración — mismo criterio de visibilidad de antes (RequireAdminDep
   // en el backend para Usuarios). Icono "@wrench": sentinel que NavRail
@@ -60,7 +62,7 @@ export function resolveView(v: string): View {
 }
 
 /** Vistas que viven DENTRO de Herramientas: no tienen entrada propia en el riel. */
-export const TOOL_VIEWS: readonly View[] = ["traces", "map3d", "config"];
+export const TOOL_VIEWS: readonly View[] = ["traces", "map3d", "coverage", "config"];
 
 /** Vistas con entrada propia en el riel (las herramientas cuelgan de «Herramientas»). */
 export const RAIL_VIEWS = VIEWS.filter((v) => !TOOL_VIEWS.includes(v.id));

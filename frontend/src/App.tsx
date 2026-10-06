@@ -52,6 +52,7 @@ import { LockedNotice } from "./components/shell/LockedNotice";
 import { useActiveGroup, useGroupNodeIds } from "./context/GroupContext";
 import { usePersistedState } from "./hooks/usePersistedState";
 import { clearUrlParams, useUrlFlag, useUrlNumber, useUrlParam, useUrlString, useUrlView } from "./hooks/useUrlState";
+const CoverageView = lazy(() => import("./components/coverage/CoverageView").then((m) => ({ default: m.CoverageView })));
 const Map3DView = lazy(() => import("./components/map3d/Map3DView").then((m) => ({ default: m.Map3DView })));
 import { RAIL_VIEWS, railActive, resolveView, VIEWS, type View } from "./view";
 import { ToolFrame } from "./components/tools/ToolFrame";
@@ -222,6 +223,7 @@ export default function App() {
   // El Mapa 3D no recuerda nada al salir: la próxima vez se abre limpio
   const setView = (next: View, opts?: Parameters<typeof setUrlView>[1]) => {
     if (view === "map3d" && next !== "map3d") clearUrlParams("m3d.");
+    if (view === "coverage" && next !== "coverage") clearUrlParams("cov.");
     setUrlView(next, opts);
   };
   const gatewayStats = useQuery({
@@ -797,6 +799,14 @@ export default function App() {
             <ToolFrame title="Mapa 3D" onBack={() => setView("tools")}>
               <Suspense fallback={<div className="empty">Cargando mapa 3D…</div>}>
                 <Map3DView summaries={summaries} onOpenNode={setSelected} />
+              </Suspense>
+            </ToolFrame>
+          )}
+
+          {view === "coverage" && (
+            <ToolFrame title="Cobertura 3D" onBack={() => setView("tools")}>
+              <Suspense fallback={<div className="empty">Cargando calculador…</div>}>
+                <CoverageView summaries={summaries} onOpenNode={setSelected} />
               </Suspense>
             </ToolFrame>
           )}

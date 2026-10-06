@@ -31,6 +31,12 @@ const TOOLS: Tool[] = [
     params: { "m3d.tab": "profile" },
   },
   {
+    id: "coverage",
+    icon: "◔",
+    title: "Calculador de cobertura 3D",
+    text: "Predice sobre el relieve hasta dónde llega un emisor: elige un nodo o un punto del mapa e indica potencia, ganancia de antena, frecuencia y alturas. Muestra el margen de enlace y qué nodos conocidos quedarían dentro.",
+  },
+  {
     id: "config",
     icon: "⚙",
     title: "Administración remota",

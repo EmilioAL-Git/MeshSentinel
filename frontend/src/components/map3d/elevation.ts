@@ -22,7 +22,7 @@ function tileUrl(z: number, x: number, y: number): string {
   return DEM.tiles[0].replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y));
 }
 
-function loadTile(z: number, x: number, y: number): Promise<ImageData | null> {
+export function loadTile(z: number, x: number, y: number): Promise<ImageData | null> {
   const key = `${z}/${x}/${y}`;
   let p = tileCache.get(key);
   if (!p) {
@@ -53,7 +53,7 @@ function loadTile(z: number, x: number, y: number): Promise<ImageData | null> {
 }
 
 /** Coordenadas de teselas (fraccionarias) de un punto a un zoom. */
-function worldPixel(lng: number, lat: number, z: number): [number, number] {
+export function worldPixel(lng: number, lat: number, z: number): [number, number] {
   const n = 2 ** z;
   const x = ((lng + 180) / 360) * n;
   const s = Math.sin((lat * Math.PI) / 180);
