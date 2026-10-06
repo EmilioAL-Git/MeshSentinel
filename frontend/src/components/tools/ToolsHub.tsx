@@ -46,6 +46,11 @@ const TOOLS: Tool[] = [
 
 const SOON: Omit<Tool, "id">[] = [
   { icon: "⇄", title: "Comparador de trazas", text: "Dos trazas al mismo destino lado a lado: qué ruta o enlace cambió." },
+  {
+    icon: "⌖",
+    title: "Planificador de repetidores",
+    text: "Cruza la cobertura medida, las posiciones estimadas y el relieve para señalar huecos de la malla y proponer dónde colocar un router nuevo para ganar más cobertura.",
+  },
 ];
 
 export function ToolsHub({ onGoTo }: { onGoTo: (v: View) => void }) {
