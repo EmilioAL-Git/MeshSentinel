@@ -1,42 +1,37 @@
-# Roadmap — decisiones anotadas para después de la v0.7
+# Roadmap — lo pendiente
 
-Decisiones ya tomadas con el usuario que NO deben implementarse hasta
-cerrar la v0.7 (Centro de Operaciones). Anotadas aquí para no perderlas y
-para que las fases actuales las preparen sin adelantarse.
+Lo planeado pero aún no implementado, con las decisiones ya tomadas con el
+usuario. Lo ya hecho se anota en cada sección como contexto; el estado
+módulo a módulo está en `docs/status.md`. Última revisión: 2026-10-06.
 
 ## 1. Selección de gateway para administración remota (Multi-Gateway)
 
-**La siguiente mejora funcional importante del Multi-Gateway.** Decisión
-del usuario (2026-07-10, al cerrar la arquitectura de transportes
-USB/TCP/Simulado tras M6.2 y ADR 0023).
+> **Actualización 2026-10-06: implementado casi por completo.** El resolver de
+> pasarela al encolar (`application/admin/gateway_routing.py`, migración 0010)
+> aplica los niveles 1–3: override por operación, `nodes.preferred_gateway_id`
+> y ranking prioridad → saltos → SNR → RSSI → recencia sobre los enlaces N:M
+> (`select_primary_link`). Las pasarelas de solo recepción y las eliminadas o
+> deshabilitadas quedan fuera de los candidatos. El preview de lotes usa el
+> mismo resolver.
 
-Política definitiva de resolución de pasarela al encolar una operación,
-por orden de precedencia:
+**Pendiente:**
 
-1. **Override de la operación** — el operador elige pasarela solo para esa
-   operación (aprovecha `target_gateway_id`, ya presente en
-   `RemoteFlagPlanItem` desde M4.2 y en el enrutado de M6.2).
-2. **Gateway preferido del nodo** — persistente (`preferred_gateway_id`,
-   columna nueva en `nodes`): infraestructura fija donde un nodo siempre
-   lo gestiona la misma pasarela.
-3. **Ranking automático** — prioridad → saltos → SNR → RSSI → recencia
-   (hoy el enrutado de M6.2 usa `select_primary_link`; se ampliará a este
-   ranking completo; la columna `gateways.priority` existe desde M5
-   reservada exactamente para esto).
-4. **Política de fallback configurable** — qué hacer si la elegida no está
-   operativa (hoy: fallback fijo a `nodes.gateway_id`, sin failover).
-
-Caso de uso: un nodo tiene gateway preferido porque normalmente siempre lo
-gestiona el mismo (instalación fija), pero el operador lo sobrescribe para
-una operación concreta cuando quiere probar otra pasarela.
-
-Preparación permitida durante v0.7 (sin implementar): dejar hueco visual
-en el Inspector (sección de pasarelas por nodo) para marcar la preferida.
+- **Política de fallback configurable** (nivel 4): hoy, sin candidato válido,
+  el fallback es fijo a `nodes.gateway_id` (solo si esa pasarela está
+  operativa-pero-caída o sin fila; nunca una retirada).
+- **Failover automático** tras fijarse la pasarela de una operación: descartado
+  a propósito (ADR 0013: evitar doble ejecución sobre LoRa); el reintento
+  manual re-evalúa.
+- **Límite de tasa de administración por pasarela**: hoy `admin_rate_limit_per_minute`
+  es global entre todas las pasarelas (el «1 en vuelo» sí es por pasarela).
 
 ## 2. Traceroute activo como herramienta de DIBUJADO de la red real
 
-> **Actualización 2026-10-05**: puntos 1–2 (persistir trazas + grafo acumulado
-> por API) implementados, ADR 0031. Pendientes: 3 (dibujado), 4 (barrido), 5, 6.
+> **Actualización 2026-10-06**: puntos 1–2 (persistir trazas + grafo acumulado
+> por API) implementados, ADR 0031; el historial de trazas y el Mapa 3D de una
+> traza ya existen (Herramientas), y la capa «Malla real» del mapa pinta
+> NeighborInfo. Pendientes: 3 (dibujado del grafo acumulado y vista de
+> topología), 4 (barrido guiado), 5 (derivados) y 6 (comparar pasarelas).
 
 **Decisión del usuario (2026-10-03): implementarlo más adelante, NO ahora.**
 Motivo: el traceroute activo (`traceroute.run`, ya operativo y probado con
@@ -78,9 +73,13 @@ traceroutes por nodo, y una traza sin respuesta es un resultado, no un error
 ## 3. Mapa 3D general: siguientes herramientas (anotado 2026-10-05)
 
 El Mapa 3D ya es un mapa general (nodos + búsqueda → trazas del nodo) con
-Perfil topográfico (línea de visión) entre dos puntos. Ideas pendientes, sin implementar:
+Perfil topográfico (línea de visión) entre dos puntos, y existe la herramienta
+**Calculador de cobertura 3D** (estimación de alcance de un emisor sobre el
+relieve: espacio libre + difracción Bullington; no es un simulador RF). Ideas
+pendientes, sin implementar:
 
-1. **Viewshed de un nodo**: zona visible desde un nodo con su mástil, sobre el DEM
+1. **Viewshed de un nodo** (distinto del calculador de cobertura, que modela
+   potencia, no solo visibilidad): zona visible desde un nodo con su mástil, sobre el DEM
    (también para un punto planeado: dónde colocar un nodo nuevo).
 2. **Mejor sitio intermedio** para desbloquear un enlace obstruido (parte del perfil).
 3. **Enlaces probables vs reales**: perfil automático de pares cercanos contrastado
