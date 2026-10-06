@@ -104,7 +104,7 @@ async def test_initial_config_is_served_from_library_state():
         assert kinds.count("node_info") == 2
         assert "channel" in kinds and "metadata" in kinds
         cfg_kinds = {f.config.WhichOneof("payload_variant") for f in frames if f.WhichOneof("payload_variant") == "config"}
-        assert {"lora", "device"} <= cfg_kinds
+        assert {"lora", "device", "sessionkey", "device_ui"} <= cfg_kinds
         nodes = {f.node_info.num: f.node_info for f in frames if f.WhichOneof("payload_variant") == "node_info"}
         assert nodes[0x11223344].user.short_name == "OTH" and nodes[0x11223344].position.latitude_i == 389000000
         # el nodo real no recibe nada por una petición de configuración
@@ -206,3 +206,28 @@ async def test_client_count_changes_notify_the_owner():
         writer.close()
         await asyncio.sleep(0.2)
     assert changes[:1] == [1] and 0 in changes
+
+
+async def _dump(h, nonce):
+    reader, writer = await h.connect()
+    _want_config(writer, nonce)
+    frames = await _read_frames(reader, FrameParser(), until_variant="config_complete_id")
+    writer.close()
+    return frames, [f.WhichOneof("payload_variant") for f in frames]
+
+
+async def test_two_phase_nonces_match_firmware_semantics():
+    """Las apps piden 69420 (solo ajustes) y luego 69421 (solo nodos). Responder
+    a la segunda con my_info otra vez las deja cargando en bucle."""
+    async with _Harness() as h:
+        frames, kinds = await _dump(h, 69420)
+        assert kinds[0] == "my_info" and kinds[-1] == "config_complete_id"
+        assert frames[-1].config_complete_id == 69420
+        nodes = [f.node_info.num for f in frames if f.WhichOneof("payload_variant") == "node_info"]
+        assert nodes == [0xAABBCCDD]  # solo el propio; el resto va en la fase 2
+        assert "channel" in kinds and "config" in kinds
+
+        frames, kinds = await _dump(h, 69421)
+        assert "my_info" not in kinds and "config" not in kinds and "channel" not in kinds
+        assert [f.node_info.num for f in frames if f.WhichOneof("payload_variant") == "node_info"] == [0x11223344]
+        assert frames[-1].config_complete_id == 69421

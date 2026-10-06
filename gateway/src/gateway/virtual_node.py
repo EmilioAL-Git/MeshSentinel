@@ -23,7 +23,14 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from google.protobuf import json_format
-from meshtastic.protobuf import admin_pb2, config_pb2, mesh_pb2, module_config_pb2, portnums_pb2
+from meshtastic.protobuf import (
+    admin_pb2,
+    config_pb2,
+    device_ui_pb2,
+    mesh_pb2,
+    module_config_pb2,
+    portnums_pb2,
+)
 
 logger = logging.getLogger("gateway.virtual_node")
 
@@ -32,6 +39,11 @@ MAX_FRAME = 512
 _CONFIG_COOLDOWN_SECONDS = 5.0  # mismo want_config_id repetido: bucle de reconexión del cliente
 _MAX_WRITE_BUFFER = 1_000_000  # cliente lento: se le expulsa antes de acumular memoria
 _BROADCAST_VARIANTS = frozenset({"packet", "node_info", "clientNotification"})
+# Las apps oficiales piden la configuración en dos fases (nonces especiales del
+# firmware): primero solo ajustes, luego solo la NodeDB. Responder a la segunda
+# con el volcado completo (mi info incluida) las hace reiniciar la carga en bucle.
+NONCE_ONLY_CONFIG = 69420
+NONCE_ONLY_NODES = 69421
 
 
 def frame(payload: bytes) -> bytes:
@@ -272,20 +284,37 @@ class VirtualNodeServer:
         msg.id = client.from_radio_id
         self._write(client, frame(msg.SerializeToString()))
 
-    def build_config_frames(self, iface: Any) -> list[Any]:
-        """FromRadio de la configuración del nodo, en el orden del firmware."""
+    @staticmethod
+    def _node_frames(iface: Any, own: bool) -> list[Any]:
+        """node_info del propio nodo (own=True) o de todos los demás (own=False)."""
+        my_num = getattr(getattr(iface, "myInfo", None), "my_node_num", None)
         frames: list[Any] = []
-        if getattr(iface, "myInfo", None) is not None:
-            frames.append(mesh_pb2.FromRadio(my_info=iface.myInfo))
-        if getattr(iface, "metadata", None) is not None:
-            frames.append(mesh_pb2.FromRadio(metadata=iface.metadata))
         for node in list((getattr(iface, "nodesByNum", None) or {}).values()):
+            if (node.get("num") == my_num) != own:
+                continue
             info = mesh_pb2.NodeInfo()
             try:
                 json_format.ParseDict(node, info, ignore_unknown_fields=True)
             except Exception:
                 continue
             frames.append(mesh_pb2.FromRadio(node_info=info))
+        return frames
+
+    def build_config_frames(self, iface: Any, nonce: int | None = None) -> list[Any]:
+        """FromRadio que el firmware enviaría ante `want_config_id`, en su orden.
+
+        · 69420 (solo configuración): mi info, mi nodo, metadatos, canales y
+          ajustes — sin el resto de la NodeDB.
+        · 69421 (solo nodos): únicamente la NodeDB de los demás nodos.
+        · cualquier otro id (CLI de Python…): volcado completo."""
+        if nonce == NONCE_ONLY_NODES:
+            return self._node_frames(iface, own=False)
+        frames: list[Any] = []
+        if getattr(iface, "myInfo", None) is not None:
+            frames.append(mesh_pb2.FromRadio(my_info=iface.myInfo))
+        frames.extend(self._node_frames(iface, own=True))
+        if getattr(iface, "metadata", None) is not None:
+            frames.append(mesh_pb2.FromRadio(metadata=iface.metadata))
         local = getattr(iface, "localNode", None)
         for channel in list(getattr(local, "channels", None) or []):
             frames.append(mesh_pb2.FromRadio(channel=channel))
@@ -297,6 +326,10 @@ class VirtualNodeServer:
                     cfg = config_pb2.Config()
                     getattr(cfg, field_desc.name).CopyFrom(getattr(local_config, field_desc.name))
                     frames.append(mesh_pb2.FromRadio(config=cfg))
+            # El firmware también envía estos dos (la librería no los conserva);
+            # las apps los esperan para dar la configuración por completa.
+            frames.append(mesh_pb2.FromRadio(config=config_pb2.Config(sessionkey=config_pb2.Config.SessionkeyConfig())))
+            frames.append(mesh_pb2.FromRadio(config=config_pb2.Config(device_ui=device_ui_pb2.DeviceUIConfig())))
         module_config = getattr(local, "moduleConfig", None)
         if module_config is not None:
             variants = {f.name for f in module_config_pb2.ModuleConfig.DESCRIPTOR.oneofs_by_name["payload_variant"].fields}
@@ -305,6 +338,8 @@ class VirtualNodeServer:
                     mcfg = module_config_pb2.ModuleConfig()
                     getattr(mcfg, field_desc.name).CopyFrom(getattr(module_config, field_desc.name))
                     frames.append(mesh_pb2.FromRadio(moduleConfig=mcfg))
+        if nonce is None or nonce not in (NONCE_ONLY_CONFIG, NONCE_ONLY_NODES):
+            frames.extend(self._node_frames(iface, own=False))
         return frames
 
     async def _send_initial_config(self, client: _Client, config_id: int) -> None:
@@ -319,11 +354,14 @@ class VirtualNodeServer:
             self._drop(client)
             return
         client.last_config_id, client.last_config_at = config_id, now
-        for i, msg in enumerate(self.build_config_frames(iface), start=1):
+        frames = self.build_config_frames(iface, config_id)
+        for i, msg in enumerate(frames, start=1):
             self._send_from_radio(client, msg)
             if i % 50 == 0:
                 await client.writer.drain()
         self._send_from_radio(client, mesh_pb2.FromRadio(config_complete_id=config_id))
         await client.writer.drain()
         client.configured = True
-        logger.info("virtual_node.config_sent client=%s id=%s", client.client_id, config_id)
+        logger.info(
+            "virtual_node.config_sent client=%s id=%s frames=%d", client.client_id, config_id, len(frames)
+        )

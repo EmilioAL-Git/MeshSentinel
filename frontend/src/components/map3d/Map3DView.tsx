@@ -70,7 +70,7 @@ function polyFeature(ring: LngLat[], props: Record<string, unknown>): GeoJSON.Fe
 const PX = {
   halfW: 3.2,
   pillarR: 6.5,
-  pillarH: 55,
+  pillarH: 20,
   minPeak: 16,
   peakRatio: 0.2,
   segment: 14, // largo de cada prisma del arco estático
@@ -894,6 +894,11 @@ export function Map3DView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [follow]);
 
+  // Cada traza nueva arranca con «Seguir» activado (el operador puede quitarlo luego)
+  useEffect(() => {
+    if (trace) setFollow(true);
+  }, [trace?.id]);
+
   // ── Animación del pulso ──────────────────────────────────────────────
   // El progreso se mide en SALTOS (0..n): cada salto dura HOP_SECONDS a 1×.
   useEffect(() => {
@@ -1244,7 +1249,11 @@ export function Map3DView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    if (!(tab === "profile" && posA && posB)) map.easeTo({ padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 0 });
+    // Solo si queda relleno: un easeTo (aunque sea de 0 ms) cancela el fitBounds
+    // del encuadre inicial que se lanza en ese mismo ciclo
+    const pad = map.getPadding();
+    const hasPad = pad.top || pad.bottom || pad.left || pad.right;
+    if (hasPad && !(tab === "profile" && posA && posB)) map.easeTo({ padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, posKey, ready]);
 
