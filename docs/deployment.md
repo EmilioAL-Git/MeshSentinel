@@ -30,7 +30,7 @@ Variable `GATEWAY_TRANSPORT` en `.env`:
 
 | Valor | Uso | Notas |
 |---|---|---|
-| `simulator` (por defecto) | Malla ficticia de 12 nodos, sin hardware | Ver `GATEWAY_SIM_SEED` / `GATEWAY_SIM_SHARED_SEED` para simular varias pasarelas viendo los mismos nodos (Multi-Gateway) |
+| `simulator` (por defecto del servicio) | Malla ficticia de 12 nodos, sin hardware | Ver `GATEWAY_SIM_SEED` / `GATEWAY_SIM_SHARED_SEED` para simular varias pasarelas viendo los mismos nodos (Multi-Gateway) |
 | `usb` | Nodo conectado por puerto serie | `MESHTASTIC_USB_DEVICE` vacío = autodetección; en macOS, Docker Desktop **no** tiene acceso al puerto serie del host — hace falta correr el gateway de forma nativa (ver `docs/operations/usb.md`) |
 | `tcp` | Nodo accesible por red (WiFi/Ethernet) | `GATEWAY_TCP_HOST` obligatorio. El firmware solo admite **un** cliente TCP simultáneo: cierra la app oficial si está conectada al mismo nodo |
 
@@ -73,8 +73,8 @@ La URL de conexión sale de `NOC_DATABASE_URL`.
 ## Tests y lint
 
 ```bash
-.venv/bin/python -m pytest backend/tests gateway/tests -q
-.venv/bin/ruff check backend/src gateway/src backend/tests gateway/tests
+.venv/bin/python -m pytest backend/tests gateway/tests launcher/tests -q
+.venv/bin/ruff check backend/src gateway/src launcher/src backend/tests gateway/tests launcher/tests
 cd frontend && npm run build   # incluye comprobación de tipos (tsc -b)
 ```
 

@@ -34,67 +34,78 @@ actuar sobre ella sin tocar cada dispositivo a mano.
 Funcionalidades realmente implementadas hoy (no aspiracionales):
 
 - **Centro de Operaciones** — vista por defecto: panel de situación (semáforo
-  de salud, alertas con reconocimiento en línea, estado de pasarelas), mapa
-  en vivo con pulsos de actividad y capas activables (estado, calidad de
-  señal, redundancia, tipo de nodo, enlaces nodo↔pasarela), y consola lateral
-  con Actividad/Trabajos/Alertas siempre montada.
-- **Flota** — listado denso de nodos con KPIs, filtros avanzados (DSL de
-  búsqueda), medidor de batería, barras de señal, favoritos/etiquetas/grupos/
-  ignorados, y selección masiva para lanzar lotes.
+  de salud, cola única de atención con alertas y ACK en línea, estado de
+  pasarelas), mapa en vivo con pulsos de actividad y consola lateral con
+  Actividad/Trabajos siempre montada.
+- **Mapa como centro operativo** — capas activables: estado, calidad de señal,
+  redundancia, tipo de nodo, enlaces nodo↔pasarela, malla real nodo↔nodo
+  (NeighborInfo persistido), rutas de traceroute, traza GPS, cobertura por
+  pasarela y medida, posiciones estimadas. El grupo activo filtra el mapa.
+- **Mapa 3D de trazas** y **Herramientas** (hub con historial de trazas,
+  calculador de cobertura 3D y administración remota).
+- **Flota** — roster denso y virtualizado con KPIs, filtros avanzados (DSL),
+  medidor de batería, barras de señal, favoritos personales/etiquetas/grupos/
+  ignorados, insignias de identidad, y selección masiva para lanzar lotes.
 - **Grupos y contexto de grupo activo** — clasificación de nodos (pasarela,
-  infraestructura, fijo, usuario), agrupación en "sitios" y una malla activa
-  que acota el resto de la interfaz (o "Toda la red" como escape).
-- **Inspector** — cajón de detalle global para cualquier nodo (no una
-  página): cabecera vital, acciones rápidas de lectura a un clic, histórico
-  de telemetría/posición con gráficas, gestión de favoritos/ignorados
-  remotos, observaciones por pasarela.
-- **Focus** — fijar un nodo como contexto: atenúa el mapa salvo alertas
-  activas, prioriza su actividad y sus trabajos en curso.
-- **Motor de alertas** — reglas configurables (batería baja, nodo
-  desconectado, SNR degradado, pasarela caída) con severidad, ciclo de vida
-  firing → acknowledged → resolved, y canales de notificación extensibles
-  (webhook, ntfy).
-- **Administración remota** — lectura de metadata/configuración, cambios
-  seguros con verificación de lectura (GET→SET→GET), editor completo de
-  `config`/`module_config` por secciones generado desde los propios
-  protobufs (sin lógica por parámetro), gestión de favoritos/ignorados
-  remotos del propio dispositivo — con cola persistente, límite de tasa de
-  malla y reintentos automáticos.
+  infraestructura, fijo, usuario), "sitios" y una malla activa que acota la
+  interfaz (o "Toda la red" como escape).
+- **Inspector** — cajón de detalle global para cualquier nodo: cabecera vital,
+  acciones rápidas (lecturas, traceroute activo), histórico y resumen 24 h con
+  gráficas, favoritos/ignorados remotos, observaciones por pasarela.
+- **Focus** — fijar un nodo como contexto: atenúa el mapa salvo alertas y
+  prioriza su actividad y trabajos.
+- **Motor de alertas** — 20+ tipos de regla (batería, offline, SNR, pasarela
+  caída/sorda, redundancia, temperatura, utilización de canal, pérdida de
+  posición, enlaces vecinos, claves duplicadas/débiles, nodo charlatán,
+  geovalla, asimetría de enlace…), ámbito global o por grupo, severidad,
+  ciclo firing → acknowledged → resolved, y notificación multi-proveedor
+  (webhook, ntfy, Telegram, Apprise) a través de canales lógicos.
+- **Administración remota** — lectura de metadata/config, SETs con verificación
+  de lectura (GET→SET→GET), editor completo de `config`/`module_config`
+  generado desde los protobufs, favoritos/ignorados remotos con sincronización,
+  traceroute activo; cola persistente, límite de tasa y reintentos.
 - **Perfiles de configuración** — plantillas versionadas e inmutables,
-  comparación por diferencias contra el estado real de un nodo, y
-  sincronización masiva.
-- **Trabajos (batches)** — selección de nodos, previsualización sin efectos
-  (dry-run), ejecución con confirmación explícita, progreso y ETA en vivo,
-  pausa/cancelación, reparto automático entre pasarelas cuando hay varias.
-- **Gestión de pasarelas** — alta/baja de pasarelas gestionadas por la propia
-  app (sin depender de variables de entorno), transporte USB, TCP o
-  simulado, descubrimiento de dispositivos, prueba de conexión antes de
-  guardar, habilitar/deshabilitar, borrado lógico.
-- **Multi-Gateway funcional** — un nodo puede ser visto por varias pasarelas
-  a la vez (N:M); estadísticas de cobertura y redundancia; cada operación se
-  enruta a una pasarela sana al encolarse (sin failover automático una vez
-  fijada).
-- **Registro de actividad** — diario cronológico de la malla: cada paquete
-  decodificado (telemetría, posición, identidad, vecinos, traceroute,
-  waypoints, mensajes) genera su propia entrada en lenguaje de operador, con
-  el detalle técnico plegado bajo "Ver paquete".
+  comparación por diferencias y sincronización masiva.
+- **Trabajos (batches)** — dry-run, confirmación explícita, progreso/ETA en
+  vivo, pausa/cancelación, reparto automático entre pasarelas.
+- **Gestión de pasarelas** — desde la propia app, sin tocar `.env`:
+  contenedores creados/destruidos por un **lanzador** dedicado, o pasarelas
+  externas registradas a mano. Transportes USB, TCP, HTTP, MQTT (solo
+  ingesta) y simulado; modo solo recepción; **nodo virtual** (servidor TCP que
+  permite conectar la app oficial a través de la pasarela).
+- **Multi-Gateway** — un nodo visto por varias pasarelas (N:M), estadísticas de
+  redundancia, enrutado de cada operación a una pasarela sana (con selección
+  manual por operación).
+- **Identidad de nodos** — detecta el cambio de node_id de firmware 2.8 y
+  permite fusionar historial de forma manual y confirmada.
+- **Registro de actividad persistente** — un paquete = una entrada en lenguaje
+  de operador, con búsqueda de servidor, filtros, histórico paginado y detalle
+  técnico plegado.
+- **Chat** y diagnóstico de entrega (heard-by).
+- **JenTastic-Nexus** — módulo opcional para nodos con firmware custom:
+  catálogo de ~190 comandos de texto, detección pasiva/activa, cola de
+  operaciones, difusión con respuestas por nodo y consola interpretada.
+- **Estadísticas** — récords de la malla con rankings completos.
+- **Seguridad y usuarios** — autenticación por sesión (cookie) y tokens API
+  Bearer, roles admin/gestor/usuario, espacio personal (favoritos y grupo
+  propios), registro de accesos. Sin administrador creado la plataforma queda
+  en modo abierto.
+- **Datos** — retención configurable por tipo, copias lógicas programadas,
+  resumen periódico por los proveedores de notificación, URLs compartibles
+  para cada vista y uso adaptado a móvil.
 
-Lo que **no** está implementado todavía (para no llevarse sorpresas):
-transporte HTTP para el gateway (solo USB, TCP y simulado), autenticación/
-RBAC real, selección "inteligente" de pasarela para administración remota
-(hoy es la primera pasarela sana disponible, sin ranking por prioridad/
-saltos/SNR/recencia — ver `docs/roadmap.md`), límite de tasa por pasarela
-(hoy es global entre todas), correlación de alertas, notificaciones por
-Telegram/email, reglas de alerta por grupo, histórico de trazas GPS, y
-topología nodo↔nodo persistida (el registro ya narra vecinos/traceroute,
-pero no se guarda un grafo consultable).
+Lo que **no** está implementado todavía (ver `docs/roadmap.md`): barrido
+activo de traceroute con presupuesto de airtime y grafo acumulado de la red
+real, failover automático de pasarela, límite de tasa de administración por
+pasarela (hoy global), correlación de alertas, alertas por `heapFreeBytes`
+(LocalStats no se decodifica) y notificación por email.
 
 ## Arquitectura
 
-Cuatro servicios orquestados con Docker Compose:
+Servicios orquestados con Docker Compose:
 
-- **gateway** — el único proceso que habla con el nodo Meshtastic (USB, TCP o
-  transporte simulado) y el único módulo que importa la librería oficial
+- **gateway** — el único proceso que habla con el nodo Meshtastic (USB, TCP, HTTP, MQTT
+  o simulado) y el único módulo que importa la librería oficial
   `meshtastic`. Decodifica los paquetes protobuf, publica eventos
   normalizados en Redis y consume su propia cola de comandos. Está
   deliberadamente desacoplado del backend: puede reiniciarse, cambiar de
@@ -107,8 +118,8 @@ Cuatro servicios orquestados con Docker Compose:
   comandos, donde sí importa que nada se pierda.
 - **backend** — FastAPI, organizado en capas (`domain` → `application` →
   `adapters`) para que la lógica de negocio no dependa de SQLAlchemy ni de
-  FastAPI directamente. Persiste nodos, posiciones y telemetría (series
-  append-only), expone la API REST y el WebSocket, evalúa el **motor de
+  FastAPI directamente. Persiste nodos, posiciones, telemetría, vecinos y trazas (series
+  append-only con retención configurable), expone la API REST y el WebSocket, evalúa el **motor de
   alertas** cada 30 s reconciliando el estado de la malla contra las reglas
   activas, y coordina el **motor de operaciones/lotes**: cada acción remota
   pasa por una cola persistente en base de datos, con reintentos, límite de
@@ -119,6 +130,9 @@ Cuatro servicios orquestados con Docker Compose:
   consola con un riel de navegación fijo, un cajón de detalle global
   (Inspector) que nunca cambia de vista, y un mapa que permanece montado en
   todo momento.
+- **gateway-launcher** — sidecar que crea y destruye contenedores de pasarela
+  a petición del backend (ADR 0028). Es el único servicio que monta el socket
+  de Docker, por diseño: el backend nunca lo toca.
 - **postgres** — persistencia recomendada (SQLite soportado para desarrollo
   vía `NOC_DATABASE_URL`, sin SQL dialectal para mantener ambos motores
   compatibles).
@@ -137,22 +151,28 @@ docker compose up --build
 - UI: http://localhost:8080
 - Documentación de la API: http://localhost:8080/api/v1/docs
 
-Por defecto el gateway usa el **transporte simulado** (una malla ficticia de
-12 nodos), así que no hace falta hardware para probar la plataforma. Para
-conectar un nodo real por TCP:
+El servicio `gateway` de Compose no arranca por defecto (`scale: 0`): al
+levantar el stack no hay ninguna pasarela. Créala desde la UI, en la pestaña
+**Enlaces** → «Añadir gateway»: con el **transporte simulado** (malla ficticia
+de 12 nodos) no hace falta hardware para probar la plataforma. Para forzar un
+gateway desde `.env` (simulado por defecto, o TCP), arráncalo a mano:
 
 ```env
 GATEWAY_TRANSPORT=tcp
 GATEWAY_TCP_HOST=192.168.1.50
 ```
 
+```bash
+docker compose up -d --scale gateway=1 gateway
+```
+
 (El firmware Meshtastic solo admite un cliente TCP a la vez: cierra la app
 oficial si está conectada al mismo nodo. Ver `docs/acceptance/tcp.md`.)
 
-Para USB, además descomenta el bloque `devices:` del servicio `gateway` en
-`docker-compose.yml` y ajusta `MESHTASTIC_USB_DEVICE` — en macOS, Docker
-Desktop no tiene acceso al puerto serie del host; hace falta correr el
-gateway de forma nativa (ver `docs/operations/usb.md`).
+La imagen del gateway se construye igualmente: la usa el lanzador para las
+pasarelas que creas desde la UI. Para USB en macOS, Docker Desktop no ve el
+puerto serie del host: hay que correr el gateway de forma nativa (ver
+`docs/operations/usb.md`).
 
 ## Cómo se desarrolla
 
@@ -164,9 +184,9 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 - Backend con recarga automática: http://localhost:8000/api/v1/docs
 
 ```bash
-# Tests + lint (venv en .venv/, instalado con -e "backend[dev]" -e "gateway[dev]")
-.venv/bin/python -m pytest backend/tests gateway/tests -q
-.venv/bin/ruff check backend/src gateway/src backend/tests gateway/tests
+# Tests + lint (venv en .venv/, instalado con -e "backend[dev]" -e "gateway[dev]" -e "launcher[dev]")
+.venv/bin/python -m pytest backend/tests gateway/tests launcher/tests -q
+.venv/bin/ruff check backend/src gateway/src launcher/src backend/tests gateway/tests launcher/tests
 
 # Frontend (incluye comprobación de tipos)
 cd frontend && npm run build
