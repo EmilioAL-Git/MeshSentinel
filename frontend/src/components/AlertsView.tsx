@@ -63,6 +63,8 @@ const RULE_FIELD_META: Record<
   {
     label: string;
     threshold?: { label: string; step?: number; default: number };
+    /** Parámetros numéricos extra, guardados en `params` (p. ej. el centro de una zona). */
+    params?: { key: string; label: string; step?: number; default: number }[];
     duration?: {
       label: string;
       toUi: (s: number) => number;
@@ -111,6 +113,28 @@ const RULE_FIELD_META: Record<
   chatty_node: { label: "Nodo parlanchín", threshold: { label: "% de aire propio (TX) máx.", step: 0.5, default: 8 } },
   obsolete_role: { label: "Rol obsoleto" },
   position_overbroadcast: { label: "Posición en exceso", threshold: { label: "Posiciones por hora máx.", default: 12 } },
+  // Informe de problemas fase 2 (ADR 0035)
+  asymmetric_link: { label: "Enlace asimétrico", threshold: { label: "Diferencia de SNR mínima (dB)", step: 0.5, default: 6 } },
+  router_cluster: { label: "Clúster de routers", threshold: { label: "Routers enlazados mínimos", default: 3 } },
+  hop_horizon: { label: "Horizonte de saltos", threshold: { label: "Saltos (máx. 7)", default: 7 } },
+  router_moving: { label: "Router que se mueve", threshold: { label: "Metros en 24 h", step: 100, default: 1000 } },
+  // Zonas circulares (solo la parte pasiva del disparador por zona): alertas de estado
+  geofence_inside: {
+    label: "Zona: nodo dentro",
+    threshold: { label: "Radio (m)", step: 50, default: 500 },
+    params: [
+      { key: "lat", label: "Latitud del centro", step: 0.0001, default: 40.4168 },
+      { key: "lon", label: "Longitud del centro", step: 0.0001, default: -3.7038 },
+    ],
+  },
+  geofence_outside: {
+    label: "Zona: nodo fuera",
+    threshold: { label: "Radio (m)", step: 50, default: 500 },
+    params: [
+      { key: "lat", label: "Latitud del centro", step: 0.0001, default: 40.4168 },
+      { key: "lon", label: "Longitud del centro", step: 0.0001, default: -3.7038 },
+    ],
+  },
   telemetry_overbroadcast: { label: "Telemetría en exceso", threshold: { label: "Paquetes de telemetría por hora máx.", default: 12 } },
 };
 
@@ -137,6 +161,15 @@ const PROVIDER_FIELD_META: Record<
     fields: [
       { key: "topic", label: "Topic", placeholder: "meshsentinel" },
       { key: "url", label: "Servidor", placeholder: "https://ntfy.sh (opcional)", optional: true },
+      { key: "token", label: "Token", type: "password", optional: true },
+    ],
+  },
+  apprise: {
+    label: "Apprise (100+ servicios)",
+    fields: [
+      { key: "url", label: "Servidor", placeholder: "http://apprise:8000" },
+      { key: "key", label: "Clave guardada", placeholder: "mi-config (o usa URLs)", optional: true },
+      { key: "urls", label: "URLs Apprise", placeholder: "discord://…,mailto://… (sin clave)", optional: true },
       { key: "token", label: "Token", type: "password", optional: true },
     ],
   },
@@ -204,6 +237,9 @@ function RuleEditor({
   const [durationUi, setDurationUi] = useState(meta?.duration ? meta.duration.toUi(rule.duration_seconds ?? 0) : 0);
   const [cooldown, setCooldown] = useState(rule.cooldown_seconds);
   const [channelIds, setChannelIds] = useState<number[]>(rule.channel_ids ?? []);
+  const [params, setParams] = useState<Record<string, number>>(
+    Object.fromEntries((meta?.params ?? []).map((f) => [f.key, Number(rule.params?.[f.key] ?? f.default)])),
+  );
 
   return (
     <div
@@ -248,6 +284,18 @@ function RuleEditor({
           />
         </div>
       )}
+      {meta?.params?.map((f) => (
+        <div key={f.key} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span className="microlabel" style={{ minWidth: 70 }}>{f.label}</span>
+          <input
+            className="input"
+            type="number"
+            step={f.step ?? 1}
+            value={params[f.key]}
+            onChange={(e) => setParams({ ...params, [f.key]: Number(e.target.value) })}
+          />
+        </div>
+      ))}
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
         <span className="microlabel" style={{ minWidth: 70 }}>Enfriamiento (s)</span>
         <input className="input" type="number" min={0} value={cooldown} onChange={(e) => setCooldown(Number(e.target.value))} />
@@ -264,6 +312,7 @@ function RuleEditor({
               duration_seconds: meta?.duration ? meta.duration.fromUi(durationUi) : rule.duration_seconds,
               cooldown_seconds: cooldown,
               channel_ids: channelIds,
+              ...(meta?.params ? { params: { ...rule.params, ...params } } : {}),
             })
           }
         >
@@ -294,6 +343,7 @@ function NewRuleForm({
   const [durationUi, setDurationUi] = useState(meta.duration?.default ?? 0);
   const [cooldown, setCooldown] = useState(0);
   const [channelIds, setChannelIds] = useState<number[]>([]);
+  const [params, setParams] = useState<Record<string, number>>({});
   // Ámbito de la regla (§1.3, ampliado): toda la red / un grupo / un nodo
   // concreto, mutuamente excluyentes. El nombre por defecto incorpora el
   // ámbito — `name` es UNIQUE en BD y colisionaría con la regla global
@@ -328,6 +378,7 @@ function NewRuleForm({
     setName(defaultName(t, kind, groupId, nodeId));
     setThreshold(RULE_FIELD_META[t].threshold?.default ?? 0);
     setDurationUi(RULE_FIELD_META[t].duration?.default ?? 0);
+    setParams(Object.fromEntries((RULE_FIELD_META[t].params ?? []).map((f) => [f.key, f.default])));
   };
 
   const changeScopeKind = (kind: "all" | "group" | "node") => {
@@ -444,6 +495,18 @@ function NewRuleForm({
           />
         </div>
       )}
+      {meta.params?.map((f) => (
+        <div key={f.key} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span className="microlabel" style={{ minWidth: 70 }}>{f.label}</span>
+          <input
+            className="input"
+            type="number"
+            step={f.step ?? 1}
+            value={params[f.key]}
+            onChange={(e) => setParams({ ...params, [f.key]: Number(e.target.value) })}
+          />
+        </div>
+      ))}
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
         <span className="microlabel" style={{ minWidth: 70 }}>Enfriamiento (s)</span>
         <input className="input" type="number" min={0} value={cooldown} onChange={(e) => setCooldown(Number(e.target.value))} />
@@ -463,7 +526,7 @@ function NewRuleForm({
               threshold: meta.threshold ? threshold : null,
               duration_seconds: meta.duration ? meta.duration.fromUi(durationUi) : null,
               cooldown_seconds: cooldown,
-              params: {},
+              params: meta.params ? Object.fromEntries(meta.params.map((f) => [f.key, params[f.key] ?? f.default])) : {},
               group_id: scopeKind === "group" ? groupId : null,
               node_id: scopeKind === "node" ? nodeId : null,
               channel_ids: channelIds,

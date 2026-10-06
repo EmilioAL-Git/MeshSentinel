@@ -27,6 +27,10 @@ export interface MapLayerState {
   showRoutes: boolean;
   /** Área aproximada por pasarela derivada de sus enlaces activos. */
   showCoverage: boolean;
+  /** Posición inferida de nodos sin GPS (ADR 0035). */
+  showEstimated: boolean;
+  /** Señal REAL medida: recepciones directas por celda (ADR 0035). */
+  showMeasured: boolean;
   colorMode: MapColorMode;
 }
 
@@ -42,6 +46,8 @@ export const DEFAULT_MAP_LAYERS: MapLayerState = {
   showTraces: false,
   showRoutes: false,
   showCoverage: false,
+  showEstimated: false,
+  showMeasured: false,
   colorMode: "status",
 };
 
@@ -133,6 +139,20 @@ export function LayerToggle({
           title="Área aproximada de cobertura por pasarela (no es un modelo de propagación real)"
         >
           ◌ Cobertura
+        </button>
+        <button
+          style={chipBtn(layers.showEstimated)}
+          onClick={() => set("showEstimated", !layers.showEstimated)}
+          title="Posición inferida de nodos sin GPS (centroide de quienes los oyen directamente; círculo = incertidumbre)"
+        >
+          ◯ Estimadas
+        </button>
+        <button
+          style={chipBtn(layers.showMeasured)}
+          onClick={() => set("showMeasured", !layers.showMeasured)}
+          title="Señal real medida: SNR de posiciones oídas a 0 saltos, por celda de ~110 m (solo donde hubo nodos con GPS emitiendo)"
+        >
+          ▦ Cobertura medida
         </button>
       </div>
       <div style={{ display: "flex", gap: "0.3rem" }}>

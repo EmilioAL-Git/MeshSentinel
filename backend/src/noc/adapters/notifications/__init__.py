@@ -1,3 +1,4 @@
+from noc.adapters.notifications.apprise import AppriseProvider
 from noc.adapters.notifications.ntfy import NtfyProvider
 from noc.adapters.notifications.telegram import TelegramProvider
 from noc.adapters.notifications.webhook import WebhookProvider
@@ -10,6 +11,7 @@ PROVIDERS: dict[str, type] = {
     "webhook": WebhookProvider,
     "ntfy": NtfyProvider,
     "telegram": TelegramProvider,
+    "apprise": AppriseProvider,
 }
 
 

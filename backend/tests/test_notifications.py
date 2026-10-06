@@ -270,3 +270,43 @@ async def test_duplicate_provider_twice_gets_distinct_names(session_factory):
         second = await duplicate_provider(p.id, session, None)
 
     assert {first.name, second.name} == {"Ops (copia)", "Ops (copia 2)"}
+
+
+# ── Apprise (servidor Apprise API) ───────────────────────────────────────────
+
+
+def test_apprise_validate_and_registry():
+    from noc.adapters.notifications.apprise import AppriseProvider
+
+    assert "apprise" in PROVIDERS
+    assert len(AppriseProvider({}).validate()) == 2
+    assert AppriseProvider({"url": "http://a:8000"}).validate() == ["Falta 'key' (configuración guardada) o 'urls' (URLs Apprise)"]
+    assert AppriseProvider({"url": "http://a:8000", "key": "k"}).validate() == []
+    assert AppriseProvider({"url": "http://a:8000", "urls": "json://x"}).validate() == []
+
+
+async def test_apprise_posts_to_key_or_stateless_endpoint(monkeypatch):
+    import httpx
+
+    from noc.adapters.notifications.apprise import AppriseProvider
+
+    calls: list[tuple[str, dict, dict]] = []
+
+    class FakeClient:
+        def __init__(self, *a, **kw): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, json=None, headers=None):
+            calls.append((url, json, headers))
+            return httpx.Response(200, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("noc.adapters.notifications.apprise.httpx.AsyncClient", FakeClient)
+    msg = render_message(make_alert(severity="CRITICAL"), "fired")
+    await AppriseProvider({"url": "http://a:8000/", "key": "ops", "token": "t"}).send(msg)
+    await AppriseProvider({"url": "http://a:8000", "urls": "json://x"}).send(render_message(make_alert(), "resolved"))
+
+    url, payload, headers = calls[0]
+    assert url == "http://a:8000/notify/ops" and payload["type"] == "failure" and "urls" not in payload
+    assert headers == {"Authorization": "Bearer t"}
+    url, payload, _ = calls[1]
+    assert url == "http://a:8000/notify" and payload["urls"] == "json://x" and payload["type"] == "success"

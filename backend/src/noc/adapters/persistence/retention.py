@@ -24,6 +24,7 @@ from noc.adapters.persistence.models import (
     AlertModel,
     AuthLoginLogModel,
     ChatMessageModel,
+    CoverageReceptionModel,
     GatewayModel,
     NeighborModel,
     NexusOperationModel,
@@ -56,6 +57,7 @@ TARGETS: tuple[RetentionTarget, ...] = (
     RetentionTarget("telemetry", "Telemetría", "retention_telemetry_days", ("node_telemetry",)),
     RetentionTarget("positions", "Posiciones", "retention_positions_days", ("node_positions",)),
     RetentionTarget("neighbors", "Vecinos", "retention_neighbors_days", ("node_neighbors",)),
+    RetentionTarget("coverage", "Cobertura medida", "retention_coverage_days", ("coverage_receptions",)),
     RetentionTarget(
         "traces", "Trazas de la red", "retention_traces_days", ("node_traces", "node_trace_hops")
     ),
@@ -78,6 +80,7 @@ TABLE_LABELS: dict[str, str] = {
     "node_telemetry": "Telemetría",
     "node_positions": "Posiciones",
     "node_neighbors": "Vecinos (NeighborInfo)",
+    "coverage_receptions": "Cobertura medida",
     "node_gateway_links": "Enlaces nodo↔pasarela",
     "node_traces": "Trazas de la red (traceroute)",
     "node_trace_hops": "Saltos de trazas",
@@ -98,6 +101,7 @@ OLDEST_COLUMN: dict[str, str] = {
     "node_telemetry": "received_at",
     "node_positions": "received_at",
     "node_neighbors": "received_at",
+    "coverage_receptions": "received_at",
     "node_traces": "received_at",
     "node_trace_hops": "received_at",
     "chat_messages": "received_at",
@@ -250,6 +254,7 @@ async def prune_all(
     await run("telemetry", "retention_telemetry_days", simple(TelemetryModel, TelemetryModel.received_at))
     await run("positions", "retention_positions_days", simple(PositionModel, PositionModel.received_at))
     await run("neighbors", "retention_neighbors_days", simple(NeighborModel, NeighborModel.received_at))
+    await run("coverage", "retention_coverage_days", simple(CoverageReceptionModel, CoverageReceptionModel.received_at))
     await run("traces", "retention_traces_days", lambda c: _prune_traces(session_factory, c))
     await run("chat", "retention_chat_days", simple(ChatMessageModel, ChatMessageModel.received_at))
     await run(

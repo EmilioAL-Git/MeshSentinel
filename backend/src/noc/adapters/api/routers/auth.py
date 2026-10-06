@@ -37,7 +37,7 @@ def _client_ip(request: Request) -> str | None:
 
 
 class UserOut(BaseModel):
-    id: int
+    id: int | None  # None = principal de un token de API (sin cuenta)
     username: str
     display_name: str
     role: str
@@ -235,6 +235,68 @@ async def delete_user(user_id: int, request: Request, _admin: RequireAdminDep) -
 # SIEMPRE, incluso en modo abierto (RequireAuthDep no serviría: en modo
 # abierto deja pasar sin sesión), pero sin exigir is_admin (no es gestión
 # de usuarios).
+
+
+# ── Tokens Bearer de API (ADR 0035) ──────────────────────────────────────────
+
+
+def _require_session_admin(current_user: AuthUser | None) -> AuthUser:
+    """Siempre exige un admin con SESIÓN real, también en modo abierto: un
+    token creado sin sesión sobreviviría al arranque del modo protegido
+    (escalada de privilegios). Un token de API nunca es admin."""
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Requiere privilegio de administrador")
+    return current_user
+
+
+class ApiTokenCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    role: str = "manager"
+    expires_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class ApiTokenOut(BaseModel):
+    id: int
+    name: str
+    token_prefix: str
+    role: str
+    created_by: str | None
+    created_at: datetime | None
+    last_used_at: datetime | None
+    expires_at: datetime | None
+
+
+class ApiTokenCreatedOut(ApiTokenOut):
+    token: str  # valor EN CLARO: solo en esta respuesta
+
+
+def _token_out(t) -> dict:  # type: ignore[no-untyped-def]
+    return {f: getattr(t, f) for f in ApiTokenOut.model_fields}
+
+
+@router.get("/tokens", response_model=list[ApiTokenOut])
+async def list_tokens(request: Request, current_user: CurrentUserDep) -> list[ApiTokenOut]:
+    _require_session_admin(current_user)
+    return [ApiTokenOut(**_token_out(t)) for t in await _service(request).list_api_tokens()]
+
+
+@router.post("/tokens", response_model=ApiTokenCreatedOut, status_code=201)
+async def create_token(body: ApiTokenCreateIn, request: Request, current_user: CurrentUserDep) -> ApiTokenCreatedOut:
+    admin = _require_session_admin(current_user)
+    try:
+        token, plain = await _service(request).create_api_token(body.name, body.role, body.expires_days, admin.username)
+    except AuthError as exc:
+        raise HTTPException(status_code=409 if exc.reason == "duplicate_name" else 400, detail=exc.message) from exc
+    return ApiTokenCreatedOut(**_token_out(token), token=plain)
+
+
+@router.delete("/tokens/{token_id}", status_code=204)
+async def revoke_token(token_id: int, request: Request, current_user: CurrentUserDep) -> None:
+    _require_session_admin(current_user)
+    if not await _service(request).revoke_api_token(token_id):
+        raise HTTPException(status_code=404, detail="Token not found")
 
 
 @router.get("/login-log", response_model=list[LoginLogOut])

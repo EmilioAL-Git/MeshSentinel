@@ -69,7 +69,7 @@ class NotificationProviderConfig:
     noc.adapters.notifications.PROVIDERS)."""
 
     name: str
-    provider: str  # "webhook" | "ntfy" | "telegram" (registro extensible)
+    provider: str  # "webhook" | "ntfy" | "telegram" | "apprise" (registro extensible)
     configuration: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
     id: int | None = None

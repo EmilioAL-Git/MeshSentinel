@@ -1734,3 +1734,56 @@ export interface BackupStatusOut {
 export const fetchBackups = () => get<BackupStatusOut>("/maintenance/backups");
 export const runBackupNow = () => send<BackupRunOut>("POST", "/maintenance/backups/run");
 export const storedBackupUrl = (name: string) => `/api/v1/maintenance/backups/${encodeURIComponent(name)}`;
+
+// ── Posiciones estimadas para nodos sin GPS (ADR 0035) ───────────────────────
+
+export interface EstimatedPositionOut {
+  node_id: string;
+  latitude: number;
+  longitude: number;
+  radius_m: number;
+  anchors: number;
+  computed_at: string;
+  provenance: "inferred";
+}
+export const fetchEstimatedPositions = () => get<EstimatedPositionOut[]>("/estimated-positions");
+
+// ── Cobertura medida (ADR 0035) ──────────────────────────────────────────────
+
+export interface CoverageCellOut {
+  latitude: number;
+  longitude: number;
+  avg_snr: number;
+  max_snr: number;
+  receptions: number;
+  nodes: number;
+  last_at: string | null;
+}
+export const fetchCoverage = (sinceHours?: number, gatewayId?: string) => {
+  const q = new URLSearchParams();
+  if (sinceHours) q.set("since_hours", String(sinceHours));
+  if (gatewayId) q.set("gateway_id", gatewayId);
+  const qs = q.toString();
+  return get<CoverageCellOut[]>(`/coverage${qs ? `?${qs}` : ""}`);
+};
+
+// ── Tokens Bearer de API (ADR 0035) ──────────────────────────────────────────
+
+export interface ApiTokenOut {
+  id: number;
+  name: string;
+  token_prefix: string;
+  role: "manager" | "user";
+  created_by: string | null;
+  created_at: string | null;
+  last_used_at: string | null;
+  expires_at: string | null;
+}
+export interface ApiTokenCreatedOut extends ApiTokenOut {
+  /** Valor en claro: solo viaja en la respuesta de creación. */
+  token: string;
+}
+export const fetchApiTokens = () => get<ApiTokenOut[]>("/auth/tokens");
+export const createApiToken = (body: { name: string; role: "manager" | "user"; expires_days: number | null }) =>
+  send<ApiTokenCreatedOut>("POST", "/auth/tokens", body);
+export const revokeApiToken = (id: number) => send<void>("DELETE", `/auth/tokens/${id}`);

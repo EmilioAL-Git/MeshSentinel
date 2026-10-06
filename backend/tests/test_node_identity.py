@@ -207,3 +207,87 @@ def test_duplicate_alert_hints_same_device_when_names_match():
     conds = {x.subject_id: x.message for x in EVALUATORS["key_security"](_rule("key_security"), snap)}
     assert "mismo nombre" in conds["!aaaa0001"]
     assert "mismo nombre" not in conds["!cccc0003"]
+
+
+# ── Informe de problemas, fase 2 (grafo RF, ADR 0035) ────────────────────────
+
+
+def test_rf_graph_asymmetric_and_cluster_and_horizon_and_moving():
+    from noc.application.rf_graph import build_rf_edges
+    from noc.domain.nodes.entities import NodeNeighbor
+
+    def n(i: int, **kw) -> Node:
+        return Node(node_id=f"!0000000{i}", short_name=f"N{i}", last_seen_at=NOW, **kw)
+
+    nodes = [n(1, role="ROUTER"), n(2, role="ROUTER"), n(3, role="REPEATER"), n(4, role="ROUTER"),
+             n(5, role="CLIENT", hops_away=7), n(6, role="CLIENT", hops_away=3), n(7, role="ROUTER_LATE")]
+    # NeighborInfo: el nodo N declara que oyó al vecino V con snr → arista V→N
+    neighbors = [
+        NodeNeighbor("!00000002", "!00000001", snr=10.0, received_at=NOW),  # 1→2 a 10 dB
+        NodeNeighbor("!00000001", "!00000002", snr=1.0, received_at=NOW),   # 2→1 a 1 dB: Δ 9
+        NodeNeighbor("!00000003", "!00000001", snr=5.0, received_at=NOW),
+        NodeNeighbor("!00000004", "!00000001", snr=5.0, received_at=NOW),
+        NodeNeighbor("!00000007", "!00000001", snr=5.0, received_at=NOW),   # ROUTER_LATE no cuenta
+    ]
+    traces = [("!00000003", "!00000004", 4.0, NOW)]  # la traza añade 3→4 (sin vuelta: no asimétrico)
+    snap = NetworkSnapshot(
+        summaries=[_summary(x) for x in nodes],
+        rf_edges=build_rf_edges(neighbors, traces),
+        position_bbox_24h={"!00000001": (40.0, 40.0, -2.0, -2.0), "!00000002": (40.0, 40.1, -2.0, -2.0)},
+        now=NOW,
+    )
+
+    def run(rt: str, **kw):
+        return EVALUATORS[rt](_rule(rt, **kw), snap)
+
+    asym = run("asymmetric_link")
+    assert [c.subject_id for c in asym] == ["!00000001"]  # el que oye PEOR (a 1 dB) es el 1
+    assert run("asymmetric_link", threshold=20) == []
+    cluster = run("router_cluster")  # N1 enlaza con N2, N3, N4 = 3 routers (N7 es ROUTER_LATE)
+    assert [c.subject_id for c in cluster] == ["!00000001"]
+    assert [c.subject_id for c in run("hop_horizon")] == ["!00000005"]
+    moving = run("router_moving")  # 0,1° de latitud ≈ 11 km
+    assert [c.subject_id for c in moving] == ["!00000002"]
+
+
+def test_rf_graph_empty_means_silent():
+    snap = NetworkSnapshot(summaries=[_summary(Node(node_id="!00000001", role="ROUTER", last_seen_at=NOW))], now=NOW)
+    for rt in ("asymmetric_link", "router_cluster", "router_moving"):
+        assert EVALUATORS[rt](_rule(rt), snap) == []
+
+
+def test_geofence_inside_outside_and_stale_and_bad_params():
+    from noc.domain.nodes.entities import Position
+
+    def n(i: int, lat: float, age_h: float = 0.0, online: bool = True) -> NodeSummary:
+        node = Node(node_id=f"!0000000{i}", short_name=f"N{i}", last_seen_at=NOW if online else NOW - timedelta(days=2))
+        return NodeSummary(node=node, last_position=Position(node.node_id, lat, -2.0, received_at=NOW - timedelta(hours=age_h)))
+
+    # centro (40.0, -2.0), radio 1 km; 0,001° de latitud ≈ 111 m
+    snap = NetworkSnapshot(
+        summaries=[n(1, 40.002), n(2, 40.05), n(3, 40.002, age_h=10), n(4, 40.002, online=False)], now=NOW
+    )
+    base = dict(threshold=1000, params={"lat": 40.0, "lon": -2.0})
+    inside = EVALUATORS["geofence_inside"](_rule("geofence_inside", **base), snap)
+    outside = EVALUATORS["geofence_outside"](_rule("geofence_outside", **base), snap)
+    assert [c.subject_id for c in inside] == ["!00000001"]  # stale y offline no cuentan
+    assert [c.subject_id for c in outside] == ["!00000002"]
+    # regla mal formada: silenciosa
+    assert EVALUATORS["geofence_inside"](_rule("geofence_inside", threshold=1000, params={}), snap) == []
+    assert EVALUATORS["geofence_inside"](_rule("geofence_inside", params={"lat": 40, "lon": -2}), snap) == []
+
+
+def test_geofence_rule_in_requires_zone_params():
+    import pytest
+    from pydantic import ValidationError
+
+    from noc.adapters.api.routers.alerts import RuleIn
+
+    base = dict(name="z", rule_type="geofence_inside", severity="INFO")
+    with pytest.raises(ValidationError):
+        RuleIn(**base, threshold=500)  # sin lat/lon
+    with pytest.raises(ValidationError):
+        RuleIn(**base, params={"lat": 99, "lon": 0}, threshold=500)  # fuera de rango
+    with pytest.raises(ValidationError):
+        RuleIn(**base, params={"lat": 40, "lon": -2})  # sin radio
+    assert RuleIn(**base, params={"lat": 40, "lon": -2}, threshold=500).rule_type == "geofence_inside"

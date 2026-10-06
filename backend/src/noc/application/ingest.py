@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from noc.adapters.persistence.chat_repositories import SqlChatRepository
 from noc.adapters.persistence.repositories import (
+    SqlCoverageRepository,
     SqlGatewayRepository,
     SqlNeighborRepository,
     SqlNodeGatewayLinkRepository,
@@ -43,6 +44,8 @@ SUPPORTED_SCHEMA_VERSION = 1
 # Actividad 2.0 Fase 1: un uptime que retrocede más de esto respecto al último
 # registro de kind=device se narra como reinicio, no como telemetría normal
 REBOOT_UPTIME_DELTA_SECONDS = 60
+# Precisión mínima de una posición para medir cobertura: 16 bits ≈ 720 m de paso
+MIN_COVERAGE_PRECISION_BITS = 16
 
 
 def _node_label(node: Node | None, fallback: str) -> str:
@@ -260,9 +263,28 @@ class IngestService:
                 gateway_id=gateway_id,
             )
         )
+        await self._record_coverage(session, p, gateway_id, ts)
         label = _node_label(await node_repo.get(p["node_id"]), p["node_id"])
         await activity.emit_activity(
             activity_events.render_position(p["node_id"], label, p, gateway_id)
+        )
+
+    async def _record_coverage(
+        self, session: AsyncSession, p: dict[str, Any], gateway_id: str | None, ts: datetime
+    ) -> None:
+        """Cobertura medida (ADR 0035): solo una posición oída A 0 SALTOS con
+        SNR y con precisión suficiente (una posición difuminada a km no mide
+        nada). El estado de "directo" viene del enlace nodo↔pasarela (último
+        hops_away observado), porque el evento de posición no lleva saltos."""
+        snr = p.get("snr")
+        bits = p.get("precision_bits")
+        if gateway_id is None or snr is None or (bits is not None and bits < MIN_COVERAGE_PRECISION_BITS):
+            return
+        links = await SqlNodeGatewayLinkRepository(session).list_for_node(p["node_id"])
+        if not any(link.gateway_id == gateway_id and link.hops_away == 0 for link in links):
+            return
+        await SqlCoverageRepository(session).add(
+            gateway_id, p["node_id"], p["latitude"], p["longitude"], snr, p.get("rssi"), ts
         )
 
     async def _on_telemetry(

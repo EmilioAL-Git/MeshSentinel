@@ -10,6 +10,7 @@ import {
   type AuthUserOut,
   type UserRole,
 } from "../api/client";
+import { ApiTokensPanel } from "./ApiTokensPanel";
 import { toast } from "./shell/Toast";
 import { t } from "../tokens";
 
@@ -97,6 +98,8 @@ export function UsersView() {
           </table>
         )}
       </div>
+
+      <ApiTokensPanel />
     </div>
   );
 }

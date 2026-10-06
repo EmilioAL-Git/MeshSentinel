@@ -11,6 +11,7 @@ from typing import Callable
 
 from noc.application.dashboard import ensure_utc, is_stale
 from noc.application.gateway_stats import compute_multi_gateway_stats
+from noc.application.rf_graph import RfEdge, find_asymmetric_links, haversine_m, router_neighbors
 from noc.application.node_identity import (
     find_duplicate_keys,
     find_weak_keys,
@@ -42,6 +43,10 @@ class NetworkSnapshot:
     # Paquetes persistidos por nodo en la última hora (reglas de ritmo
     # excesivo). Observado, no exacto: un paquete oído por 2 pasarelas puede
     # contar dos veces — por eso los umbrales por defecto son holgados.
+    # Grafo RF dirigido (NeighborInfo + trazas, ADR 0035) y caja envolvente de
+    # posiciones de 24 h por nodo (lat_min, lat_max, lon_min, lon_max).
+    rf_edges: list[RfEdge] = field(default_factory=list)
+    position_bbox_24h: dict[str, tuple[float, float, float, float]] = field(default_factory=dict)
     position_counts_1h: dict[str, int] = field(default_factory=dict)
     telemetry_counts_1h: dict[str, int] = field(default_factory=dict)
     all_nodes: list = field(default_factory=list)  # list[Node] de toda la red, para key_security
@@ -481,6 +486,155 @@ def eval_telemetry_overbroadcast(rule: AlertRule, snap: NetworkSnapshot) -> list
     return _eval_rate(rule, snap, snap.telemetry_counts_1h, 12, "telemetría")
 
 
+# ── Informe de problemas, fase 2 (ADR 0035) ─────────────────────────────────
+
+# ROUTER_LATE queda fuera a propósito: está pensado para repetir en clústeres.
+ROUTER_ROLES = frozenset({"ROUTER", "REPEATER"})
+INFRA_ROLES = frozenset({"ROUTER", "REPEATER", "ROUTER_LATE"})
+
+
+def eval_asymmetric_link(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    """Enlace con SNR muy distinto según el sentido (antena/ubicación/ruido
+    local desigual). Sujeto = el extremo que oye PEOR; agregado por nodo."""
+    threshold = rule.threshold if rule.threshold is not None else 6
+    labels = {s.node.node_id: _node_label(s) for s in snap.summaries}
+    by_node: dict[str, list[str]] = {}
+    for link in find_asymmetric_links(snap.rf_edges, threshold):
+        if link.weak_rx not in labels:
+            continue
+        other = labels.get(link.strong_rx, link.strong_rx)
+        by_node.setdefault(link.weak_rx, []).append(
+            f"{other} (lo oye a {link.weak_snr:g} dB, él le oye a {link.strong_snr:g} dB)"
+        )
+    return [
+        AlertCondition(
+            rule_id=rule.id or 0,
+            subject_type="node",
+            subject_id=node_id,
+            message=f"Enlace asimétrico en {labels[node_id]} (Δ > {threshold:g} dB): {'; '.join(items)}",
+        )
+        for node_id, items in sorted(by_node.items())
+    ]
+
+
+def eval_router_cluster(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    """Router enlazado con ≥N routers más: repetición redundante que gasta
+    aire sin ganar cobertura. Solo ve los enlaces conocidos (NeighborInfo/trazas)."""
+    threshold = int(rule.threshold) if rule.threshold is not None else 3
+    routers = {s.node.node_id for s in snap.summaries if (s.node.role or "").upper() in ROUTER_ROLES}
+    labels = {s.node.node_id: _node_label(s) for s in snap.summaries}
+    adj = router_neighbors(snap.rf_edges, routers)
+    return [
+        AlertCondition(
+            rule_id=rule.id or 0,
+            subject_type="node",
+            subject_id=node_id,
+            message=(
+                f"Router {labels[node_id]} enlazado con {len(peers)} routers más "
+                f"({', '.join(labels[p] for p in sorted(peers)[:4])}{' …' if len(peers) > 4 else ''}): "
+                f"posible repetición redundante"
+            ),
+        )
+        for node_id, peers in sorted(adj.items())
+        if len(peers) >= threshold
+    ]
+
+
+def eval_hop_horizon(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    """Nodo activo en el límite de saltos: más allá no hay margen (el máximo
+    de Meshtastic es 7) y cualquier cambio lo deja inalcanzable."""
+    threshold = int(rule.threshold) if rule.threshold is not None else 7
+    out = []
+    for s in snap.summaries:
+        hops = s.node.hops_away
+        if hops is None or hops < threshold or not s.node.is_online(snap.node_offline_after_seconds, snap.now):
+            continue
+        out.append(
+            AlertCondition(
+                rule_id=rule.id or 0,
+                subject_type="node",
+                subject_id=s.node.node_id,
+                message=f"{_node_label(s)} está a {hops} saltos (límite de la malla: 7): sin margen de alcance",
+            )
+        )
+    return out
+
+
+def eval_router_moving(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    """Router/repetidor cuyas posiciones de 24 h abarcan más de X metros: un
+    repetidor fijo que se mueve deja de ser infraestructura fiable (o el GPS
+    de baja precisión engaña — por eso el umbral por defecto es holgado)."""
+    threshold = rule.threshold if rule.threshold is not None else 1000
+    out = []
+    for s in snap.summaries:
+        if (s.node.role or "").upper() not in INFRA_ROLES:
+            continue
+        bbox = snap.position_bbox_24h.get(s.node.node_id)
+        if bbox is None:
+            continue
+        spread = haversine_m(bbox[0], bbox[2], bbox[1], bbox[3])
+        if spread > threshold:
+            out.append(
+                AlertCondition(
+                    rule_id=rule.id or 0,
+                    subject_type="node",
+                    subject_id=s.node.node_id,
+                    message=(
+                        f"{s.node.role} {_node_label(s)} se ha movido {spread / 1000:.1f} km en 24 h "
+                        f"(umbral {threshold / 1000:g} km)"
+                    ),
+                )
+            )
+    return out
+
+
+# ── Geofence (zona circular; solo la parte pasiva del disparador por zona) ────
+# Alertas basadas en ESTADO: "dentro" dispara al entrar y se resuelve al salir;
+# "fuera" dispara al salir de la zona esperada y se resuelve al volver. La
+# zona vive en `params` {lat, lon}; el radio en `threshold` (metros). Sin
+# siembra por defecto: requiere una zona que solo el operador conoce.
+
+GEOFENCE_MAX_POSITION_AGE_S = 6 * 3600  # una posición más vieja no dice dónde está AHORA
+
+
+def _geofence(rule: AlertRule, snap: NetworkSnapshot, inside: bool) -> list[AlertCondition]:
+    try:
+        lat, lon = float(rule.params["lat"]), float(rule.params["lon"])
+    except (KeyError, TypeError, ValueError):
+        return []  # regla mal formada: nunca dispara, nunca rompe el ciclo
+    radius = rule.threshold if rule.threshold else 0
+    if radius <= 0:
+        return []
+    out = []
+    for s in snap.summaries:
+        pos = s.last_position
+        if pos is None or pos.received_at is None or not s.node.is_online(snap.node_offline_after_seconds, snap.now):
+            continue
+        if (snap.now - ensure_utc(pos.received_at)).total_seconds() > GEOFENCE_MAX_POSITION_AGE_S:
+            continue
+        dist = haversine_m(lat, lon, pos.latitude, pos.longitude)
+        if (dist <= radius) != inside:
+            continue
+        verb = "dentro de" if inside else "fuera de"
+        out.append(
+            AlertCondition(
+                rule_id=rule.id or 0,
+                subject_type="node",
+                subject_id=s.node.node_id,
+                message=f"{_node_label(s)} {verb} la zona «{rule.name}» ({dist:.0f} m del centro, radio {radius:g} m)",
+            )
+        )
+    return out
+
+
+def eval_geofence_inside(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    return _geofence(rule, snap, inside=True)
+
+
+def eval_geofence_outside(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    return _geofence(rule, snap, inside=False)
+
+
 EVALUATORS: dict[str, Evaluator] = {
     "low_battery": eval_low_battery,
     "node_offline": eval_node_offline,
@@ -497,6 +651,12 @@ EVALUATORS: dict[str, Evaluator] = {
     "obsolete_role": eval_obsolete_role,
     "position_overbroadcast": eval_position_overbroadcast,
     "telemetry_overbroadcast": eval_telemetry_overbroadcast,
+    "asymmetric_link": eval_asymmetric_link,
+    "router_cluster": eval_router_cluster,
+    "hop_horizon": eval_hop_horizon,
+    "router_moving": eval_router_moving,
+    "geofence_inside": eval_geofence_inside,
+    "geofence_outside": eval_geofence_outside,
 }
 
 # Tipos cuyo sujeto no son nodos: una regla por grupo no tiene sentido para

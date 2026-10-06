@@ -94,6 +94,11 @@ def default_rules(settings: Settings) -> list[AlertRule]:
         # Informe de problemas fase 1 (ADR 0034). Umbrales editables en la UI.
         AlertRule(name="Nodo parlanchín", rule_type="chatty_node", severity="WARNING", threshold=8),
         AlertRule(name="Rol obsoleto", rule_type="obsolete_role", severity="INFO"),
+        # Informe de problemas fase 2 (ADR 0035)
+        AlertRule(name="Enlace asimétrico", rule_type="asymmetric_link", severity="INFO", threshold=6),
+        AlertRule(name="Clúster de routers", rule_type="router_cluster", severity="INFO", threshold=3),
+        AlertRule(name="Horizonte de saltos", rule_type="hop_horizon", severity="INFO", threshold=7),
+        AlertRule(name="Router que se mueve", rule_type="router_moving", severity="WARNING", threshold=1000),
         AlertRule(
             name="Posición en exceso", rule_type="position_overbroadcast", severity="WARNING", threshold=12
         ),

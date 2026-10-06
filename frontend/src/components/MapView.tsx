@@ -11,6 +11,8 @@ import { useIsMobile } from "../hooks/useMediaQuery";
 import { useUrlList, useUrlNumber, useUrlParam } from "../hooks/useUrlState";
 import { LayerToggle, DEFAULT_MAP_LAYERS, type MapColorMode, type MapLayerState } from "./map/LayerToggle";
 import { LinksLayer } from "./map/LinksLayer";
+import { EstimatedLayer } from "./map/EstimatedLayer";
+import { MeasuredCoverageLayer } from "./map/MeasuredCoverageLayer";
 import { NeighborsLayer } from "./map/NeighborsLayer";
 import { TraceLayer } from "./map/TraceLayer";
 import { RouteLayer } from "./map/RouteLayer";
@@ -288,6 +290,8 @@ const LAYER_CODES: { code: string; key: keyof Omit<MapLayerState, "colorMode"> }
   { code: "traces", key: "showTraces" },
   { code: "routes", key: "showRoutes" },
   { code: "coverage", key: "showCoverage" },
+  { code: "estimated", key: "showEstimated" },
+  { code: "measured", key: "showMeasured" },
 ];
 const DEFAULT_ON_CODES = LAYER_CODES.filter((c) => DEFAULT_MAP_LAYERS[c.key]).map((c) => c.code);
 
@@ -443,6 +447,11 @@ export function MapView({
       )}
       {layers.showNeighbors && <NeighborsLayer summaries={visibleByLayer} />}
       {layers.showRoutes && <RouteLayer summaries={visibleByLayer} gateways={gateways} />}
+      {layers.showEstimated && <EstimatedLayer
+          summaries={groupNodeIds != null ? summaries.filter((s) => groupNodeIds.has(s.node.node_id)) : summaries}
+          onShowDetail={onShowDetail}
+        />}
+      {layers.showMeasured && <MeasuredCoverageLayer />}
       {layers.showCoverage && <CoverageLayer summaries={visibleByLayer} gateways={gateways} />}
       {layers.showTraces && <TraceLayer nodeId={focusId ?? selectedId} />}
       <MarkerClusterGroup chunkedLoading maxClusterRadius={50}>

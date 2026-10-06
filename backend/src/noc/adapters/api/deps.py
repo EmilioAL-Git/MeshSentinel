@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from noc.application.auth.service import AuthService
 from noc.config import get_settings
-from noc.domain.auth.entities import AuthUser
+from noc.domain.auth.entities import TOKEN_PRINCIPAL_PREFIX, AuthUser
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -24,6 +24,14 @@ async def get_current_user(request: Request) -> AuthUser | None:
     """Usuario autenticado a partir de la cookie de sesión, o None si no hay
     sesión válida — independiente de si el modo protegido está activo (así
     la atribución de autoría es exacta incluso en transiciones de modo)."""
+    header = request.headers.get("authorization", "")
+    if header.lower().startswith("bearer "):
+        # Token de API (ADR 0035): si el Bearer no vale NO se cae a la cookie —
+        # una credencial explícita inválida es 401, no una puerta lateral.
+        principal = await _auth_service(request).resolve_api_token(header[7:].strip())
+        if principal is None:
+            raise HTTPException(status_code=401, detail="Token de API inválido o caducado")
+        return principal
     token = request.cookies.get(get_settings().session_cookie_name)
     if not token:
         return None
@@ -67,6 +75,8 @@ async def require_user(current_user: CurrentUserDep) -> AuthUser:
     real incluso en modo abierto — no hay a quién atribuirlas sin sesión."""
     if current_user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
+    if current_user.username.startswith(TOKEN_PRINCIPAL_PREFIX):
+        raise HTTPException(status_code=403, detail="Un token de API no tiene espacio personal")
     return current_user
 
 

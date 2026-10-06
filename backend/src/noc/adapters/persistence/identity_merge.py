@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from noc.adapters.persistence.models import (
     AdminOperationModel,
     ChatMessageModel,
+    CoverageReceptionModel,
     GroupMemberModel,
     NeighborModel,
     NexusNodeFlagModel,
@@ -61,6 +62,7 @@ async def merge_identity(session: AsyncSession, predecessor_id: str, successor_i
 
     await simple("positions", PositionModel, "node_id")
     await simple("telemetry", TelemetryModel, "node_id")
+    await simple("coverage", CoverageReceptionModel, "node_id")
     await simple("neighbors", NeighborModel, "node_id")
     await simple("neighbors", NeighborModel, "neighbor_id")
     await simple("chat_sent", ChatMessageModel, "from_node_id")

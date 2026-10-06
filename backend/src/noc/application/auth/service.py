@@ -18,6 +18,7 @@ import bcrypt
 import redis.asyncio as aioredis
 
 from noc.adapters.persistence.auth_repositories import (
+    SqlApiTokenRepository,
     SqlAuthLoginLogRepository,
     SqlAuthSessionRepository,
     SqlAuthUserRepository,
@@ -30,7 +31,17 @@ from noc.adapters.persistence.models import (
     UserFavoriteModel,
 )
 from noc.config import Settings
-from noc.domain.auth.entities import ROLE_ADMIN, ROLE_MANAGER, ROLES, AuthSession, AuthUser, LoginLogEntry
+from noc.domain.auth.entities import (
+    API_TOKEN_ROLES,
+    ROLE_ADMIN,
+    ROLE_MANAGER,
+    ROLES,
+    TOKEN_PRINCIPAL_PREFIX,
+    ApiToken,
+    AuthSession,
+    AuthUser,
+    LoginLogEntry,
+)
 
 logger = logging.getLogger("noc.auth")
 
@@ -279,6 +290,73 @@ class AuthService:
                 await sessions.touch(s.id, now, new_expiry)
                 await session.commit()
             return user
+
+    # ── Tokens Bearer de API (ADR 0035) ──────────────────────────────────
+
+    API_TOKEN_PREFIX = "msk_"
+
+    async def create_api_token(
+        self, name: str, role: str, expires_days: int | None, created_by: str | None
+    ) -> tuple[ApiToken, str]:
+        """Devuelve (token guardado, valor EN CLARO). El claro no se vuelve a ver."""
+        if role not in API_TOKEN_ROLES:
+            raise AuthError("invalid_role", f"Un token solo puede tener rol: {', '.join(API_TOKEN_ROLES)}")
+        plain = self.API_TOKEN_PREFIX + secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        entity = ApiToken(
+            name=name.strip(),
+            token_hash=_hash_token(plain),
+            token_prefix=plain[:8],
+            role=role,
+            created_by=created_by,
+            created_at=now,
+            expires_at=now + timedelta(days=expires_days) if expires_days else None,
+        )
+        async with self._session_factory() as session:
+            try:
+                saved = await SqlApiTokenRepository(session).create(entity)
+                await session.commit()
+            except Exception as exc:  # nombre duplicado (UNIQUE)
+                await session.rollback()
+                raise AuthError("duplicate_name", "Ya existe un token con ese nombre") from exc
+        return saved, plain
+
+    async def resolve_api_token(self, plain: str) -> AuthUser | None:
+        """Principal sintético con el rol del token (sin id: no tiene espacio
+        personal), o None si no existe/caducó. Distinguible por `username`."""
+        if not plain.startswith(self.API_TOKEN_PREFIX):
+            return None
+        async with self._session_factory() as session:
+            repo = SqlApiTokenRepository(session)
+            token = await repo.get_by_hash(_hash_token(plain))
+            if token is None:
+                return None
+            now = datetime.now(timezone.utc)
+            expires = _as_utc(token.expires_at)
+            if expires is not None and now > expires:
+                return None
+            last = _as_utc(token.last_used_at)
+            if token.id is not None and (last is None or now - last >= _TOUCH_MIN_INTERVAL):
+                await repo.touch(token.id, now)
+                await session.commit()
+        return AuthUser(
+            username=f"{TOKEN_PRINCIPAL_PREFIX}{token.name}",
+            display_name=f"Token {token.name}",
+            password_hash="",
+            role=token.role,
+            enabled=True,
+            id=None,
+        )
+
+    async def list_api_tokens(self) -> list[ApiToken]:
+        async with self._session_factory() as session:
+            return await SqlApiTokenRepository(session).list_all()
+
+    async def revoke_api_token(self, token_id: int) -> bool:
+        async with self._session_factory() as session:
+            ok = await SqlApiTokenRepository(session).delete(token_id)
+            await session.commit()
+            return ok
 
     # ── Gestión de usuarios ──────────────────────────────────────────────
 

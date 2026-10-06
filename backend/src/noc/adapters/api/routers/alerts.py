@@ -62,6 +62,12 @@ class RuleIn(BaseModel):
         "obsolete_role",
         "position_overbroadcast",
         "telemetry_overbroadcast",
+        "asymmetric_link",
+        "router_cluster",
+        "hop_horizon",
+        "router_moving",
+        "geofence_inside",
+        "geofence_outside",
     ]
     severity: Literal["INFO", "WARNING", "CRITICAL"]
     enabled: bool = True
@@ -85,6 +91,15 @@ class RuleIn(BaseModel):
             raise ValueError(
                 f"rule_type '{self.rule_type}' no admite escopado por grupo o nodo (sujeto: pasarela)"
             )
+        if self.rule_type.startswith("geofence_"):
+            try:
+                lat, lon = float(self.params["lat"]), float(self.params["lon"])
+            except (KeyError, TypeError, ValueError):
+                raise ValueError("una regla de zona exige params {lat, lon}") from None
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError("lat/lon fuera de rango")
+            if not self.threshold or self.threshold <= 0:
+                raise ValueError("una regla de zona exige un radio (threshold, en metros) > 0")
         return self
 
 

@@ -24,8 +24,10 @@ from noc.adapters.persistence.repositories import (
     SqlPositionRepository,
     SqlTelemetryRepository,
 )
-from noc.application.alerting.evaluators import EVALUATORS, NetworkSnapshot
+from noc.adapters.persistence.trace_repository import SqlTraceRepository
+from noc.application.alerting.evaluators import EVALUATORS, INFRA_ROLES, NetworkSnapshot
 from noc.application.dashboard import ensure_utc
+from noc.application.rf_graph import build_rf_edges
 from noc.application.node_identity import pair_identity_changes, superseded_node_ids
 from noc.config import get_settings
 from noc.domain.alerts.entities import Alert, AlertCondition, AlertRule
@@ -77,6 +79,14 @@ class AlertEngine:
         settings = get_settings()
         async with self._session_factory() as session:
             rules = await SqlAlertRuleRepository(session).list_enabled()
+            now_utc = datetime.now(timezone.utc)
+            neighbors = await SqlNeighborRepository(session).list_latest_network(
+                since=now_utc - NEIGHBOR_SNAPSHOT_WINDOW
+            )
+            trace_edges = [
+                (e.src_id, e.dst_id, e.avg_snr, e.last_seen)
+                for e in await SqlTraceRepository(session).graph(since=now_utc - NEIGHBOR_SNAPSHOT_WINDOW)
+            ]
             all_summaries = await SqlNodeRepository(session).list_summaries()
             all_nodes = [x.node for x in all_summaries]
             snapshot = NetworkSnapshot(
@@ -87,8 +97,11 @@ class AlertEngine:
                 all_nodes=all_nodes,
                 gateways=await SqlGatewayRepository(session).list_all(),
                 links=await SqlNodeGatewayLinkRepository(session).list_all(),
-                neighbors=await SqlNeighborRepository(session).list_latest_network(
-                    since=datetime.now(timezone.utc) - NEIGHBOR_SNAPSHOT_WINDOW
+                neighbors=neighbors,
+                rf_edges=build_rf_edges(neighbors, trace_edges),
+                position_bbox_24h=await SqlPositionRepository(session).bbox_per_node_since(
+                    now_utc - timedelta(hours=24),
+                    {x.node.node_id for x in all_summaries if (x.node.role or "").upper() in INFRA_ROLES},
                 ),
                 node_offline_after_seconds=settings.node_offline_after_seconds,
                 position_counts_1h=await SqlPositionRepository(session).count_per_node_since(

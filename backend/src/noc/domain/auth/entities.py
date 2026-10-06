@@ -64,3 +64,24 @@ class LoginLogEntry:
     user_agent: str | None = None
     id: int | None = None
     created_at: datetime | None = None
+
+
+TOKEN_PRINCIPAL_PREFIX = "token:"
+API_TOKEN_ROLES = (ROLE_MANAGER, ROLE_USER)  # nunca admin: la gestión de usuarios exige sesión
+
+
+@dataclass(slots=True)
+class ApiToken:
+    """Token Bearer para integraciones (ADR 0035). Solo se guarda el hash: el
+    valor en claro se muestra UNA vez al crearlo. Actúa con el rol del token,
+    nunca como admin y sin espacio personal (favoritos/grupo)."""
+
+    name: str
+    token_hash: str
+    token_prefix: str  # primeros caracteres, no secretos, para identificarlo en la UI
+    role: str = ROLE_MANAGER
+    created_by: str | None = None
+    id: int | None = None
+    created_at: datetime | None = None
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None

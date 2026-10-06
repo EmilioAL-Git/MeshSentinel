@@ -669,3 +669,53 @@ class TraceHopModel(Base):
     direction: Mapped[str] = mapped_column(String(8), nullable=False)  # towards|back
     position: Mapped[int] = mapped_column(Integer, default=0)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EstimatedPositionModel(Base):
+    """Posición INFERIDA de un nodo sin GPS (ADR 0035). Estado derivado: una fila
+    por nodo, reemplazada en cada pasada del estimador; nunca es historia."""
+
+    __tablename__ = "estimated_positions"
+
+    node_id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    latitude: Mapped[float] = mapped_column(Float)
+    longitude: Mapped[float] = mapped_column(Float)
+    radius_m: Mapped[int] = mapped_column(Integer)
+    anchors: Mapped[int] = mapped_column(Integer)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CoverageReceptionModel(Base):
+    """Recepción DIRECTA medida (ADR 0035): una pasarela oyó la posición de un
+    nodo a 0 saltos con esta señal. Append-only; se agrega por celda al leer."""
+
+    __tablename__ = "coverage_receptions"
+    __table_args__ = (
+        Index("ix_coverage_received", "received_at"),
+        Index("ix_coverage_gateway_received", "gateway_id", "received_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    gateway_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    node_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    latitude: Mapped[float] = mapped_column(Float)
+    longitude: Mapped[float] = mapped_column(Float)
+    snr: Mapped[float | None] = mapped_column(Float)
+    rssi: Mapped[int | None] = mapped_column(Integer)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ApiTokenModel(Base):
+    """Token Bearer de integración (ADR 0035): solo el hash SHA-256."""
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    token_prefix: Mapped[str] = mapped_column(String(12))
+    role: Mapped[str] = mapped_column(String(16))
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

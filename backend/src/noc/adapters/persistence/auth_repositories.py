@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from noc.adapters.persistence.models import AuthLoginLogModel, AuthSessionModel, AuthUserModel
-from noc.domain.auth.entities import AuthSession, AuthUser, LoginLogEntry
+from noc.adapters.persistence.models import ApiTokenModel, AuthLoginLogModel, AuthSessionModel, AuthUserModel
+from noc.domain.auth.entities import ApiToken, AuthSession, AuthUser, LoginLogEntry
 
 
 def _user(m: AuthUserModel) -> AuthUser:
@@ -158,3 +158,38 @@ class SqlAuthLoginLogRepository:
             stmt = stmt.where(AuthLoginLogModel.id < before_id)
         rows = await self._session.scalars(stmt)
         return [_log_entry(r) for r in rows]
+
+
+def _token(m: ApiTokenModel) -> ApiToken:
+    return ApiToken(**{f.name: getattr(m, f.name) for f in fields(ApiToken)})
+
+
+class SqlApiTokenRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, t: ApiToken) -> ApiToken:
+        m = ApiTokenModel(
+            name=t.name, token_hash=t.token_hash, token_prefix=t.token_prefix, role=t.role,
+            created_by=t.created_by, created_at=t.created_at or datetime.now(timezone.utc), expires_at=t.expires_at,
+        )
+        self._session.add(m)
+        await self._session.flush()
+        return _token(m)
+
+    async def get_by_hash(self, token_hash: str) -> ApiToken | None:
+        m = (await self._session.scalars(select(ApiTokenModel).where(ApiTokenModel.token_hash == token_hash))).first()
+        return _token(m) if m else None
+
+    async def list_all(self) -> list[ApiToken]:
+        rows = await self._session.scalars(select(ApiTokenModel).order_by(ApiTokenModel.id))
+        return [_token(r) for r in rows]
+
+    async def touch(self, token_id: int, at: datetime) -> None:
+        m = await self._session.get(ApiTokenModel, token_id)
+        if m is not None:
+            m.last_used_at = at
+
+    async def delete(self, token_id: int) -> bool:
+        result = await self._session.execute(delete(ApiTokenModel).where(ApiTokenModel.id == token_id))
+        return result.rowcount > 0

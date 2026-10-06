@@ -163,6 +163,12 @@ SETTINGS_REGISTRY: list[SettingSpec] = [
         choices=RETENTION_CHOICES,
     ),
     SettingSpec(
+        "retention_coverage_days", "retention", "Cobertura medida",
+        "int", "d", 0,
+        "Recepciones directas con señal (capa «Cobertura medida» del mapa). 0 = conservar siempre.",
+        choices=RETENTION_CHOICES,
+    ),
+    SettingSpec(
         "retention_neighbors_days", "retention", "Vecinos (NeighborInfo)",
         "int", "d", 0,
         "Enlaces nodo↔nodo reportados; crece rápido (N vecinos por paquete). Las alertas de enlace perdido miran 7 días. 0 = conservar siempre.",

@@ -15,6 +15,7 @@ from sqlalchemy.orm import aliased
 
 from noc.adapters.persistence.models import (
     ChatMessageModel,
+    CoverageReceptionModel,
     GatewayModel,
     GroupMemberModel,
     NeighborModel,
@@ -170,6 +171,9 @@ class SqlNodeRepository:
             delete(ChatMessageModel).where(ChatMessageModel.from_node_id.in_(node_ids))
         )
         await self._session.execute(delete(NeighborModel).where(NeighborModel.node_id.in_(node_ids)))
+        await self._session.execute(
+            delete(CoverageReceptionModel).where(CoverageReceptionModel.node_id.in_(node_ids))
+        )
         await self._session.execute(delete(TelemetryModel).where(TelemetryModel.node_id.in_(node_ids)))
         await self._session.execute(delete(PositionModel).where(PositionModel.node_id.in_(node_ids)))
         await self._session.execute(
@@ -216,6 +220,7 @@ class SqlNodeRepository:
         ).scalar_one()
         await self._session.execute(delete(ChatMessageModel))
         await self._session.execute(delete(NeighborModel))
+        await self._session.execute(delete(CoverageReceptionModel))
         await self._session.execute(delete(TelemetryModel))
         await self._session.execute(delete(PositionModel))
         await self._session.execute(delete(NodeGatewayLinkModel))
@@ -341,6 +346,24 @@ class SqlPositionRepository:
             select(func.count()).select_from(PositionModel).where(PositionModel.received_at >= since)
         )
         return int(result or 0)
+
+    async def bbox_per_node_since(
+        self, since: datetime, node_ids: set[str] | None = None
+    ) -> dict[str, tuple[float, float, float, float]]:
+        """(lat_min, lat_max, lon_min, lon_max) por nodo desde `since`."""
+        stmt = (
+            select(
+                PositionModel.node_id,
+                func.min(PositionModel.latitude),
+                func.max(PositionModel.latitude),
+                func.min(PositionModel.longitude),
+                func.max(PositionModel.longitude),
+            )
+            .where(PositionModel.received_at >= since)
+            .group_by(PositionModel.node_id)
+        )
+        rows = await self._session.execute(stmt)
+        return {r[0]: (r[1], r[2], r[3], r[4]) for r in rows if node_ids is None or r[0] in node_ids}
 
     async def count_per_node_since(self, since: datetime) -> dict[str, int]:
         rows = await self._session.execute(
@@ -772,3 +795,61 @@ class SqlGatewayRepository:
         await self._session.delete(row)
         await self._session.flush()
         return True
+
+
+class SqlCoverageRepository:
+    """Cobertura medida (ADR 0035): recepciones directas con señal."""
+
+    CELL_DECIMALS = 3  # ≈ 110 m de lado
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(
+        self, gateway_id: str, node_id: str, lat: float, lon: float, snr: float | None, rssi: int | None, at: datetime
+    ) -> None:
+        self._session.add(
+            CoverageReceptionModel(
+                gateway_id=gateway_id, node_id=node_id, latitude=lat, longitude=lon, snr=snr, rssi=rssi, received_at=at
+            )
+        )
+
+    MAX_ROWS = 200_000  # acota la lectura; las más recientes mandan
+
+    async def cells(
+        self, since: datetime, gateway_id: str | None = None, limit: int = 5000
+    ) -> list[dict[str, Any]]:
+        """Agregado por celda de ~110 m. La cuantización se hace en Python (no
+        con round(double, int) en SQL: PostgreSQL solo lo admite sobre numeric,
+        SQLite sobre cualquier número — SQL portable por regla del proyecto)."""
+        stmt = (
+            select(
+                CoverageReceptionModel.latitude,
+                CoverageReceptionModel.longitude,
+                CoverageReceptionModel.snr,
+                CoverageReceptionModel.node_id,
+                CoverageReceptionModel.received_at,
+            )
+            .where(CoverageReceptionModel.received_at >= since, CoverageReceptionModel.snr.is_not(None))
+            .order_by(CoverageReceptionModel.received_at.desc())
+            .limit(self.MAX_ROWS)
+        )
+        if gateway_id:
+            stmt = stmt.where(CoverageReceptionModel.gateway_id == gateway_id)
+        cells: dict[tuple[float, float], dict[str, Any]] = {}
+        for lat, lon, snr, node_id, at in await self._session.execute(stmt):
+            key = (round(lat, self.CELL_DECIMALS), round(lon, self.CELL_DECIMALS))
+            c = cells.setdefault(key, {"snrs": [], "nodes": set(), "last_at": at})
+            c["snrs"].append(float(snr))
+            c["nodes"].add(node_id)
+        out = [
+            {
+                "latitude": lat, "longitude": lon,
+                "avg_snr": round(sum(c["snrs"]) / len(c["snrs"]), 1),
+                "max_snr": max(c["snrs"]), "receptions": len(c["snrs"]),
+                "nodes": len(c["nodes"]), "last_at": c["last_at"],
+            }
+            for (lat, lon), c in cells.items()
+        ]
+        out.sort(key=lambda x: -x["receptions"])
+        return out[:limit]
