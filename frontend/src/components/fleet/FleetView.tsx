@@ -28,6 +28,7 @@ import { FleetBlocks } from "./FleetBlocks";
 import { GroupBar } from "./GroupBar";
 import { MobileFilters } from "../shell/MobileFilters";
 import { computeFleetGroupMetrics } from "./groupStats";
+import { useIdentityBadges, useIdentityReport } from "../../hooks/useIdentity";
 import { DEFAULT_FLEET_COLUMNS, FLEET_COLUMNS, FleetRow, buildFleetGrid, type FleetColumnId } from "./instruments";
 
 /**
@@ -40,8 +41,10 @@ import { DEFAULT_FLEET_COLUMNS, FLEET_COLUMNS, FleetRow, buildFleetGrid, type Fl
  * de un grupo — no tiene sentido clasificar miles de nodos ajenos.
  */
 
+const isUnnamed = (s: NodeSummaryOut) => !s.node.long_name?.trim() && !s.node.short_name?.trim();
+
 export function FleetView({
-  summaries,
+  summaries: rawSummaries,
   allSummaries,
   loading,
   error,
@@ -94,9 +97,28 @@ export function FleetView({
    * valor hardcodeado aquí (hardening). */
   lowBatteryThreshold: number;
 }) {
+  // Ocultar nodos sin nombre (ni largo ni corto): predeterminado ON, persistido
+  // en el navegador del operador. Filtro de presentación, el backend no cambia.
+  const [hideUnnamed, setHideUnnamed] = usePersistedState<boolean>("fleet.hideUnnamed", true);
+  const unnamedCount = useMemo(() => rawSummaries.filter((s) => isUnnamed(s)).length, [rawSummaries]);
+  // Solo nodos con nueva identidad (sucesores de un cambio 2.8, ADR 0034).
+  const [onlyNewIdentity, setOnlyNewIdentity] = useState(false);
+  const identityReport = useIdentityReport();
+  const newIdentityIds = useMemo(
+    () => new Set((identityReport?.changes ?? []).map((c) => c.successor_id)),
+    [identityReport],
+  );
+  const summaries = useMemo(
+    () =>
+      rawSummaries.filter(
+        (s) => (!hideUnnamed || !isUnnamed(s)) && (!onlyNewIdentity || newIdentityIds.has(s.node.node_id)),
+      ),
+    [rawSummaries, hideUnnamed, onlyNewIdentity, newIdentityIds],
+  );
   const [ignoreTarget, setIgnoreTarget] = useState<{ id: string; label: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; label?: string } | null>(null);
   const nexusModeOn = useNexusMode();
+  const identityBadges = useIdentityBadges();
   const { canOperate } = useAuth();
   const set = (patch: NodeFilterParams) => onFiltersChange({ ...filters, ...patch });
   const hasFilters = Object.values(filters).some((v) => v !== undefined && v !== "" && v !== false);
@@ -355,6 +377,22 @@ export function FleetView({
         >
           {filters.include_ignored ? "◉" : "○"} ignorados
         </button>
+        <button
+          className={`btn ghost${hideUnnamed ? " on" : ""}`}
+          style={hideUnnamed ? { color: "var(--text)", borderColor: "var(--border)" } : undefined}
+          onClick={() => setHideUnnamed(!hideUnnamed)}
+          title="Oculta los nodos que no han publicado nombre (predeterminado; se recuerda en este navegador)"
+        >
+          {hideUnnamed ? "◉" : "○"} ocultar sin nombre{unnamedCount > 0 ? ` (${unnamedCount})` : ""}
+        </button>
+        <button
+          className={`btn ghost${onlyNewIdentity ? " on" : ""}`}
+          style={onlyNewIdentity ? { color: "var(--text)", borderColor: "var(--border)" } : undefined}
+          onClick={() => setOnlyNewIdentity(!onlyNewIdentity)}
+          title="Muestra solo los nodos con nueva identidad (cambio de node_id por clave pública, firmware 2.8)"
+        >
+          {onlyNewIdentity ? "◉" : "○"} ⇄ nueva identidad ≥2.8 ({newIdentityIds.size})
+        </button>
         {hasFilters && (
           <button className="btn ghost" onClick={() => onFiltersChange({})}>
             ✕ limpiar
@@ -403,6 +441,7 @@ export function FleetView({
               lowBatteryThreshold={lowBatteryThreshold}
               visibleColumns={visibleColumns}
               nexusModeOn={nexusModeOn}
+              identityBadges={identityBadges}
             />
           )}
           {!loading && summaries.length > 0 && !isGrouped && (
@@ -448,6 +487,7 @@ export function FleetView({
                         gatewayNodeIds={gatewayNodeIds}
                         lowBatteryThreshold={lowBatteryThreshold}
                         nexusModeOn={nexusModeOn}
+                        identityBadge={identityBadges.get(summary.node.node_id)}
                       />
                     </div>
                   );
