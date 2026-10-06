@@ -255,6 +255,7 @@ function FleetRowImpl({
   gatewayNodeIds,
   lowBatteryThreshold = 20,
   nexusModeOn,
+  identityBadge,
 }: {
   summary: NodeSummaryOut;
   selected: string | null;
@@ -276,6 +277,9 @@ function FleetRowImpl({
    * otras tantas suscripciones idénticas a la misma query (hardening de
    * rendimiento de Flota). Se resuelve una sola vez en el padre. */
   nexusModeOn: boolean;
+  /** Texto de la insignia de identidad/clave (ADR 0034), resuelto en el padre
+   * (mismo criterio que nexusModeOn: nunca un hook de datos por fila). */
+  identityBadge?: string;
 }) {
   const { node } = summary;
   // Actividad como INDICADOR (hardening): el roster ya no se ordena por
@@ -327,6 +331,11 @@ function FleetRowImpl({
         <strong>{node.short_name ?? "?"}</strong>{" "}
         <span style={{ color: "var(--text-dim)" }}>{node.long_name ?? ""}</span>
         {node.is_ignored && <span style={{ color: "var(--text-faint)" }}> · ignorado</span>}
+        {identityBadge && (
+          <span title={identityBadge} style={{ color: "var(--warn)", marginLeft: 6 }}>
+            {identityBadge.startsWith("⚠") || identityBadge.includes("⚠") ? "⚠" : "⇄"}
+          </span>
+        )}
       </span>
       <span className="mono r-hide" style={{ fontSize: 11, color: "var(--text-dim)" }}>{node.node_id}</span>
       {FLEET_COLUMNS.filter((c) => visibleColumns.includes(c.id)).map((c) => (

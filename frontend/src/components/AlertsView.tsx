@@ -105,6 +105,13 @@ const RULE_FIELD_META: Record<
     label: "Enlace de vecinos perdido",
     duration: { label: "Minutos sin reoír el enlace", toUi: (s) => Math.round(s / 60), fromUi: (m) => m * 60, default: 120 },
   },
+  // Sin parámetros: claves débiles o duplicadas (los cambios de identidad 2.8 no cuentan)
+  key_security: { label: "Seguridad de claves" },
+  // Informe de problemas fase 1 (ADR 0034)
+  chatty_node: { label: "Nodo parlanchín", threshold: { label: "% de aire propio (TX) máx.", step: 0.5, default: 8 } },
+  obsolete_role: { label: "Rol obsoleto" },
+  position_overbroadcast: { label: "Posición en exceso", threshold: { label: "Posiciones por hora máx.", default: 12 } },
+  telemetry_overbroadcast: { label: "Telemetría en exceso", threshold: { label: "Paquetes de telemetría por hora máx.", default: 12 } },
 };
 
 // Tipos cuyo sujeto son pasarelas: sin escopado por grupo (la API lo rechaza)

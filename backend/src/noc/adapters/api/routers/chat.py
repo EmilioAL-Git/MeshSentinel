@@ -6,16 +6,18 @@ cliente (igual que el resto de la consola de Registro) a partir de
 `GET /nodes`, para no duplicar esa lógica aquí.
 """
 
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from noc.adapters.api.deps import SessionDep
 from noc.adapters.persistence.chat_repositories import SqlChatRepository
 from noc.adapters.persistence.repositories import SqlGatewayRepository
 from noc.application.channel_names import merge_channel_names
+from noc.application.delivery import build_delivery_diagnostic
 from noc.domain.chat.entities import ChatMessage
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -92,6 +94,63 @@ async def list_messages(
             row = row.model_copy(update={"channel_name": names[row.channel_index]})
         out.append(row)
     return out
+
+
+class DiagFieldOut(BaseModel):
+    value: Any | None
+    provenance: str  # reported | observed | inferred | unknown
+
+
+class HeardByOut(BaseModel):
+    gateway_id: str | None
+    received_at: datetime | None
+    snr: DiagFieldOut
+    rssi: DiagFieldOut
+    hop_limit: DiagFieldOut
+    hop_start: DiagFieldOut
+    hops_used: DiagFieldOut
+
+
+class DeliveryDiagnosticOut(BaseModel):
+    message_id: int
+    packet_id: DiagFieldOut
+    from_node_id: str
+    to_node_id: DiagFieldOut
+    channel_index: DiagFieldOut
+    heard_by: list[HeardByOut]
+    heard_by_count: int
+    notes: list[str]
+
+
+@router.get("/heard-by", response_model=DeliveryDiagnosticOut)
+async def heard_by_packet(
+    session: SessionDep, node_id: str = Query(max_length=16), packet_id: int = Query(ge=0)
+) -> DeliveryDiagnosticOut:
+    """Igual que `/messages/{id}/heard-by`, por (remitente, packet_id): lo usa
+    la UI, cuyas filas en vivo aún no tienen id de base de datos."""
+    candidates = await SqlChatRepository(session).list_same_packet(node_id, packet_id)
+    if not candidates:
+        raise HTTPException(status_code=404, detail="Packet not found")
+    anchor = max(candidates, key=lambda c: c.received_at.timestamp() if c.received_at else 0)
+    return DeliveryDiagnosticOut.model_validate(asdict(build_delivery_diagnostic(anchor, candidates)))
+
+
+@router.get("/messages/{message_id}/heard-by", response_model=DeliveryDiagnosticOut)
+async def heard_by(message_id: int, session: SessionDep) -> DeliveryDiagnosticOut:
+    """Diagnóstico de entrega: qué pasarelas oyeron este paquete y con qué
+    señal, cada dato con su procedencia (application/delivery.py)."""
+    repo = SqlChatRepository(session)
+    message = await repo.get(message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    candidates = (
+        await repo.list_same_packet(message.from_node_id, message.packet_id)
+        if message.packet_id is not None
+        else [message]
+    )
+    return DeliveryDiagnosticOut.model_validate(
+        asdict(build_delivery_diagnostic(message, candidates))
+    )
 
 
 async def _channel_names(session: SessionDep) -> dict[int, str]:

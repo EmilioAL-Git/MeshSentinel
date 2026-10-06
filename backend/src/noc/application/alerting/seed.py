@@ -85,6 +85,21 @@ def default_rules(settings: Settings) -> list[AlertRule]:
             severity="INFO",
             duration_seconds=7200,
         ),
+        # ADR 0034: clave débil o duplicada (los cambios de identidad 2.8 no cuentan)
+        AlertRule(
+            name="Seguridad de claves",
+            rule_type="key_security",
+            severity="WARNING",
+        ),
+        # Informe de problemas fase 1 (ADR 0034). Umbrales editables en la UI.
+        AlertRule(name="Nodo parlanchín", rule_type="chatty_node", severity="WARNING", threshold=8),
+        AlertRule(name="Rol obsoleto", rule_type="obsolete_role", severity="INFO"),
+        AlertRule(
+            name="Posición en exceso", rule_type="position_overbroadcast", severity="WARNING", threshold=12
+        ),
+        AlertRule(
+            name="Telemetría en exceso", rule_type="telemetry_overbroadcast", severity="WARNING", threshold=12
+        ),
     ]
 
 

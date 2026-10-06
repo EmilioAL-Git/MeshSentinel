@@ -1657,3 +1657,80 @@ export const fetchTrace = (id: number) => get<TraceOut>(`/traces/${id}`);
 /** Rescata los traceroutes anteriores al registro de trazas desde el Registro. */
 export const importLegacyTraces = () =>
   send<{ scanned: number; imported: number; skipped: number }>("POST", "/traces/import-legacy");
+
+// ── Identidad de nodos y seguridad de claves (ADR 0034) ──────────────────────
+
+export interface IdentityChangeOut {
+  predecessor_id: string;
+  successor_id: string;
+  basis: "derived_num" | "same_key";
+  predecessor_last_seen_at: string | null;
+  successor_first_seen_at: string | null;
+  predecessor_quiet: boolean | null;
+}
+export interface IdentityReportOut {
+  changes: IdentityChangeOut[];
+  duplicate_keys: { key_fingerprint: string; node_ids: string[] }[];
+  weak_keys: { node_id: string; reason: string }[];
+}
+export const fetchIdentity = () => get<IdentityReportOut>("/identity");
+export const mergeIdentity = (predecessorId: string, successorId: string) =>
+  send<{ moved: Record<string, number> }>("POST", "/identity/merge", {
+    predecessor_id: predecessorId,
+    successor_id: successorId,
+    confirm: predecessorId,
+  });
+
+// ── Diagnóstico de entrega «heard by» (ADR 0034) ─────────────────────────────
+
+export type Provenance = "reported" | "observed" | "inferred" | "unknown";
+export interface DiagField<T = unknown> {
+  value: T | null;
+  provenance: Provenance;
+}
+export interface HeardByOut {
+  gateway_id: string | null;
+  received_at: string | null;
+  snr: DiagField<number>;
+  rssi: DiagField<number>;
+  hop_limit: DiagField<number>;
+  hop_start: DiagField<number>;
+  hops_used: DiagField<number>;
+}
+export interface DeliveryDiagnosticOut {
+  message_id: number;
+  packet_id: DiagField<number>;
+  from_node_id: string;
+  to_node_id: DiagField<string>;
+  channel_index: DiagField<number>;
+  heard_by: HeardByOut[];
+  heard_by_count: number;
+  notes: string[];
+}
+export const fetchHeardBy = (nodeId: string, packetId: number) =>
+  get<DeliveryDiagnosticOut>(`/chat/heard-by?node_id=${encodeURIComponent(nodeId)}&packet_id=${packetId}`);
+
+// ── Copias programadas ───────────────────────────────────────────────────────
+
+export interface BackupFileOut {
+  name: string;
+  size_bytes: number;
+  created_at: string;
+}
+export interface BackupRunOut {
+  finished_at: string;
+  duration_seconds: number;
+  trigger: string;
+  file: string | null;
+  size_bytes: number | null;
+  error: string | null;
+}
+export interface BackupStatusOut {
+  directory: string;
+  files: BackupFileOut[];
+  last_run: BackupRunOut | null;
+  running: boolean;
+}
+export const fetchBackups = () => get<BackupStatusOut>("/maintenance/backups");
+export const runBackupNow = () => send<BackupRunOut>("POST", "/maintenance/backups/run");
+export const storedBackupUrl = (name: string) => `/api/v1/maintenance/backups/${encodeURIComponent(name)}`;

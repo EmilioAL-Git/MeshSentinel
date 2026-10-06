@@ -11,6 +11,11 @@ from typing import Callable
 
 from noc.application.dashboard import ensure_utc, is_stale
 from noc.application.gateway_stats import compute_multi_gateway_stats
+from noc.application.node_identity import (
+    find_duplicate_keys,
+    find_weak_keys,
+    pair_identity_changes,
+)
 from noc.domain.alerts.entities import AlertCondition, AlertRule
 from noc.domain.nodes.entities import GatewayInfo, NodeGatewayLink, NodeNeighbor, NodeSummary
 
@@ -30,6 +35,16 @@ class NetworkSnapshot:
     links: list[NodeGatewayLink] = field(default_factory=list)
     neighbors: list[NodeNeighbor] = field(default_factory=list)
     node_offline_after_seconds: int = 900
+    # Nodos viejos ya reemplazados por su identidad 2.8 (ADR 0034): no deben
+    # disparar node_offline. Lo rellena el engine con TODA la red (antes de
+    # escopar por grupo/nodo) — el emparejamiento necesita ver ambos lados.
+    superseded_ids: frozenset[str] = frozenset()
+    # Paquetes persistidos por nodo en la última hora (reglas de ritmo
+    # excesivo). Observado, no exacto: un paquete oído por 2 pasarelas puede
+    # contar dos veces — por eso los umbrales por defecto son holgados.
+    position_counts_1h: dict[str, int] = field(default_factory=dict)
+    telemetry_counts_1h: dict[str, int] = field(default_factory=dict)
+    all_nodes: list = field(default_factory=list)  # list[Node] de toda la red, para key_security
     now: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def scoped_to_group(self, group_id: int) -> "NetworkSnapshot":
@@ -106,7 +121,7 @@ def eval_node_offline(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondi
     out = []
     for s in snap.summaries:
         last = s.node.last_seen_at
-        if last is None:
+        if last is None or s.node.node_id in snap.superseded_ids:
             continue
         silent = (snap.now - ensure_utc(last)).total_seconds()
         if silent > duration:
@@ -355,6 +370,117 @@ def eval_neighbor_link_lost(rule: AlertRule, snap: NetworkSnapshot) -> list[Aler
     return out
 
 
+def eval_key_security(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    """Claves de baja entropía o duplicadas (ADR 0034). Se evalúa sobre TODA la
+    red (`all_nodes`) para que un duplicado no desaparezca al escopar por
+    grupo, pero solo se alerta de los nodos del snapshot escopado. Los pares
+    viejo→nuevo de un cambio de identidad 2.8 NO son duplicados."""
+    in_scope = {s.node.node_id: s for s in snap.summaries}
+    nodes = snap.all_nodes or [s.node for s in snap.summaries]
+    changes = pair_identity_changes(nodes)
+    problems: dict[str, list[str]] = {}
+    for w in find_weak_keys(nodes):
+        problems.setdefault(w.node_id, []).append(f"clave débil ({w.reason})")
+    names = {n.node_id: (n.short_name, n.long_name) for n in nodes}
+    for g in find_duplicate_keys(nodes, changes):
+        same_name = len({names.get(i) for i in g.node_ids}) == 1 and names.get(g.node_ids[0]) != (None, None)
+        for node_id in g.node_ids:
+            others = [i for i in g.node_ids if i != node_id]
+            hint = " (mismo nombre: posible mismo equipo con otro número)" if same_name else ""
+            problems.setdefault(node_id, []).append(
+                f"clave duplicada con {', '.join(others[:3])}" + (" …" if len(others) > 3 else "") + hint
+            )
+    out = []
+    for node_id, reasons in sorted(problems.items()):
+        s = in_scope.get(node_id)
+        if s is None:
+            continue
+        out.append(
+            AlertCondition(
+                rule_id=rule.id or 0,
+                subject_type="node",
+                subject_id=node_id,
+                message=f"{_node_label(s)}: {'; '.join(reasons)}",
+            )
+        )
+    return out
+
+
+# ── Informe de problemas de la malla, fase 1 (ADR 0034; niveles A y C, sin grafo) ──
+# Umbrales editables en la UI. Los de uso del aire (8 % TX) vienen de la guía
+# de buenas prácticas de Meshtastic; los de ritmo son nuestros y se calibran con
+# la malla real, no se copian de otros proyectos.
+# SIN regla de "desfase de reloj": la única hora que recibimos es la del fix GPS
+# (`position_time`), y un nodo sin fix reciente reenvía su última posición con
+# hora vieja — no se puede distinguir un reloj roto de un fix antiguo (probado
+# con la malla real: 22 falsos positivos, «48 d»).
+
+# Roles retirados del firmware: un nodo que aún los anuncia corre una
+# configuración heredada (ROUTER_CLIENT se eliminó; hoy es CLIENT o ROUTER).
+OBSOLETE_ROLES = frozenset({"ROUTER_CLIENT"})
+
+
+def eval_chatty_node(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    """Nodo parlanchín: `air_util_tx` (observado en su telemetría de
+    dispositivo) por encima del umbral — su propio uso del aire, no el canal."""
+    threshold = rule.threshold if rule.threshold is not None else 8
+    out = []
+    for s in snap.summaries:
+        tel = s.last_device_telemetry
+        if tel and tel.air_util_tx is not None and tel.air_util_tx > threshold:
+            out.append(
+                AlertCondition(
+                    rule_id=rule.id or 0,
+                    subject_type="node",
+                    subject_id=s.node.node_id,
+                    message=(
+                        f"{_node_label(s)} transmite demasiado: {tel.air_util_tx:g} % de uso del aire "
+                        f"propio (umbral {threshold:g} %)"
+                    ),
+                )
+            )
+    return out
+
+
+def eval_obsolete_role(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    out = []
+    for s in snap.summaries:
+        role = (s.node.role or "").upper()
+        if role in OBSOLETE_ROLES:
+            out.append(
+                AlertCondition(
+                    rule_id=rule.id or 0,
+                    subject_type="node",
+                    subject_id=s.node.node_id,
+                    message=f"{_node_label(s)} anuncia el rol obsoleto {role} (reportado por el nodo)",
+                )
+            )
+    return out
+
+
+def _eval_rate(rule: AlertRule, snap: NetworkSnapshot, counts: dict[str, int], default: float, what: str):
+    threshold = rule.threshold if rule.threshold is not None else default
+    labels = {s.node.node_id: _node_label(s) for s in snap.summaries}
+    return [
+        AlertCondition(
+            rule_id=rule.id or 0,
+            subject_type="node",
+            subject_id=node_id,
+            message=f"{labels[node_id]} envía {what} en exceso: {n} en la última hora (umbral {threshold:g}/h)",
+        )
+        for node_id, n in sorted(counts.items())
+        if node_id in labels and n > threshold
+    ]
+
+
+def eval_position_overbroadcast(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    return _eval_rate(rule, snap, snap.position_counts_1h, 12, "posiciones")
+
+
+def eval_telemetry_overbroadcast(rule: AlertRule, snap: NetworkSnapshot) -> list[AlertCondition]:
+    return _eval_rate(rule, snap, snap.telemetry_counts_1h, 12, "telemetría")
+
+
 EVALUATORS: dict[str, Evaluator] = {
     "low_battery": eval_low_battery,
     "node_offline": eval_node_offline,
@@ -366,6 +492,11 @@ EVALUATORS: dict[str, Evaluator] = {
     "channel_utilization_high": eval_channel_utilization_high,
     "position_lost": eval_position_lost,
     "neighbor_link_lost": eval_neighbor_link_lost,
+    "key_security": eval_key_security,
+    "chatty_node": eval_chatty_node,
+    "obsolete_role": eval_obsolete_role,
+    "position_overbroadcast": eval_position_overbroadcast,
+    "telemetry_overbroadcast": eval_telemetry_overbroadcast,
 }
 
 # Tipos cuyo sujeto no son nodos: una regla por grupo no tiene sentido para

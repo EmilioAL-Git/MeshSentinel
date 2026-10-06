@@ -25,6 +25,7 @@ export function FleetBlocks({
   lowBatteryThreshold,
   visibleColumns,
   nexusModeOn,
+  identityBadges,
 }: {
   summaries: NodeSummaryOut[];
   gatewayNodeIds: Set<string>;
@@ -41,6 +42,7 @@ export function FleetBlocks({
   visibleColumns: FleetColumnId[];
   /** Resuelto una sola vez por el padre (FleetView) — ver instruments.tsx. */
   nexusModeOn: boolean;
+  identityBadges: Map<string, string>;
 }) {
   const byCategory = useMemo(() => groupByCategory(summaries, gatewayNodeIds), [summaries, gatewayNodeIds]);
 
@@ -103,6 +105,7 @@ export function FleetBlocks({
                 gatewayNodeIds={gatewayNodeIds}
                 lowBatteryThreshold={lowBatteryThreshold}
                 nexusModeOn={nexusModeOn}
+                identityBadge={identityBadges.get(summary.node.node_id)}
               />
             ))}
           </BlockAccordion>

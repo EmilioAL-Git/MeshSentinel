@@ -1,0 +1,7 @@
+{
+  "_comment": "Claves públicas (base64, 32 bytes) conocidas como débiles. Ampliar con avisos publicados; las heurísticas estructurales de node_identity.py cubren el resto.",
+  "version": 1,
+  "keys": [
+    {"key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "reason": "clave nula (todo ceros)"}
+  ]
+}

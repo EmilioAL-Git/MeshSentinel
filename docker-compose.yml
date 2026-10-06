@@ -40,6 +40,7 @@ services:
       NOC_DATABASE_URL: ${NOC_DATABASE_URL:-postgresql+asyncpg://noc:noc@postgres:5432/noc}
       NOC_REDIS_URL: redis://redis:6379/0
       NOC_GATEWAY_LAUNCHER_URL: http://gateway-launcher:9000
+      NOC_BACKUP_DIR: /backups
       NOC_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
       LOW_BATTERY_THRESHOLD: ${LOW_BATTERY_THRESHOLD:-20}
       OFFLINE_MINUTES_WARNING: ${OFFLINE_MINUTES_WARNING:-30}
@@ -52,6 +53,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - backups-data:/backups
     networks: [noc]
     restart: unless-stopped
 
@@ -132,3 +135,4 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  backups-data:

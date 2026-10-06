@@ -36,6 +36,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "activity": "Actividad y registro",
     "retention": "Retención de datos",
     "digest": "Resumen periódico",
+    "backup": "Copias de seguridad",
     "security": "Seguridad",
 }
 
@@ -220,6 +221,19 @@ SETTINGS_REGISTRY: list[SettingSpec] = [
         "int", "h", 0,
         "Hora del día, en UTC (0-23), a la que se envía el resumen.",
         choices=tuple((f"{h:02d}:00 UTC", h) for h in range(0, 24, 2)),
+    ),
+    SettingSpec(
+        "backup_period_hours", "backup", "Copia automática",
+        "int", "h", 0,
+        "Guarda una copia lógica completa de la base de datos con esta periodicidad. "
+        "Si una copia falla se avisa a las integraciones de notificación.",
+        choices=(("Desactivada", 0), ("Cada 6 horas", 6), ("Cada día", 24), ("Cada semana", 168)),
+    ),
+    SettingSpec(
+        "backup_keep", "backup", "Copias que se conservan",
+        "int", None, 1,
+        "Al superar este número se borran las más antiguas.",
+        choices=(("3", 3), ("7", 7), ("14", 14), ("30", 30)),
     ),
     SettingSpec(
         "ws_require_auth", "security", "Canal en vivo (WebSocket)",

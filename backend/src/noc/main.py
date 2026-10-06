@@ -26,6 +26,7 @@ from noc.adapters.api.routers import (
     settings as settings_router,
     stats as stats_router,
     system,
+    identity,
     topology,
     traces,
 )
@@ -47,6 +48,7 @@ from noc.application.alerting.dispatcher import NotificationDispatcher
 from noc.application.alerting.seed import seed_default_rules
 from noc.application.auth.service import AuthService
 from noc.application.dashboard import DashboardService
+from noc.application.backup import BackupService
 from noc.application.digest import DigestService
 from noc.application.envelopes import make_event_envelope
 from noc.application.gateways.service import GatewayService
@@ -142,6 +144,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.digest = digest
     digest.start()
 
+    # Copias de seguridad programadas (Ajustes → Datos)
+    backups = BackupService(app.state.db.session_factory, settings)
+    app.state.backups = backups
+    backups.start()
+
     # Pipeline de administración remota (M1.1, ADR 0013)
     admin_service = AdminOperationService(app.state.db.session_factory, command_queue, settings)
     app.state.batches = BatchService(app.state.db.session_factory, settings)
@@ -179,6 +186,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await digest.stop()
+        await backups.stop()
         await retention.stop()
         await admin_service.stop()
         await nexus_ops.stop()
@@ -268,6 +276,7 @@ def create_app() -> FastAPI:
     app.include_router(activity_router.router, prefix=settings.api_v1_prefix)
     app.include_router(chat.router, prefix=settings.api_v1_prefix)
     app.include_router(topology.router, prefix=settings.api_v1_prefix)
+    app.include_router(identity.router, prefix=settings.api_v1_prefix)
     app.include_router(traces.router, prefix=settings.api_v1_prefix)
     app.include_router(settings_router.router, prefix=settings.api_v1_prefix)
     app.include_router(maintenance_router.router, prefix=settings.api_v1_prefix)

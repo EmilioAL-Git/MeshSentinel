@@ -19,7 +19,8 @@ COPY alembic ./alembic
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-RUN useradd --create-home --uid 1000 noc
+RUN useradd --create-home --uid 1000 noc \
+    && mkdir /backups && chown noc:noc /backups
 USER noc
 
 EXPOSE 8000

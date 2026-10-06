@@ -40,6 +40,7 @@ import { useActiveGroup } from "../../context/GroupContext";
 import { CATEGORY_DEFS, NODE_TYPE_OVERRIDE_OPTIONS, classifyNode } from "../fleet/classify";
 import { Signal } from "../fleet/instruments";
 import { IgnoreNodeModal } from "../fleet/IgnoreNodeModal";
+import { IdentityNotice } from "./IdentityNotice";
 import { NexusCatIcon } from "../nexus/NexusCatIcon";
 import { NodeNexusPanel } from "../nexus/NodeNexusPanel";
 import { useNexusMode } from "../nexus/useNexusMode";
@@ -767,6 +768,7 @@ export function Inspector({
 
         {effectiveTab === "resumen" && (
           <>
+            <IdentityNotice nodeId={nodeId} />
             <Section label="ESTADO">
               {problems.length === 0 ? (
                 <div

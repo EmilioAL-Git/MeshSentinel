@@ -193,3 +193,58 @@ async def download_backup(request: Request, _admin: RequireAdminDep) -> FileResp
         filename=f"meshsentinel-{stamp}.jsonl.gz",
         background=BackgroundTask(path.unlink, missing_ok=True),
     )
+
+
+# ── Copias programadas (application/backup.py) ───────────────────────────────
+
+
+class BackupFileOut(BaseModel):
+    name: str
+    size_bytes: int
+    created_at: datetime
+
+
+class BackupRunOut(BaseModel):
+    finished_at: datetime
+    duration_seconds: float
+    trigger: str
+    file: str | None
+    size_bytes: int | None
+    error: str | None
+
+
+class BackupStatusOut(BaseModel):
+    directory: str
+    files: list[BackupFileOut]
+    last_run: BackupRunOut | None
+    running: bool
+
+
+@router.get("/backups", response_model=BackupStatusOut)
+async def list_backups(request: Request, _admin: RequireAdminDep) -> BackupStatusOut:
+    service = request.app.state.backups
+    run = service.last_run
+    return BackupStatusOut(
+        directory=str(service.directory),
+        files=[BackupFileOut(name=f.name, size_bytes=f.size_bytes, created_at=f.created_at) for f in service.list_backups()],
+        last_run=BackupRunOut(**{k: getattr(run, k) for k in BackupRunOut.model_fields}) if run else None,
+        running=service.running,
+    )
+
+
+@router.post("/backups/run", response_model=BackupRunOut)
+async def run_backup(request: Request, _admin: RequireAdminDep) -> BackupRunOut:
+    """Hace una copia ahora, en el directorio de copias programadas."""
+    service = request.app.state.backups
+    if service.running:
+        raise HTTPException(status_code=409, detail="Ya hay una copia en curso")
+    run = await service.run_once("manual")
+    return BackupRunOut(**{k: getattr(run, k) for k in BackupRunOut.model_fields})
+
+
+@router.get("/backups/{name}")
+async def download_stored_backup(name: str, request: Request, _admin: RequireAdminDep) -> FileResponse:
+    path = request.app.state.backups.path_of(name)  # solo nombres ya listados: sin path traversal
+    if path is None:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    return FileResponse(path, media_type="application/gzip", filename=name)

@@ -57,6 +57,11 @@ class RuleIn(BaseModel):
         "channel_utilization_high",
         "position_lost",
         "neighbor_link_lost",
+        "key_security",
+        "chatty_node",
+        "obsolete_role",
+        "position_overbroadcast",
+        "telemetry_overbroadcast",
     ]
     severity: Literal["INFO", "WARNING", "CRITICAL"]
     enabled: bool = True

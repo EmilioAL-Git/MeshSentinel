@@ -342,6 +342,14 @@ class SqlPositionRepository:
         )
         return int(result or 0)
 
+    async def count_per_node_since(self, since: datetime) -> dict[str, int]:
+        rows = await self._session.execute(
+            select(PositionModel.node_id, func.count())
+            .where(PositionModel.received_at >= since)
+            .group_by(PositionModel.node_id)
+        )
+        return {r[0]: int(r[1]) for r in rows}
+
 
 class SqlTelemetryRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -375,6 +383,15 @@ class SqlTelemetryRepository:
             select(func.count()).select_from(TelemetryModel).where(TelemetryModel.received_at >= since)
         )
         return int(result or 0)
+
+    async def count_per_node_since(self, since: datetime) -> dict[str, int]:
+        """Paquetes de telemetría (cualquier kind) por nodo desde `since`."""
+        rows = await self._session.execute(
+            select(TelemetryModel.node_id, func.count())
+            .where(TelemetryModel.received_at >= since)
+            .group_by(TelemetryModel.node_id)
+        )
+        return {r[0]: int(r[1]) for r in rows}
 
     async def extremes_since(self, kind: str, since: datetime) -> dict[str, dict[str, float | int | None]]:
         """Extremos por nodo de las muestras de un `kind` desde `since` (Top

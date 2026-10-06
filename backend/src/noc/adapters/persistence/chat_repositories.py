@@ -180,3 +180,16 @@ class SqlChatRepository:
             .where(ChatMessageModel.to_node_id.is_not(None))
         )
         return int(result or 0)
+
+    async def get(self, message_id: int) -> ChatMessage | None:
+        m = await self._session.get(ChatMessageModel, message_id)
+        return _to_entity(m) if m else None
+
+    async def list_same_packet(self, from_node_id: str, packet_id: int) -> list[ChatMessage]:
+        """Todas las filas (una por pasarela) con el mismo remitente y packet_id."""
+        rows = await self._session.scalars(
+            select(ChatMessageModel).where(
+                ChatMessageModel.from_node_id == from_node_id, ChatMessageModel.packet_id == packet_id
+            )
+        )
+        return [_to_entity(r) for r in rows]

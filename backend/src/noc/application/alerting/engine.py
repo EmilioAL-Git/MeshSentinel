@@ -21,9 +21,12 @@ from noc.adapters.persistence.repositories import (
     SqlNeighborRepository,
     SqlNodeGatewayLinkRepository,
     SqlNodeRepository,
+    SqlPositionRepository,
+    SqlTelemetryRepository,
 )
 from noc.application.alerting.evaluators import EVALUATORS, NetworkSnapshot
 from noc.application.dashboard import ensure_utc
+from noc.application.node_identity import pair_identity_changes, superseded_node_ids
 from noc.config import get_settings
 from noc.domain.alerts.entities import Alert, AlertCondition, AlertRule
 
@@ -35,6 +38,9 @@ TransitionKind = Literal["fired", "resolved", "reminder"]
 # más de esto desaparece del snapshot y su alerta neighbor_link_lost se
 # auto-resuelve (la tabla append-only lo conserva; solo acota la evaluación).
 NEIGHBOR_SNAPSHOT_WINDOW = timedelta(days=7)
+
+# Ventana de los conteos de paquetes por nodo (reglas de ritmo excesivo)
+PACKET_RATE_WINDOW = timedelta(hours=1)
 
 
 @dataclass(slots=True, frozen=True)
@@ -71,18 +77,26 @@ class AlertEngine:
         settings = get_settings()
         async with self._session_factory() as session:
             rules = await SqlAlertRuleRepository(session).list_enabled()
+            all_summaries = await SqlNodeRepository(session).list_summaries()
+            all_nodes = [x.node for x in all_summaries]
             snapshot = NetworkSnapshot(
                 # Los nodos ignorados (M1.2) tampoco generan alertas: sus
                 # alertas activas se resuelven solas al desaparecer del snapshot
-                summaries=[
-                    x for x in await SqlNodeRepository(session).list_summaries() if not x.node.is_ignored
-                ],
+                summaries=[x for x in all_summaries if not x.node.is_ignored],
+                superseded_ids=frozenset(superseded_node_ids(pair_identity_changes(all_nodes))),
+                all_nodes=all_nodes,
                 gateways=await SqlGatewayRepository(session).list_all(),
                 links=await SqlNodeGatewayLinkRepository(session).list_all(),
                 neighbors=await SqlNeighborRepository(session).list_latest_network(
                     since=datetime.now(timezone.utc) - NEIGHBOR_SNAPSHOT_WINDOW
                 ),
                 node_offline_after_seconds=settings.node_offline_after_seconds,
+                position_counts_1h=await SqlPositionRepository(session).count_per_node_since(
+                    datetime.now(timezone.utc) - PACKET_RATE_WINDOW
+                ),
+                telemetry_counts_1h=await SqlTelemetryRepository(session).count_per_node_since(
+                    datetime.now(timezone.utc) - PACKET_RATE_WINDOW
+                ),
             )
 
         transitions: list[AlertTransition] = []

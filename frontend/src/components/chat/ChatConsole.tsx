@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type ActivityEntry } from "../../activity";
-import { fetchChatChannels, fetchChatMessages, type GatewayOut, type NodeSummaryOut } from "../../api/client";
+import { fetchChatChannels, fetchChatMessages, fetchHeardBy, type DiagField, type GatewayOut, type NodeSummaryOut } from "../../api/client";
 import { channelLabel, chatRowFromActivity, chatRowFromApi, contentKey, initials, type ChatRow } from "../../chat";
 import { NodeSelect } from "../NodeSelect";
 
@@ -257,7 +257,71 @@ export function ChatConsole({
   );
 }
 
+const PROVENANCE_TAG: Record<string, { tag: string; label: string; color: string }> = {
+  reported: { tag: "R", label: "Reportado por el propio paquete", color: "var(--accent)" },
+  observed: { tag: "O", label: "Observado por una de nuestras pasarelas", color: "var(--ok)" },
+  inferred: { tag: "I", label: "Inferido a partir de otros datos", color: "var(--warn)" },
+  unknown: { tag: "?", label: "Desconocido: no se dispone del dato", color: "var(--text-faint)" },
+};
+
+function Prov({ f, unit, digits }: { f: DiagField<number | string>; unit?: string; digits?: number }) {
+  const p = PROVENANCE_TAG[f.provenance];
+  const v = f.value == null ? "desconocido" : `${digits != null ? Number(f.value).toFixed(digits) : f.value}${unit ?? ""}`;
+  return (
+    <span>
+      {v}{" "}
+      <sup title={p.label} style={{ color: p.color, fontSize: 8.5, cursor: "help" }}>
+        {p.tag}
+      </sup>
+    </span>
+  );
+}
+
+/** «¿Quién lo oyó?» — procedencia por dato (R/O/I/?), nunca se inventa lo que no se sabe. */
+function HeardByPanel({ row }: { row: ChatRow }) {
+  const q = useQuery({
+    queryKey: ["heard-by", row.fromNodeId, row.packetId],
+    queryFn: () => fetchHeardBy(row.fromNodeId, row.packetId!),
+    enabled: row.packetId != null,
+    retry: false,
+  });
+  if (row.packetId == null)
+    return <div style={{ fontSize: 11, color: "var(--text-faint)" }}>Sin packet_id: no se puede agrupar quién lo oyó.</div>;
+  if (q.isLoading) return <div style={{ fontSize: 11, color: "var(--text-faint)" }}>Consultando…</div>;
+  if (q.isError || !q.data)
+    return <div style={{ fontSize: 11, color: "var(--text-faint)" }}>Este paquete aún no está en el histórico.</div>;
+  const d = q.data;
+  return (
+    <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.6 }}>
+      <div>
+        Oído por <strong>{d.heard_by_count}</strong> pasarela{d.heard_by_count === 1 ? "" : "s"} · paquete{" "}
+        <Prov f={d.packet_id} /> · destino <Prov f={d.to_node_id} />
+      </div>
+      <table style={{ borderCollapse: "collapse", marginTop: 4 }}>
+        <tbody>
+          {d.heard_by.map((h) => (
+            <tr key={h.gateway_id ?? "?"}>
+              <td style={{ paddingRight: 12 }}>{h.gateway_id ?? "?"}</td>
+              <td style={{ paddingRight: 12 }}>SNR <Prov f={h.snr} digits={1} /></td>
+              <td style={{ paddingRight: 12 }}>RSSI <Prov f={h.rssi} unit=" dBm" /></td>
+              <td style={{ paddingRight: 12 }}>saltos <Prov f={h.hops_used} /></td>
+              <td>límite <Prov f={h.hop_limit} />/<Prov f={h.hop_start} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {d.notes.map((n) => (
+        <div key={n} style={{ color: "var(--text-faint)", marginTop: 2 }}>{n}</div>
+      ))}
+      <div style={{ color: "var(--text-faint)", marginTop: 2 }}>
+        R reportado · O observado · I inferido · ? desconocido
+      </div>
+    </div>
+  );
+}
+
 function ChatRowView({ row, nodeNames }: { row: ChatRow; nodeNames: Map<string, string> }) {
+  const [showDelivery, setShowDelivery] = useState(false);
   const name = nodeNames.get(row.fromNodeId) ?? row.fromNodeId;
   const toName = row.toNodeId ? (nodeNames.get(row.toNodeId) ?? row.toNodeId) : null;
   return (
@@ -311,11 +375,25 @@ function ChatRowView({ row, nodeNames }: { row: ChatRow; nodeNames: Map<string, 
         <div style={{ fontSize: 12.5, color: "var(--text)", marginTop: 2, wordBreak: "break-word" }}>
           {row.text}
         </div>
+        {showDelivery && (
+          <div style={{ marginTop: 6, paddingLeft: 8, borderLeft: "2px solid var(--border)" }}>
+            <HeardByPanel row={row} />
+          </div>
+        )}
       </div>
       <div style={{ textAlign: "right", fontSize: 10, color: "var(--text-faint)", whiteSpace: "nowrap" }}>
         {row.rssi != null && <div>{row.rssi} dBm</div>}
         {row.snr != null && <div>SNR {row.snr.toFixed(1)}</div>}
         {row.gatewayId && <div>{row.gatewayId}</div>}
+        {row.direction === "inbound" && (
+          <div
+            style={{ cursor: "pointer", color: showDelivery ? "var(--accent)" : "var(--text-faint)" }}
+            title="Diagnóstico de entrega: qué pasarelas lo oyeron y con qué señal"
+            onClick={() => setShowDelivery((v) => !v)}
+          >
+            ⓘ entrega
+          </div>
+        )}
         <div style={{ color: "var(--ok)" }}>{row.direction === "inbound" ? "Recibido" : row.direction}</div>
       </div>
     </div>

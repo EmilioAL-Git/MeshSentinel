@@ -1,10 +1,13 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  fetchBackups,
   fetchConfigExport,
   fetchDigestStatus,
   fetchRuntime,
   fetchSettings,
+  runBackupNow,
+  storedBackupUrl,
   fetchStorage,
   importConfig,
   pruneNow,
@@ -149,6 +152,7 @@ export function SettingsView() {
         <DataPanel
           retentionSettings={settings.filter((s) => s.category === "retention")}
           digestSettings={settings.filter((s) => s.category === "digest")}
+          backupSettings={settings.filter((s) => s.category === "backup")}
           onChanged={invalidate}
         />
       )}
@@ -564,10 +568,12 @@ const tdStyle = { padding: "5px 8px", fontSize: 12.5 } as const;
 function DataPanel({
   retentionSettings,
   digestSettings,
+  backupSettings,
   onChanged,
 }: {
   retentionSettings: SettingOut[];
   digestSettings: SettingOut[];
+  backupSettings: SettingOut[];
   onChanged: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -583,6 +589,17 @@ function DataPanel({
     },
     onError: (err) =>
       toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo enviar", { kind: "error" }),
+  });
+
+  const backups = useQuery({ queryKey: ["backups"], queryFn: fetchBackups, refetchInterval: 30_000 });
+  const backupNow = useMutation({
+    mutationFn: runBackupNow,
+    onSuccess: (run) => {
+      toast(run.error ? `La copia falló: ${run.error}` : `Copia guardada: ${run.file}`, run.error ? { kind: "error" } : undefined);
+      queryClient.invalidateQueries({ queryKey: ["backups"] });
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo copiar", { kind: "error" }),
   });
 
   const prune = useMutation({
@@ -669,6 +686,48 @@ function DataPanel({
               : "Aún no se ha enviado ninguno"}
           </span>
         </div>
+      </div>
+
+      <div>
+        <h2>Copias automáticas</h2>
+        <div style={{ color: t.textDim, fontSize: 12.5, maxWidth: 640, marginTop: 4 }}>
+          Copia lógica completa guardada en el servidor (<code style={{ fontFamily: t.fontMono }}>{backups.data?.directory ?? "…"}</code>),
+          con rotación. Si una copia falla se avisa a las integraciones de notificación. Contienen hashes de
+          contraseña y tokens: trata el directorio como un secreto.
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, fontSize: 12.5 }}>
+          <tbody>
+            {backupSettings.map((st) => (
+              <SettingRow key={st.key} setting={st} onChanged={onChanged} />
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button className="btn" disabled={backupNow.isPending || backups.data?.running} onClick={() => backupNow.mutate()}>
+            {backupNow.isPending || backups.data?.running ? "Copiando…" : "Copiar ahora"}
+          </button>
+          {backups.data?.last_run?.error && (
+            <span style={{ color: t.crit, fontSize: 12 }}>Última copia con error: {backups.data.last_run.error}</span>
+          )}
+        </div>
+        {(backups.data?.files.length ?? 0) > 0 && (
+          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+            <tbody>
+              {backups.data!.files.map((f) => (
+                <tr key={f.name} style={{ borderBottom: `1px solid ${t.borderSubtle}` }}>
+                  <td style={{ ...tdStyle, fontFamily: t.fontMono }}>{f.name}</td>
+                  <td style={{ ...tdStyle, textAlign: "right", fontFamily: t.fontMono }}>{fmtBytes(f.size_bytes)}</td>
+                  <td style={tdStyle}>{fmtDate(f.created_at)}</td>
+                  <td style={tdStyle}>
+                    <a href={storedBackupUrl(f.name)} download>
+                      ⤓
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div>

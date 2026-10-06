@@ -100,6 +100,14 @@ class Settings(BaseSettings):
     digest_period_hours: int = 0
     digest_hour_utc: int = 8
 
+    # ── Copias de seguridad programadas ────────────────────────────────
+    # 0 = desactivadas. Escribe en `backup_dir` (en Docker, el volumen
+    # /backups) y conserva las `backup_keep` más recientes. Los ficheros
+    # contienen hashes de contraseña y tokens: tratar el directorio como secreto.
+    backup_period_hours: int = 0
+    backup_keep: int = 7
+    backup_dir: str = "backups"
+
     # ── Autenticación ──────────────────────────────────────────────────
     # Modo abierto mientras no exista ningún auth_users con is_admin+enabled
     # (sin flag de entorno: ver AuthService.is_protected_mode). Sesión
