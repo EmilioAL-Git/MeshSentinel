@@ -894,6 +894,34 @@ export function Map3DView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [follow]);
 
+  // Mover el mapa a mano (arrastrar, girar, zoom, táctil) desactiva «Seguir»; los
+  // movimientos de la propia cámara no traen `originalEvent`
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const onUser = (e: { originalEvent?: unknown }) => {
+      if (e.originalEvent && followRef.current) setFollow(false);
+    };
+    // El bucle de «Seguir» llama a jumpTo en cada fotograma, que interrumpe el gesto
+    // de arrastre antes de que MapLibre emita sus eventos: se detecta en el DOM
+    const el = map.getCanvasContainer();
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.buttons && followRef.current) setFollow(false);
+    };
+    el.addEventListener("pointermove", onPointerMove);
+    map.on("movestart", onUser);
+    map.on("zoomstart", onUser);
+    map.on("rotatestart", onUser);
+    map.on("pitchstart", onUser);
+    return () => {
+      el.removeEventListener("pointermove", onPointerMove);
+      map.off("movestart", onUser);
+      map.off("zoomstart", onUser);
+      map.off("rotatestart", onUser);
+      map.off("pitchstart", onUser);
+    };
+  }, [ready]);
+
   // Cada traza nueva arranca con «Seguir» activado (el operador puede quitarlo luego)
   useEffect(() => {
     if (trace) setFollow(true);
@@ -1227,10 +1255,17 @@ export function Map3DView({
         return next.pitch === c.pitch && next.bearing === c.bearing ? c : next;
       });
     sync();
+    // El giro se limita a ±90° (MapLibre no tiene mínimo/máximo de rumbo propio)
+    const clampBearing = () => {
+      const b = map.getBearing();
+      if (b > 90 || b < -90) map.setBearing(b > 0 ? 90 : -90);
+    };
     map.on("pitch", sync);
+    map.on("rotate", clampBearing);
     map.on("rotate", sync);
     return () => {
       map.off("pitch", sync);
+      map.off("rotate", clampBearing);
       map.off("rotate", sync);
     };
   }, [ready]);
