@@ -89,6 +89,7 @@ class OperationOut(BaseModel):
     finished_at: datetime | None
     duration_ms: int | None
     gateway_note: str | None
+    dismissed_at: datetime | None
     actor_label: str
 
     @classmethod
@@ -213,6 +214,23 @@ async def cancel_operation(
             batches = getattr(request.app.state, "batches", None)
             if batches is not None:
                 await batches.maybe_complete(session, op.batch_id)
+    assert op is not None
+    return OperationOut.from_entity(op)
+
+
+@router.post("/operations/{op_id}/dismiss", response_model=OperationOut)
+async def dismiss_operation(op_id: int, session: SessionDep, _user: RequireManagerDep) -> OperationOut:
+    """Descarta un fallo: deja de contar como problema, la operación se conserva."""
+    from datetime import timezone
+
+    async with session.begin():
+        repo = SqlAdminOperationRepository(session)
+        op = await repo.get(op_id)
+        if op is None:
+            raise HTTPException(status_code=404, detail="Operation not found")
+        if op.status not in ("failed", "timeout", "verify_failed"):
+            raise HTTPException(status_code=409, detail=f"Cannot dismiss operation in status '{op.status}'")
+        op = await repo.update_fields(op_id, {"dismissed_at": datetime.now(timezone.utc)})
     assert op is not None
     return OperationOut.from_entity(op)
 

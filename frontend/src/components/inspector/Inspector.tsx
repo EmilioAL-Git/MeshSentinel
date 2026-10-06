@@ -23,6 +23,7 @@ import {
   refreshNodeConfig,
   removeGroupMember,
   retryOperation,
+  dismissOperation,
   setNodeFavorite,
   displayName,
   setNodeIgnored,
@@ -486,6 +487,11 @@ export function Inspector({
     onError: (e) => toast(`No se pudo añadir a la cola: ${e.message}`, { kind: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
   });
+  const doDismiss = useMutation({
+    mutationFn: (id: number) => dismissOperation(id),
+    onSuccess: () => toast("Fallo descartado"),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["operations"] }),
+  });
   const doRetry = useMutation({
     mutationFn: (id: number) => retryOperation(id),
     onSuccess: () => toast("Reintento añadido a la cola"),
@@ -579,7 +585,7 @@ export function Inspector({
   // fetches nuevos — cada problema detectado es clicable y salta a su
   // pestaña de detalle (mismo patrón que la cola de atención de StatusPanel,
   // pero a escala de un único nodo).
-  const failedOps = allNodeOps.filter((o) => FAILED_OP_STATUSES.has(o.status));
+  const failedOps = allNodeOps.filter((o) => FAILED_OP_STATUSES.has(o.status) && !o.dismissed_at);
   type Problem = { icon: string; label: string; color: string; tab: TabId };
   const problems: Problem[] = [];
   if (n && !n.online) problems.push({ icon: "📴", label: "Nodo offline", color: t.crit, tab: "log" });
@@ -1158,6 +1164,11 @@ export function Inspector({
                     {RETRYABLE.has(op.status) && (
                       <button style={iconBtn} title="Reintentar (re-evalúa la pasarela)" onClick={() => doRetry.mutate(op.id)}>
                         ↻
+                      </button>
+                    )}
+                    {FAILED_OP_STATUSES.has(op.status) && !op.dismissed_at && (
+                      <button style={iconBtn} title="Descartar: deja de contar como problema" onClick={() => doDismiss.mutate(op.id)}>
+                        ✕
                       </button>
                     )}
                   </div>

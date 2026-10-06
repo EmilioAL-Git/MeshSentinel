@@ -125,6 +125,7 @@ class AdminOperation:
     # en el momento de encolar — nunca se reintenta solo por esto (Nivel 1-4,
     # `application/admin/gateway_routing.py:resolve_gateway`).
     gateway_note: str | None = None
+    dismissed_at: datetime | None = None
 
     @property
     def is_terminal(self) -> bool:

@@ -302,6 +302,8 @@ class AdminOperationModel(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     gateway_note: Mapped[str | None] = mapped_column(Text)
+    # El operador descartó el fallo (no cuenta como problema); la op no cambia
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ConfigProfileModel(Base):

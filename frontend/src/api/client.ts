@@ -687,6 +687,7 @@ export interface OperationOut {
   finished_at: string | null;
   duration_ms: number | null;
   gateway_note: string | null;
+  dismissed_at?: string | null;
   /** Resuelto en backend (resolve_actor_label): nunca reconstruir en React. */
   actor_label: string;
 }
@@ -712,6 +713,7 @@ export const createOperation = (body: {
   gateway_selection?: GatewaySelectionIn;
 }) => send<OperationOut>("POST", "/admin/operations", body);
 export const cancelOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/cancel`);
+export const dismissOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/dismiss`);
 export const retryOperation = (id: number) => send<OperationOut>("POST", `/admin/operations/${id}/retry`);
 
 // ── Favoritos/ignorados remotos (M4.1/M4.2) ─────────────────────────────────

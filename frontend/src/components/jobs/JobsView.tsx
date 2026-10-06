@@ -11,6 +11,7 @@ import {
   pauseBatch,
   resumeBatch,
   retryOperation,
+  dismissOperation,
   type BatchOut,
   type NodeSummaryOut,
   type OperationOut,
@@ -133,6 +134,7 @@ function OpRow({
   onLocate,
   onCancel,
   onRetry,
+  onDismiss,
   showTime,
 }: {
   op: OperationOut;
@@ -143,6 +145,7 @@ function OpRow({
   onLocate: (id: string) => void;
   onCancel?: (id: number) => void;
   onRetry?: (id: number) => void;
+  onDismiss?: (id: number) => void;
   showTime?: "created" | "finished";
 }) {
   return (
@@ -181,6 +184,11 @@ function OpRow({
       {onRetry && RETRYABLE_OP_STATUSES.has(op.status) && (
         <button style={smallBtn} title="Reintentar (re-evalúa la pasarela)" onClick={() => onRetry(op.id)}>
           ↻
+        </button>
+      )}
+      {onDismiss && FAILED_OP_STATUSES.has(op.status) && !op.dismissed_at && (
+        <button style={smallBtn} title="Descartar: deja de contar como problema (la operación se conserva)" onClick={() => onDismiss(op.id)}>
+          ✕
         </button>
       )}
       {onCancel && (op.status === "pending" || op.status === "queued" || op.status === "running") && (
@@ -470,6 +478,11 @@ export function JobsView({
     queryClient.invalidateQueries({ queryKey: ["batches"] });
   };
   const doCancelOp = useMutation({ mutationFn: cancelOperation, onSettled: invalidate });
+  const doDismissOp = useMutation({
+    mutationFn: dismissOperation,
+    onSuccess: () => toast("Fallo descartado"),
+    onSettled: invalidate,
+  });
   const doRetryOp = useMutation({
     mutationFn: retryOperation,
     onSuccess: () => toast("Reintento añadido a la cola (re-evalúa la pasarela)"),
@@ -599,6 +612,7 @@ export function JobsView({
   const needsAttention = allOps.filter(
     (o) =>
       FAILED_OP_STATUSES.has(o.status) &&
+      !o.dismissed_at &&
       matches(o) &&
       (o.finished_at == null || new Date(o.finished_at).getTime() > dayAgo),
   );
@@ -816,6 +830,7 @@ export function JobsView({
                 onOpenNode={onOpenNode}
                 onLocate={onLocate}
                 onRetry={(id) => doRetryOp.mutate(id)}
+                onDismiss={(id) => doDismissOp.mutate(id)}
                 showTime="finished"
               />
             ))}
