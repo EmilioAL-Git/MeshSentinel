@@ -175,8 +175,8 @@ function RankingModal({
 }
 
 export function StatsView({ onOpenNode }: { onOpenNode: (nodeId: string) => void }) {
-  const [hoursParam, setHours] = useUrlNumber("stats.h", 24);
-  const hours = clampHours(hoursParam ?? 24);
+  const [hoursParam, setHours] = useUrlNumber("stats.h", 168);
+  const hours = clampHours(hoursParam ?? 168);
   const days = Math.floor(hours / 24);
   const restHours = hours % 24;
   const { activeGroupId, activeGroup } = useActiveGroup();
