@@ -212,6 +212,18 @@ async def set_ignored(node_id: str, body: FlagIn, session: SessionDep, _user: Re
     return NodeOut.from_entity(node, get_settings().node_offline_after_seconds)
 
 
+@router.put("/{node_id}/alerts-muted", response_model=NodeOut)
+async def set_alerts_muted(
+    node_id: str, body: FlagIn, session: SessionDep, _user: RequireManagerDep
+) -> NodeOut:
+    """Silencia las alertas de ESTE nodo (sigue visible y cuenta en agregados)."""
+    node = await SqlNodeRepository(session).set_flag(node_id, "alerts_muted", body.value)
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    await session.commit()
+    return NodeOut.from_entity(node, get_settings().node_offline_after_seconds)
+
+
 @router.put("/{node_id}/nexus", response_model=NodeOut)
 async def set_nexus(
     node_id: str, body: FlagIn, session: SessionDep, current_user: RequireManagerDep

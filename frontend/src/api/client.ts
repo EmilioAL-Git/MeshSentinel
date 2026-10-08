@@ -26,6 +26,7 @@ export interface NodeOut {
   last_seen_at: string | null;
   is_favorite: boolean;
   is_ignored: boolean;
+  alerts_muted: boolean;
   is_nexus: boolean;
   preferred_gateway_id: string | null;
   node_type_override: string | null;
@@ -338,6 +339,8 @@ export const setFavoriteBulk = (nodeIds: string[], value: boolean) =>
   send<{ changed: number; unchanged: number }>("POST", "/nodes/bulk-favorite", { node_ids: nodeIds, value });
 export const setNodeIgnored = (id: string, value: boolean) =>
   send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/ignored`, { value });
+export const setNodeAlertsMuted = (id: string, value: boolean) =>
+  send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/alerts-muted`, { value });
 export const setNodeNexus = (id: string, value: boolean) =>
   send<NodeOut>("PUT", `/nodes/${encodeURIComponent(id)}/nexus`, { value });
 export const setNodeTags = (id: string, tag_ids: number[]) =>

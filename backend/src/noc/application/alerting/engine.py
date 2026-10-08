@@ -92,7 +92,7 @@ class AlertEngine:
             snapshot = NetworkSnapshot(
                 # Los nodos ignorados (M1.2) tampoco generan alertas: sus
                 # alertas activas se resuelven solas al desaparecer del snapshot
-                summaries=[x for x in all_summaries if not x.node.is_ignored],
+                summaries=[x for x in all_summaries if not x.node.is_ignored and not x.node.alerts_muted],
                 superseded_ids=frozenset(superseded_node_ids(pair_identity_changes(all_nodes))),
                 all_nodes=all_nodes,
                 gateways=await SqlGatewayRepository(session).list_all(),

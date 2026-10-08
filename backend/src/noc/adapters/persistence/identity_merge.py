@@ -109,6 +109,8 @@ async def merge_identity(session: AsyncSession, predecessor_id: str, successor_i
         new.is_favorite = True
     if old.is_ignored:
         new.is_ignored = True
+    if old.alerts_muted:
+        new.alerts_muted = True
     if old.is_nexus:
         new.is_nexus = True
     if new.preferred_gateway_id is None:

@@ -129,7 +129,7 @@ class SqlNodeRepository:
         return _node_entity(model) if model else None
 
     async def set_flag(self, node_id: str, flag: str, value: bool) -> Node | None:
-        assert flag in ("is_favorite", "is_ignored", "is_nexus")
+        assert flag in ("is_favorite", "is_ignored", "is_nexus", "alerts_muted")
         model = await self._session.get(NodeModel, node_id)
         if model is None:
             return None
@@ -140,7 +140,7 @@ class SqlNodeRepository:
     async def set_flag_bulk(self, node_ids: list[str], flag: str, value: bool) -> tuple[int, int]:
         """Fija un flag en bloque (Flota → selección). Devuelve (changed,
         unchanged): unchanged = ya tenían ese valor o no existen."""
-        assert flag in ("is_favorite", "is_ignored", "is_nexus")
+        assert flag in ("is_favorite", "is_ignored", "is_nexus", "alerts_muted")
         requested = list(dict.fromkeys(node_ids))
         column = getattr(NodeModel, flag)
         to_change = list(

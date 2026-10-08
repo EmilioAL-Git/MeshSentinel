@@ -24,6 +24,8 @@ class Node:
     # Metadatos del NOC (M1.2): solo BD propia, nunca tocan la malla
     is_favorite: bool = False
     is_ignored: bool = False
+    # Silencia SOLO las alertas del nodo (el nodo sigue visible y en agregados).
+    alerts_muted: bool = False
     # Marcado manual de nodo JenTastic-Nexus (ADR 0027 §8): enteramente
     # manual, nunca autodetectado ni escrito por eventos de la malla — solo
     # por PUT /nodes/{id}/nexus, tras que el operador acepte una sugerencia

@@ -27,6 +27,7 @@ import {
   setNodeFavorite,
   displayName,
   setNodeIgnored,
+  setNodeAlertsMuted,
   setNodePreferredGateway,
   setNodeTags,
   setNodeTypeOverride,
@@ -397,6 +398,13 @@ export function Inspector({
     mutationFn: (value: boolean) => setNodeIgnored(nodeId, value),
     onSettled: invalidate,
   });
+  const muted = useMutation({
+    mutationFn: (value: boolean) => setNodeAlertsMuted(nodeId, value),
+    onSettled: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["alerts"] });
+    },
+  });
   const saveTags = useMutation({
     mutationFn: (tagIds: number[]) => setNodeTags(nodeId, tagIds),
     onSettled: invalidate,
@@ -616,6 +624,7 @@ export function Inspector({
       tab: "history",
     });
   }
+  if (n?.alerts_muted) problems.push({ icon: "🔕", label: "Alertas silenciadas", color: t.textDim, tab: "general" });
   if (n?.is_ignored) problems.push({ icon: "👁", label: "Nodo ignorado (local)", color: t.textDim, tab: "general" });
 
   const badge = (n: number, color: string = t.accent) =>
@@ -702,6 +711,16 @@ export function Inspector({
           >
             👁
           </button>
+          )}
+          {canOperate && (
+            <button
+              style={{ ...iconBtn, color: n?.alerts_muted ? t.warn : t.textFaint }}
+              title={n?.alerts_muted ? "Reactivar alertas de este nodo" : "Silenciar alertas de este nodo"}
+              onClick={() => muted.mutate(!n?.alerts_muted)}
+              disabled={muted.isPending}
+            >
+              {n?.alerts_muted ? "🔕" : "🔔"}
+            </button>
           )}
           {confirmIgnore && (
             <IgnoreNodeModal

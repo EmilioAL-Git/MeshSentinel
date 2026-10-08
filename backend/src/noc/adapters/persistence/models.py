@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -85,6 +86,7 @@ class NodeModel(Base):
     # Metadatos del NOC (M1.2) — nunca provienen de la malla ni la modifican
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     is_ignored: Mapped[bool] = mapped_column(Boolean, default=False)
+    alerts_muted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # Marcado manual JenTastic-Nexus (ADR 0027 §8) — mismo criterio.
     is_nexus: Mapped[bool] = mapped_column(Boolean, default=False)
     # Selección inteligente de gateway (Nivel 2): sin FK, mismo criterio que

@@ -111,6 +111,7 @@ class NodeOut(BaseModel):
     last_seen_at: datetime | None
     is_favorite: bool
     is_ignored: bool
+    alerts_muted: bool
     is_nexus: bool
     preferred_gateway_id: str | None
     node_type_override: str | None
