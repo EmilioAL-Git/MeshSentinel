@@ -265,9 +265,11 @@ export function StatusPanel({
     return (nodeId: string) => names.get(nodeId) ?? nodeId;
   }, [summaries]);
 
-  // ② LA cola de atención: cada nodo UNA vez con todos sus problemas
+  // ② LA cola de atención = las alertas activas (mismo criterio que el
+  // contador de Alertas): cada nodo UNA vez con todas sus alertas. Los
+  // umbrales del Dashboard solo alimentan el semáforo, no la cola.
   const queue = useMemo(() => {
-    const cards = buildAttentionQueue(attentionBase, scopedActive, labelOf);
+    const cards = buildAttentionQueue([], scopedActive, labelOf);
     cards.sort(
       (a, b) =>
         Number(b.nodeId === focusId) - Number(a.nodeId === focusId) ||
@@ -275,7 +277,7 @@ export function StatusPanel({
         a.label.localeCompare(b.label),
     );
     return cards;
-  }, [attentionBase, scopedActive, labelOf, focusId]);
+  }, [scopedActive, labelOf, focusId]);
   const critCount = queue.filter((c) => c.rank === 0).length;
 
   const activeGwStats = groupNodeIds != null ? groupGwStats.data : stats;
