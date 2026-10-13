@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { t } from "../../tokens";
 
 const overlayStyle: CSSProperties = {
@@ -31,7 +32,10 @@ const boxStyle: CSSProperties = {
 export function Modal({
   title, onClose, children, width,
 }: { title: string; onClose: () => void; children: ReactNode; width?: string }) {
-  return (
+  // Portal al <body>: en móvil `.app-root` es position:fixed (contexto de
+  // apilamiento propio) y un Modal dentro quedaría BAJO el Inspector, que ya
+  // es un portal del body (FloatingWindow, z 950).
+  return createPortal(
     <div style={overlayStyle} onMouseDown={onClose}>
       <div style={width ? { ...boxStyle, width } : boxStyle} onMouseDown={(e) => e.stopPropagation()}>
         <div className="panel-head">
@@ -42,6 +46,7 @@ export function Modal({
         </div>
         <div style={{ padding: "0.75rem", overflowY: "auto" }}>{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
