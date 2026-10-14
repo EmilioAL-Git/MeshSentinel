@@ -40,7 +40,12 @@ MAX_TEXT_CHARS = 200
 _ZH_ID_VERBS = frozenset({"ADD", "DEL"})
 _REDIRECT_NAMES = frozenset({"R", "REDIRECT"})
 _REDIRECT_DESTINATIONS = frozenset({"CH", "DM"})
-MAX_REDIRECT_DEPTH = 2  # §B1 prompt v2.8.006
+# El código admite hasta 3 (`NEXUS_MAX_REDIRECT_DEPTH`), pero en HARDWARE
+# (2026-10-14, firmware 2.8.005 y 2.8.101) un `R` dentro de otro `R` NO se
+# procesa: el nodo responde "Unknown command 'R DM !id VERSION'". La doc ya
+# decía "only recognized at the top level — known limitation". Solo 1 nivel
+# es útil; rechazar el anidado evita mandar un comando que falla en silencio.
+MAX_REDIRECT_DEPTH = 1
 
 
 class NexusCommandError(ValueError):
@@ -62,8 +67,8 @@ class NexusCommand:
 def _redirect_depth(args: tuple[str, ...]) -> int:
     """Profundidad de un `R`/`REDIRECT` cuyo comando envuelto es OTRO redirect.
 
-    `R CH <id> STATS` tiene profundidad 1. `R CH <id> R DM <id> STATS` tiene
-    profundidad 2 (el máximo permitido, §B1). Cuenta cuántas veces aparece un
+    `R CH <id> STATS` tiene profundidad 1 (el máximo útil). `R CH <id> R DM <id>
+    STATS` tiene profundidad 2: el firmware no procesa el segundo `R`. Cuenta cuántas veces aparece un
     token `R`/`REDIRECT` seguido de un destino válido (`CH`/`DM`) dentro de
     los argumentos, más el nivel inicial.
     """

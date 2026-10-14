@@ -16,10 +16,12 @@ DEFAULT_PREFIX = "/nexus"
 KNOWN_PREFIXES = ("/nexus", "/jt", "/jent", "/jentastic")
 
 _HEX8 = re.compile(r"^[0-9a-f]{8}$")
-# El manual v2.8.006 (verificado contra el código fuente) llama al parámetro
-# "<mac6>" — 6 caracteres hex (3 bytes), no 4 (2 bytes) como se había dejado
-# sin confirmar en la iteración anterior.
-_MAC6 = re.compile(r"^[0-9a-f]{6}$")
+# `-mac` compara los ÚLTIMOS 2 BYTES de la MAC (4 hex). Verificado contra el
+# código fuente público (`NexusModule.cpp` matchTargetedCmd: `(mac[4] << 8) |
+# mac[5]` frente a `strtoul(arg, 16)`) y EN HARDWARE (2026-10-14: 4 hex
+# responde, 6 hex no). El manual PDF 2.8.006 decía "<mac6>" y estaba mal: un
+# valor de 6 hex nunca iguala un sufijo de 16 bits y el nodo calla.
+_MAC4 = re.compile(r"^[0-9a-f]{4}$")
 _COMMAND_TEXT = re.compile(
     r"^(" + "|".join(re.escape(p) for p in KNOWN_PREFIXES) + r")(-[a-z]+)?(\s|$)",
     re.IGNORECASE,
@@ -81,12 +83,14 @@ class ShortName:
 
 @dataclass(frozen=True, slots=True)
 class Mac:
-    last_bytes: str  # 6 hex = últimos 3 bytes de la MAC (manual v2.8.006, "<mac6>")
+    last_bytes: str  # 4 hex = últimos 2 bytes de la MAC (el firmware no compara más)
 
     def __post_init__(self) -> None:
         value = self.last_bytes.strip().lower()
-        if not _MAC6.match(value):
-            raise NexusAddressError(f"MAC no válida (6 hex): {self.last_bytes!r}")
+        if not _MAC4.match(value):
+            raise NexusAddressError(
+                f"MAC no válida: se esperan 4 hex (últimos 2 bytes), no {self.last_bytes!r}"
+            )
         object.__setattr__(self, "last_bytes", value)
 
 

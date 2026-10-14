@@ -81,10 +81,8 @@ Parser = Callable[[str], dict[str, Any]]
 # mensaje de uso genérico — nada que estructurar todavía.
 PENDING_FORMATS: tuple[str, ...] = (
     "SIGSTATS",
-    "HOPSTATS",
     "PACKETSTATS",
     "CHANNELSTATS",
-    "RELAYS",
 )
 
 PARSERS: dict[str, Parser] = {}
@@ -99,7 +97,44 @@ _UNKNOWN_COMMAND_RE = re.compile(r"^JT:\s*Unknown command '(?P<command>[^']*)'\s
 # versión, solo de si el token está presente o no) — usado por la detección
 # PASIVA (`nexus_gateway.py`): no requiere haber mandado ningún comando,
 # solo que el TEXTO ya tenga la forma de una respuesta Nexus.
-_SIGNATURE_RE = re.compile(r"^(?:[🟢🔴]\s*)?(?:JT|Nexus)[\s:]")
+# Marcador de estado de firma de la RESPUESTA (`NexusCommands.cpp`, cola del
+# despachador): describe cómo llegó el COMANDO al nodo, no la respuesta.
+SIGNATURE_STATES: dict[str, str] = {
+    "🔒": "trusted",  # firmado, verificado y firmante en admin/secondary/master
+    "🟢": "verified",  # firmado y verificado, firmante NO de confianza
+    "🟠": "invalid",  # firma presente pero NO verifica
+    "🔴": "unsigned",  # sin firma
+}
+SIGNATURE_MARKERS = "".join(SIGNATURE_STATES)
+_SIGNATURE_RE = re.compile(rf"^(?:[{SIGNATURE_MARKERS}]\s*)?(?:JT|Nexus)[\s:]")
+
+
+_REJECTION_RE = re.compile(
+    rf"^(?:[{SIGNATURE_MARKERS}]\s*)?JT SECURITY:\s*rejected\s*[—–-]\s*(?P<reason>.+)$", re.S
+)
+
+# Motivo del firmware → pista de operador. Los textos exactos salen de
+# `NexusModule.cpp` (replay, REQ_SIG, ALLOW_DM).
+_REJECTION_HINTS = (
+    ("signature required", "El nodo exige comandos firmados (REQ_SIG) y la clave de esta pasarela no está en su lista de confianza (SKEY/admin)."),
+    ("ALLOW_DM=OFF", "El nodo no acepta comandos por mensaje directo (ALLOW_DM apagado)."),
+    ("DM not authorized", "El nodo acepta DMs, pero la clave de esta pasarela no está en su lista de confianza."),
+    ("replay", "El nodo vio este paquete antes (protección anti-repetición); reenviar con otro id."),
+)
+
+
+def security_rejection(text: str) -> dict[str, str] | None:
+    """`JT SECURITY: rejected — <motivo>` → {reason, hint, marker}; None si no es."""
+    match = _REJECTION_RE.match(text.strip())
+    if not match:
+        return None
+    reason = match.group("reason").strip()
+    hint = next((h for needle, h in _REJECTION_HINTS if needle.lower() in reason.lower()), "")
+    out = {"reason": reason, "hint": hint}
+    marker = text.strip()[0]
+    if marker in SIGNATURE_MARKERS:
+        out["marker"] = marker
+    return out
 
 
 def looks_like_nexus_signature(text: str) -> bool:
@@ -126,10 +161,16 @@ def parse_response(command: str, text: str, args: tuple[str, ...] = ()) -> Parse
     unknown = _UNKNOWN_COMMAND_RE.match(text.strip())
     if unknown:
         return ParsedResponse(key, "unsupported", text, {"command": unknown.group("command")})
+    rejected = security_rejection(text)
+    if rejected is not None:
+        # NO es una respuesta al comando: el nodo lo rechazó antes de ejecutarlo.
+        return ParsedResponse(key, "raw", text, {"rejected": True, **rejected})
     parser = PARSERS.get(key)
     if parser is None:
         return ParsedResponse(key, "raw", text)
     try:
+        # `data["marker"]` (si lo hay) ya es el estado de firma: la lectura
+        # (`SIGNATURE_STATES[marker]`) es de presentación, no se persiste aparte.
         return ParsedResponse(key, "structured", text, parser(text))
     except Exception as exc:  # noqa: BLE001 — un formato inesperado nunca rompe la UI
         return ParsedResponse(key, "raw", text, error=f"{type(exc).__name__}: {exc}")
@@ -389,7 +430,11 @@ PARSERS["NODES"] = parse_nodes
 # igualmente en la captura real y se devuelven tal cual, sin inventar su
 # significado. BYPASS_RP lleva un contador entre paréntesis aparte.
 
-_SECURITY_LINE_RE = re.compile(r"^(?P<key>[A-Z_]+):(?P<value>\S+)(?:\s*\((?P<extra>[^)]*)\))?$")
+# 2.8.101+ añade `FAV_XT:<st> ch<n>` (AUTO_FAV_EXTRA, canal en los bits 7-9);
+# 2.8.005 emite solo 6 líneas. El sufijo `ch<n>` se devuelve aparte.
+_SECURITY_LINE_RE = re.compile(
+    r"^(?P<key>[A-Z_]+):(?P<value>\S+)(?:\s+ch(?P<channel>\d+))?(?:\s*\((?P<extra>[^)]*)\))?$"
+)
 
 
 def parse_security(text: str) -> dict[str, Any]:
@@ -403,6 +448,8 @@ def parse_security(text: str) -> dict[str, Any]:
             continue
         key = match.group("key").lower()
         data[key] = match.group("value").lower()
+        if match.group("channel") is not None:
+            data[f"{key}_channel"] = int(match.group("channel"))
         if match.group("extra"):
             data[f"{key}_extra"] = match.group("extra")
     return data
@@ -758,6 +805,18 @@ PARSERS["WATCH STATS"] = parse_watch_stats
 _FAVS_ENTRY_RE = re.compile(r"!([0-9a-fA-F]{8}):([^\s!]*)")
 
 
+# El firmware pagina desde un buffer de 2048 B (`paging_buf[2048]`) y
+# `appendPaging` DESCARTA en silencio la entrada que no cabe: una lista que
+# llega cerca de ese tamaño puede estar incompleta sin que nada lo avise
+# (hardware 2026-10-14: NODES dio 89 filas de 109 nodos en 2057 B). Por
+# debajo del umbral se asume completa; por encima, `truncated_suspected`.
+PAGED_LIST_SUSPECT_BYTES = 1900
+
+
+def _suspect_truncated(body: str) -> bool:
+    return len(body.encode("utf-8")) >= PAGED_LIST_SUSPECT_BYTES
+
+
 def _parse_node_list(text: str, header: str) -> dict[str, Any]:
     marker, body = _first_line(text, header)
     entries = [
@@ -767,6 +826,8 @@ def _parse_node_list(text: str, header: str) -> dict[str, Any]:
     data: dict[str, Any] = {"entries": entries}
     if marker:
         data["marker"] = marker
+    if _suspect_truncated(body):
+        data["truncated_suspected"] = True
     return data
 
 
@@ -902,6 +963,8 @@ def parse_nign_list(text: str) -> dict[str, Any]:
     data: dict[str, Any] = {"entries": entries}
     if marker:
         data["marker"] = marker
+    if _suspect_truncated(body):
+        data["truncated_suspected"] = True
     return data
 
 
@@ -932,3 +995,323 @@ def parse_uptime(text: str) -> dict[str, Any]:
 
 
 PARSERS["UPTIME"] = parse_uptime
+
+
+# --- Capturas reales 2026-10-14 (X1→T1000, firmware 2.8.101) -----------------
+# Formatos tal cual los devolvió el nodo (`tools/captures/validate-20261014-*`).
+# Quirks del firmware que se toleran, no se «arreglan»: cabecera `JT JT ...`
+# duplicada (INFRA, NIGN) y filas paginadas pegadas sin separador (NODES28).
+
+
+def _unmark(text: str) -> tuple[str | None, str]:
+    stripped = text.strip()
+    if stripped and stripped[0] in SIGNATURE_MARKERS:
+        return stripped[0], stripped[1:].lstrip()
+    return None, stripped
+
+
+def _with_marker(marker: str | None, data: dict[str, Any]) -> dict[str, Any]:
+    if marker:
+        data["marker"] = marker
+    return data
+
+
+_NEIGHBOR_RE = re.compile(r"!([0-9a-fA-F]{8}):(.*?)\((-?\d+(?:\.\d+)?)\)(?=\s|$)")
+
+
+def parse_neighbors(text: str) -> dict[str, Any]:
+    """`JT Neighbors (0-hop):\n!id:NOMBRE(snr) …` — vecinos a 0 saltos."""
+    marker, body = _unmark(text)
+    if not body.startswith("JT Neighbors"):
+        raise ValueError("no empieza por 'JT Neighbors'")
+    entries = [
+        {"node_id": f"!{nid.lower()}", "short_name": name, "snr": float(snr)}
+        for nid, name, snr in _NEIGHBOR_RE.findall(body)
+    ]
+    return _with_marker(marker, {"entries": entries})
+
+
+PARSERS["NEIGHBORS"] = parse_neighbors
+
+
+_INFRA_RE = re.compile(r"^!([0-9a-fA-F]{8}):(.*):([A-Z_]+):H(\d+)\s*$")
+
+
+def parse_infra(text: str) -> dict[str, Any]:
+    """`JT JT Infrastructure:` (cabecera duplicada del firmware) + una línea
+    `!id:NOMBRE:ROL:H<saltos>` por nodo."""
+    marker, body = _unmark(text)
+    if not re.match(r"^(?:JT )?JT Infrastructure:", body):
+        raise ValueError("no empieza por 'JT Infrastructure'")
+    entries = []
+    for line in body.splitlines()[1:]:
+        m = _INFRA_RE.match(line.strip())
+        if m:
+            entries.append({"node_id": f"!{m.group(1).lower()}", "short_name": m.group(2),
+                            "role": m.group(3), "hops": int(m.group(4))})
+    return _with_marker(marker, {"entries": entries})
+
+
+PARSERS["INFRA"] = parse_infra
+
+
+_NODES28_SUMMARY_RE = re.compile(r"JT NODES28:\s*(\d+)/(\d+) matched")
+_NODES28_ROW_RE = re.compile(r"!([0-9a-fA-F]{8})\s+(.+?)\s+([P-])([V-])(\s*\(self\))?(?=!|$|\s)")
+
+
+def parse_nodes28(text: str) -> dict[str, Any]:
+    """Nodos con protocolo 2.8: P = estructura 2.8, V = firma XEdDSA vista.
+    Las filas llegan pegadas (`PV (self)!e2cb7890  emyX  PV!8215…`)."""
+    marker, body = _unmark(text)
+    summary = _NODES28_SUMMARY_RE.search(body)
+    if summary is None:
+        raise ValueError("falta el resumen 'N/M matched'")
+    rows_text = body.split("JT NODES28:", 2)[-1] if body.count("JT NODES28:") > 1 else body
+    entries = [
+        {"node_id": f"!{nid.lower()}", "short_name": name.strip(), "structural": p == "P",
+         "signed": v == "V", "self": bool(me)}
+        for nid, name, p, v, me in _NODES28_ROW_RE.findall(rows_text)
+    ]
+    return _with_marker(marker, {"matched": int(summary.group(1)), "total": int(summary.group(2)),
+                                 "entries": entries})
+
+
+PARSERS["NODES28"] = parse_nodes28
+
+
+_HOPSTATS_RE = re.compile(r"^JT HOPSTATS \(T:(\d+)\):")
+
+
+def parse_hopstats(text: str) -> dict[str, Any]:
+    marker, body = _unmark(text)
+    head = _HOPSTATS_RE.match(body)
+    if head is None:
+        raise ValueError("no empieza por 'JT HOPSTATS'")
+    hops = {int(h): int(n) for h, n in re.findall(r"\bH(\d):(\d+)", body)}
+    return _with_marker(marker, {"total": int(head.group(1)), "hops": hops})
+
+
+PARSERS["HOPSTATS"] = parse_hopstats
+
+
+_RELAY_RE = re.compile(r"^\*([0-9a-fA-F]{2}) \((.*)\): D:(\d+) R:(\d+) T:(\d+)\s*$")
+
+
+def parse_relays(text: str) -> dict[str, Any]:
+    marker, body = _unmark(text)
+    if not body.startswith("JT Relay Stats"):
+        raise ValueError("no empieza por 'JT Relay Stats'")
+    entries = []
+    for line in body.splitlines()[1:]:
+        m = _RELAY_RE.match(line.strip())
+        if m:
+            names = [n for n in m.group(2).split(",") if n and n != "??"]
+            entries.append({"relay": m.group(1).lower(), "names": names, "direct": int(m.group(3)),
+                            "relayed": int(m.group(4)), "total": int(m.group(5))})
+    return _with_marker(marker, {"entries": entries})
+
+
+PARSERS["RELAYS"] = parse_relays
+
+
+_LCS_STATE_RE = re.compile(r"^([A-Z]+)\s+(\d+(?:\.\d+)?)%\s+\((\d+)\)\s*$")
+
+
+def parse_lcs(text: str) -> dict[str, Any]:
+    """`JT LCS: n=3001 (~0d)` + estados TX/RX/STBY/FS/SLP/BUSY/ERR/UNK."""
+    marker, body = _unmark(text)
+    head = re.match(r"^JT LCS:\s*n=(\d+)\s*\(~(\d+)d\)", body)
+    if head is None:
+        raise ValueError("no empieza por 'JT LCS:'")
+    states: dict[str, dict[str, float | int]] = {}
+    for line in body.splitlines()[1:]:
+        m = _LCS_STATE_RE.match(line.strip())
+        if m:
+            states[m.group(1)] = {"percent": float(m.group(2)), "samples": int(m.group(3))}
+    return _with_marker(marker, {"samples": int(head.group(1)), "days": int(head.group(2)),
+                                 "states": states})
+
+
+PARSERS["LORACHIPSTATS"] = parse_lcs
+
+
+def parse_features(text: str) -> dict[str, Any]:
+    marker, body = _unmark(text)
+    head = re.match(r"^JT FEATURES:\s*0x([0-9A-Fa-f]+)", body)
+    if head is None:
+        raise ValueError("no empieza por 'JT FEATURES:'")
+    flags = {name: state.upper() == "ON"
+             for name, state in re.findall(r"^([A-Z_0-9]+):\s+(ON|off)\s*$", body, re.M)}
+    return _with_marker(marker, {"mask": f"0x{head.group(1).upper()}", "flags": flags})
+
+
+PARSERS["FEATURES"] = parse_features
+
+
+def parse_vault(text: str) -> dict[str, Any]:
+    marker, body = _unmark(text)
+    if not body.startswith("JT VAULT:"):
+        raise ValueError("no empieza por 'JT VAULT:'")
+    data: dict[str, Any] = {}
+    ver = re.search(r"Ver:v(\d+)\s+Size:(\d+)B", body)
+    if ver:
+        data["version"] = int(ver.group(1))
+        data["size_bytes"] = int(ver.group(2))
+    for key, name in (("Drop", "drop_mask"), ("OutDr", "outdrop_mask"), ("Inv", "invalid_mask")):
+        m = re.search(rf"^{key}:(0x[0-9A-Fa-f]+)", body, re.M)
+        if m:
+            data[name] = m.group(1)
+    for key, name in (("Groups", "groups"), ("Aliases", "aliases"), ("Macros", "macros"), ("Cron", "cron")):
+        m = re.search(rf"^{key}:(\d+)/(\d+)", body, re.M)
+        if m:
+            data[name] = {"used": int(m.group(1)), "max": int(m.group(2))}
+    return _with_marker(marker, data)
+
+
+PARSERS["VAULT"] = parse_vault
+
+
+def parse_trusted(text: str) -> dict[str, Any]:
+    marker, body = _unmark(text)
+    if not body.startswith("JT TRUSTED Slots:"):
+        raise ValueError("no empieza por 'JT TRUSTED Slots:'")
+    slots = [
+        {"slot": int(i), "name": name.strip(), "active": state.upper() != "OFF"}
+        for i, name, state in re.findall(r"^\[(\d)\]\s*(.*?)\s*\((\w+)\)\s*$", body, re.M)
+    ]
+    return _with_marker(marker, {"slots": slots})
+
+
+PARSERS["TRUSTED"] = parse_trusted
+
+
+def parse_modules(text: str) -> dict[str, Any]:
+    marker, body = _unmark(text)
+    if not body.startswith("JT Loaded Modules:"):
+        raise ValueError("no empieza por 'JT Loaded Modules:'")
+    modules = [m.strip() for _, _, m in re.findall(r"\[(\d+)/(\d+)\]\s*(.+)", body)]
+    return _with_marker(marker, {"modules": modules})
+
+
+PARSERS["MODULES"] = parse_modules
+
+
+def parse_hopmatrix(text: str) -> dict[str, Any]:
+    """Triángulo `S<n>: …` de hop_start frente a saltos usados (`S\\U`)."""
+    marker, body = _unmark(text)
+    if not body.startswith("JT Hop Matrix:"):
+        raise ValueError("no empieza por 'JT Hop Matrix:'")
+    rows = {int(n): [int(x) for x in vals.split()]
+            for n, vals in re.findall(r"^S(\d):((?:\s*\d+)*)\s*$", body, re.M)}
+    return _with_marker(marker, {"rows": rows})
+
+
+PARSERS["HOPMATRIX"] = parse_hopmatrix
+
+
+_TRACE_STARTING_RE = re.compile(r"^JT: Starting trace to !?([0-9a-fA-F]{8})")
+_TRACE_LEG_RE = re.compile(r"^(.+?) > (.+?)\((-?\d+(?:\.\d+)?)dB\)\s*$")
+
+
+def parse_trace(text: str) -> dict[str, Any]:
+    """TRACE responde en DOS mensajes: `JT: Starting trace to !id...` y, unos
+    segundos después, `JT TRACE (1.61s):` con ida, vuelta y `[Last: …]`.
+    `interim=True` marca el primero: NO es el resultado."""
+    marker, body = _unmark(text)
+    start = _TRACE_STARTING_RE.match(body)
+    result_at = body.find("JT TRACE (")
+    if result_at < 0:
+        if start:
+            return _with_marker(marker, {"interim": True, "target": f"!{start.group(1).lower()}"})
+        raise ValueError("ni 'Starting trace' ni 'JT TRACE'")
+    head = re.match(r"JT TRACE \((\d+(?:\.\d+)?)s\):", body[result_at:])
+    if head is None:
+        raise ValueError("cabecera 'JT TRACE (<s>s):' no reconocida")
+    legs = []
+    for line in body[result_at:].splitlines()[1:]:
+        leg = _TRACE_LEG_RE.match(line.strip())
+        if leg:
+            legs.append({"from": leg.group(1), "to": leg.group(2), "snr_db": float(leg.group(3))})
+    data: dict[str, Any] = {"interim": False, "elapsed_s": float(head.group(1)), "legs": legs}
+    last = re.search(r"\[Last:\s*(-?\d+)dBm,\s*(-?\d+(?:\.\d+)?)Hz\]", body)
+    if last:
+        data["last_rssi_dbm"] = int(last.group(1))
+        data["last_freq_error_hz"] = float(last.group(2))
+    return _with_marker(marker, data)
+
+
+PARSERS["TRACE"] = parse_trace
+
+
+_FCD_SECTION_RE = re.compile(r"^JT Full Config:\s*(\w+)\s*\n--\n(.*?)(?:\n--(?:\n|$)|\Z)", re.M | re.S)
+
+
+def _fcd_value(raw: str) -> Any:
+    value = raw.strip()
+    if value in ("true", "false"):
+        return value == "true"
+    if re.fullmatch(r"-?\d+", value):
+        return int(value)
+    if re.fullmatch(r"-?\d+\.\d+", value):
+        return float(value)
+    return value
+
+
+def parse_fullconfigdump(text: str) -> dict[str, Any]:
+    """`JT Full Config Dump:` + secciones `JT Full Config: <NOMBRE>\n--\nclave:
+    valor…\n--`. Captura real 2.8.101: SOLO llegan DEVICE…LORA (2043 B de los
+    ~6 KB): `paging_buf` es de 2 KB y descarta el resto en silencio, así que
+    BLUETOOTH/MQTT/SERIAL/… no se pueden leer por aquí. `wifi_psk` sale
+    enmascarado (`***`) en el firmware."""
+    marker, body = _unmark(text)
+    if "JT Full Config Dump:" not in body:
+        raise ValueError("no empieza por 'JT Full Config Dump:'")
+    sections: dict[str, dict[str, Any]] = {}
+    for name, block in _FCD_SECTION_RE.findall(body):
+        values: dict[str, Any] = {}
+        for line in block.splitlines():
+            key, sep, raw = line.partition(": ")
+            if sep:
+                values[key.strip()] = _fcd_value(raw)
+            elif line.endswith(":"):
+                values[line[:-1].strip()] = ""
+        sections[name.upper()] = values
+    data: dict[str, Any] = {"sections": sections}
+    if _suspect_truncated(body):
+        data["truncated_suspected"] = True
+    return _with_marker(marker, data)
+
+
+PARSERS["FULLCONFIGDUMP"] = parse_fullconfigdump
+
+
+_METRICS_OK_RE = re.compile(
+    r"^JT METRICS ([0-9a-fA-F]{8}):\s*(?:Bat:(-?\d+(?:\.\d+)?)V)?\s*(?:ChU:(-?\d+(?:\.\d+)?)%)?"
+)
+
+
+def parse_metrics(text: str) -> dict[str, Any]:
+    """`METRICS <nodo>`: de la NodeDB del nodo consultado. Formato con datos
+    DERIVADO DEL FUENTE (`Bat:%.2fV ChU:%.1f%%`); en hardware 2.8.101 todos los
+    nodos probados (incluido el propio) devolvieron `No metrics`: la NodeDB
+    2.8 casi nunca conserva métricas de dispositivo."""
+    marker, body = _unmark(text)
+    none = re.match(r"^JT: No metrics for ([0-9a-fA-F]{8})", body)
+    if none:
+        return _with_marker(marker, {"node_id": f"!{none.group(1).lower()}", "available": False})
+    missing = re.match(r"^JT: Node ([0-9a-fA-F]{8}) not found", body)
+    if missing:
+        return _with_marker(marker, {"node_id": f"!{missing.group(1).lower()}", "available": False,
+                                     "not_in_nodedb": True})
+    ok = _METRICS_OK_RE.match(body)
+    if ok is None:
+        raise ValueError("formato METRICS no reconocido")
+    data: dict[str, Any] = {"node_id": f"!{ok.group(1).lower()}", "available": True}
+    if ok.group(2) is not None:
+        data["voltage_v"] = float(ok.group(2))
+    if ok.group(3) is not None:
+        data["channel_utilization_percent"] = float(ok.group(3))
+    return _with_marker(marker, data)
+
+
+PARSERS["METRICS"] = parse_metrics

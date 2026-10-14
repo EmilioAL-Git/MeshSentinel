@@ -14,8 +14,9 @@ Reglas:
 - No decide nada de seguridad: destructivo / difusión / persistencia siguen
   saliendo de `catalog.py` y de `build_command`, que es lo que valida de
   verdad. Esto solo ayuda a teclear.
-- `SETLORA`/`SETROLE` NO se modelan: el manual los lista pero el firmware
-  real respondió «Unknown command» en campo (ver `catalog.py`).
+- `SETROLE`/`SETLORA` SÍ se modelan (fuente + hardware 2026-10-14): existen,
+  pero exigen argumento; la sonda sin argumentos del 2026-09-29 fue un falso
+  negativo (ver `catalog.py`).
 """
 
 from dataclasses import dataclass, replace
@@ -190,11 +191,21 @@ SYNTAX: dict[str, tuple[Variant, ...]] = {
                                               _num("window", "Ventana (s)", 1, optional=True)),
                 note="Ignora relays duplicados de un mismo relay dentro de la ventana."),
     ),
-    "INVALIDS": (
+    # Hardware 2026-10-14 (2.8.005 y 2.8.101) + fuente: `INVALIDS <R> ON` NO
+    # existe ("Unknown command"). Se activa con INVALID <R>, se apaga con
+    # UNINVALID <R>; las reglas reales son 5, no las que daba el manual.
+    "INVALIDS": (Variant("Ver estado y contadores", note=_READ, verified=True),),
+    "INVALID": (
         Variant("Ver estado", note=_READ),
-        Variant("Cambiar filtro", args=(
-            _choice("rule", "Regla", "ZERONODES", "MAXNODE", "HOPSTART", "BADPAYLOAD", "ALL"),
-            _onoff("Valor"))),
+        Variant("Activar regla", args=(
+            _choice("rule", "Regla", "NULL", "SPAIN", "GERMANY", "HW_UNSET", "ID_MISMATCH"),),
+                note="NULL: posición 0,0 · SPAIN/GERMANY: fuera de la caja · HW_UNSET: NodeInfo sin "
+                     "hardware · ID_MISMATCH: NodeInfo con id falso.", verified=True),
+    ),
+    "UNINVALID": (
+        Variant("Desactivar regla", args=(
+            _choice("rule", "Regla", "NULL", "SPAIN", "GERMANY", "HW_UNSET", "ID_MISMATCH"),),
+                verified=True),
     ),
     "FSIG": (
         Variant("Ver ranuras", note=_READ),
@@ -245,6 +256,19 @@ SYNTAX: dict[str, tuple[Variant, ...]] = {
     ),
     # --- Radio (§5) -------------------------------------------------------
     "SETPOWER": (Variant("Potencia de transmisión", args=(_num("dbm", "dBm", 0, 30),)),),
+    # Existen pero EXIGEN argumento (`strncasecmp(cmd, "SETROLE ", 8)`): la
+    # sonda sin argumentos del 2026-09-29 dio "Unknown command" por construcción.
+    "SETROLE": (Variant("Cambiar rol del dispositivo", args=(
+        _choice("role", "Rol", "CLIENT", "SENSOR", "ROUTER", "RTR_CLIENT", "BASE", "MUTE",
+                "HIDDEN", "LOST", "TAK", "TAK_TRACKER"),),
+        note="Se aplica al momento (puede reiniciar). REPEATER/TRACKER no son válidos."),),
+    "SETLORA": (Variant("Parámetros LoRa manuales", args=(
+        _num("sf", "SF", 5, 12),
+        _choice("bw", "BW (kHz)", "62", "125", "250", "500", "31"),
+        _num("cr", "CR (5=4/5 … 8=4/8)", 5, 8),
+        Arg("freq", "Frecuencia (MHz)", ArgKind.TEXT, placeholder="869.618",
+            hint="863–873 MHz (sub-GHz) o 2400–2500 (2.4 GHz). Se aplica en vivo a los 5 s.")),
+        note="Fuera de rango el nodo responde «Invalid sub-GHz params» y no cambia nada."),),
     "SETPREAMBLE": (
         Variant("Ver preámbulo", note=_READ),
         Variant("Fijar preámbulo", args=(_num("len", "Símbolos", 6, 1024),)),
@@ -410,16 +434,6 @@ SYNTAX: dict[str, tuple[Variant, ...]] = {
         Variant("Vigilar pin", ("WATCH",), (_text("pin", "Pin u OFF"),)),
     ),
     "PLAY": (Variant("Melodía RTTTL", args=(_text("melody", "Melodía RTTTL"),)),),
-    "FAKEPOS": (Variant("Inyectar posición fija", args=(
-        Arg("lat", "Latitud", ArgKind.TEXT, placeholder="40.4168"),
-        Arg("lon", "Longitud", ArgKind.TEXT, placeholder="-3.7038"),
-        _num("alt", "Altitud (m)"),
-        _num("ch", "Canal", 0, 7, optional=True)),
-        note="El canal opcional se envía como «C <n>» en el manual; déjalo vacío salvo que lo necesites."),),
-    "FAKERANDPOS": (Variant("Inyectar posición aleatoria", args=(
-        Arg("lat_min", "Lat. mín.", ArgKind.TEXT), Arg("lat_max", "Lat. máx.", ArgKind.TEXT),
-        Arg("lon_min", "Lon. mín.", ArgKind.TEXT), Arg("lon_max", "Lon. máx.", ArgKind.TEXT),
-        _num("alt", "Altitud (m)"))),),
     "BSAVE": (Variant("Copia de seguridad en flash"),),
     "BLOAD": (Variant("Restaurar copia", note="Reinicia el nodo."),),
 }

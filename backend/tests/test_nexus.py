@@ -68,7 +68,7 @@ def test_zero_hop_uses_last_two_hex_chars() -> None:
         (Broadcast(), "/nexus STATS"),
         (Local(), "/nexus-local STATS"),
         (ShortName("N018"), "/nexus-node N018 STATS"),
-        (Mac("1ABCDE"), "/nexus-mac 1abcde STATS"),
+        (Mac("1ABC"), "/nexus-mac 1abc STATS"),
         (Group("centro"), "/nexus-group centro STATS"),
     ],
 )
@@ -93,6 +93,9 @@ def test_device_addressing_allowed_in_builder() -> None:
 def test_invalid_mac_and_names() -> None:
     with pytest.raises(NexusAddressError):
         Mac("1ab")
+    # 6 hex era el valor del manual PDF y NUNCA acierta: el firmware compara 2 bytes.
+    with pytest.raises(NexusAddressError):
+        Mac("1abcde")
     with pytest.raises(NexusAddressError):
         build_command("STATS", target=ShortName("AB MO"))
 
@@ -154,7 +157,7 @@ def test_zh_add_del_truncate_id_automatically() -> None:
     assert build_command("ZH", ["ON"]).text == "/nexus ZH ON"
 
 
-@pytest.mark.parametrize("name", ["NAME", "OWNER", "REVERT"])
+@pytest.mark.parametrize("name", ["NAME", "OWNER"])
 @pytest.mark.parametrize("target", [Broadcast(), Group("centro")])
 def test_identity_commands_forbidden_on_multi_node(name: str, target) -> None:
     with pytest.raises(NexusCommandError):
@@ -169,7 +172,7 @@ def test_identity_command_allowed_on_single_device() -> None:
 
 @pytest.mark.parametrize(
     ("name", "args"),
-    [("REVERT", ()), ("NAME", ("x",)), ("OWNER", ("a", "b")), ("DELNODE", (OTHER,)),
+    [("REBOOT", ()), ("NAME", ("x",)), ("OWNER", ("a", "b")), ("DELNODE", (OTHER,)),
      ("ZH", ("CLEAR",)), ("RDROP", ("CLEAR",))],
 )
 def test_destructive_commands_flagged(name: str, args) -> None:
@@ -189,6 +192,26 @@ def test_requires_save_semantics() -> None:
     assert not build_command("RATELIMIT", ["POS", "10"]).requires_save  # auto-persistente
     assert not build_command("REBOOT", target=SHORT).requires_save
     assert not build_command("STATS").requires_save
+
+
+def test_invalid_rules_use_invalid_and_uninvalid() -> None:
+    # Hardware 2026-10-14: `INVALIDS NULL ON` → "Unknown command"; la forma
+    # real es INVALID/UNINVALID (alias INV/UNINV), sin [ON|OFF].
+    assert build_command("INVALID", ["NULL"]).text == "/nexus INVALID NULL"
+    assert build_command("INV", ["SPAIN"]).text == "/nexus INVALID SPAIN"
+    assert build_command("UNINV", ["NULL"]).text == "/nexus UNINVALID NULL"
+    assert not build_command("INVALIDS").mutates
+    assert build_command("INVALID", ["NULL"]).mutates
+    assert not build_command("INVALID").mutates  # bare = consulta
+
+
+def test_private_commands_are_not_in_the_public_catalog() -> None:
+    from noc.application.nexus import catalog as _c
+
+    for name in ("REVERT", "RELAYSPOOF", "FAKENODE", "FTEXT", "INJECT", "FAKEPOS"):
+        assert _c.resolve(name) is None
+        with pytest.raises(NexusCommandError):
+            build_command(name)
 
 
 def test_busy_seconds_from_document() -> None:
@@ -252,10 +275,11 @@ def test_settings_is_distinct_from_config() -> None:
 def test_redirect_depth_limit() -> None:
     ok = build_command("R", ["CH", "centro", "STATS"], target=SHORT)
     assert ok.text == "/nexus-node N018 REDIRECT CH centro STATS"  # nombre canónico
-    nested_ok = build_command(
-        "REDIRECT", ["CH", "centro", "R", "DM", "!21de52ee", "STATS"], target=SHORT
-    )
-    assert nested_ok.spec.name == "REDIRECT"
+    # Validado en hardware (2026-10-14): un `R` anidado no se procesa → se rechaza.
+    with pytest.raises(NexusCommandError):
+        build_command(
+            "REDIRECT", ["CH", "centro", "R", "DM", "!21de52ee", "STATS"], target=SHORT
+        )
     with pytest.raises(NexusCommandError):
         build_command(
             "R",
@@ -1112,3 +1136,126 @@ def test_toggles_send_words_not_bits():
     assert builder.build_command("TX", ["OFF"]).destructive
     assert builder.build_command("TX", ["0"]).destructive
     assert not builder.build_command("TX", ["ON"]).destructive
+
+
+@pytest.mark.parametrize("marker", ["🔒", "🟢", "🟠", "🔴"])
+def test_all_four_signature_markers_are_recognised(marker: str) -> None:
+    from noc.application.nexus.parsers import looks_like_nexus_signature, parse_response
+
+    text = f"{marker} JT VERSION: 2.8.101.08c204f"
+    assert looks_like_nexus_signature(text)
+    parsed = parse_response("VERSION", text)
+    assert parsed.kind == "structured" and parsed.data["marker"] == marker
+
+
+def test_security_parses_fav_xt_channel_suffix() -> None:
+    from noc.application.nexus.parsers import parse_response
+
+    text = ("🟢 JT SECURITY:\n REQ_SIG:off\n ALLOW_DM:off\n SILENT:off\n FAV_NX:off\n"
+            " FAV_TR:off\n FAV_XT:ON ch3\n BYPASS_RP:off (10/256)")
+    data = parse_response("SECURITY", text).data
+    assert data["fav_xt"] == "on" and data["fav_xt_channel"] == 3
+    assert data["bypass_rp_extra"] == "10/256"
+    # 2.8.005 emite 6 líneas, sin FAV_XT: sigue funcionando
+    old = parse_response("SECURITY", "JT SECURITY:\n REQ_SIG:off\n BYPASS_RP:off (4/256)").data
+    assert "fav_xt" not in old and old["req_sig"] == "off"
+
+
+def test_security_rejection_is_flagged_not_structured() -> None:
+    from noc.application.nexus.parsers import parse_response
+
+    parsed = parse_response("INFO", "🟠 JT SECURITY: rejected — DM not authorized (ALLOW_DM=OFF)")
+    assert parsed.kind == "raw" and parsed.data["rejected"] is True
+    assert "ALLOW_DM" in parsed.data["reason"] and parsed.data["hint"]
+
+
+# --- Formatos reales capturados 2026-10-14 (X1→T1000, firmware 2.8.101) --------
+
+
+def _parse(command: str, text: str):
+    from noc.application.nexus.parsers import parse_response
+
+    parsed = parse_response(command, text)
+    assert parsed.kind == "structured", parsed
+    return parsed.data
+
+
+def test_parse_neighbors_real() -> None:
+    d = _parse("NEIGHBORS", "🟢 JT Neighbors (0-hop):\n!e2cb7890:emyX(15) !c9df912c:AB86(14) "
+                            "!51cfcb78:NoeT(15) !6f14b147:ABDE(12) ")
+    assert [e["short_name"] for e in d["entries"]] == ["emyX", "AB86", "NoeT", "ABDE"]
+    assert d["entries"][0] == {"node_id": "!e2cb7890", "short_name": "emyX", "snr": 15.0}
+
+
+def test_parse_infra_tolerates_duplicated_header() -> None:
+    d = _parse("INFRA", "🟢 JT JT Infrastructure:\n!e5f72035:Cap:ROUTER:H2\n!e9758daf:CO02:ROUTER_LATE:H3\n")
+    assert d["entries"] == [
+        {"node_id": "!e5f72035", "short_name": "Cap", "role": "ROUTER", "hops": 2},
+        {"node_id": "!e9758daf", "short_name": "CO02", "role": "ROUTER_LATE", "hops": 3},
+    ]
+
+
+def test_parse_nodes28_glued_rows() -> None:
+    text = ("🟢 JT NODES28: 11/109 matched (P=structural2.8, V=XEdDSA-signed)\nJT NODES28:\n"
+            "!215baaee  📟  PV (self)!e2cb7890  emyX  PV!82153348  ALTO  P-!95d75e61  6670  P-")
+    d = _parse("NODES28", text)
+    assert (d["matched"], d["total"]) == (11, 109)
+    rows = {e["node_id"]: e for e in d["entries"]}
+    assert rows["!215baaee"]["self"] and rows["!215baaee"]["signed"] and rows["!215baaee"]["structural"]
+    assert rows["!82153348"]["structural"] and not rows["!82153348"]["signed"]
+    assert len(d["entries"]) == 4
+
+
+def test_parse_hopstats_relays_lcs() -> None:
+    d = _parse("HOPSTATS", "🟢 JT HOPSTATS (T:66):\nH0:58 H1:0 H2:2 H3:1 \nH4:3 H5:2 ")
+    assert d["total"] == 66 and d["hops"][0] == 58 and d["hops"][5] == 2
+    r = _parse("RELAYS", "JT Relay Stats:\n*00 (6700,2e00): D:4 R:0 T:4\n*7d (??): D:0 R:1 T:1\n")
+    assert r["entries"][0] == {"relay": "00", "names": ["6700", "2e00"], "direct": 4, "relayed": 0, "total": 4}
+    assert r["entries"][1]["names"] == []
+    lcs = _parse("LORACHIPSTATS", "🟢 JT LCS: n=3864 (~0d)\nTX 1.5% (59)\nRX 98.4% (3805)\nSTBY 0.0% (0)")
+    assert lcs["samples"] == 3864 and lcs["states"]["TX"] == {"percent": 1.5, "samples": 59}
+
+
+def test_parse_features_vault_trusted_modules() -> None:
+    f = _parse("FEATURES", "🟢 JT FEATURES: 0x00000000D235D7BA\nFORWARD_OPAQUE_TO_PHONE:      off\n"
+                           "LATEBASE:                     ON")
+    assert f["mask"] == "0x00000000D235D7BA" and f["flags"] == {"FORWARD_OPAQUE_TO_PHONE": False, "LATEBASE": True}
+    v = _parse("VAULT", "JT VAULT:\nVer:v65 Size:2370B\nDrop:0x0000000000000000\nGroups:0/4\nCron:0/8")
+    assert v["version"] == 65 and v["size_bytes"] == 2370 and v["groups"] == {"used": 0, "max": 4}
+    t = _parse("TRUSTED", "JT TRUSTED Slots:\n[0]  (OFF)\n[1] Nexus (ON)")
+    assert t["slots"] == [{"slot": 0, "name": "", "active": False}, {"slot": 1, "name": "Nexus", "active": True}]
+    m = _parse("MODULES", "JT Loaded Modules:\n[01/14] TrafficManagement\n[03/14] Nexus")
+    assert m["modules"] == ["TrafficManagement", "Nexus"]
+
+
+def test_parse_trace_two_messages() -> None:
+    interim = _parse("TRACE", "🟢 JT: Starting trace to !e2cb7890...")
+    assert interim == {"interim": True, "target": "!e2cb7890", "marker": "🟢"}
+    done = _parse("TRACE", "🟢 JT TRACE (1.61s):\n📟 > emyX(16.0dB)\nemyX > 📟(15.0dB)\n[Last: -20dBm, 0.00Hz]")
+    assert done["interim"] is False and done["elapsed_s"] == 1.61
+    assert [(x["from"], x["to"], x["snr_db"]) for x in done["legs"]] == [("📟", "emyX", 16.0), ("emyX", "📟", 15.0)]
+    assert done["last_rssi_dbm"] == -20
+
+
+def test_parse_fullconfigdump_real_capture_truncated() -> None:
+    text = ("JT Full Config Dump:\nJT Full Config: DEVICE\n--\nrole: CLIENT_MUTE\nserial_enabled: false\n"
+            "buzzer_gpio: 25\ntzdef: GMT-1GMT,M3.5.0,M10.4.0/3\n--\nJT Full Config: POSITION\n--\n"
+            "position_broadcast_secs: 14400\nposition_flags: 0x00000108 DOP|TIMESTAMP\n--\n"
+            "JT Full Config: NETWORK\n--\nwifi_ssid: \nwifi_psk: ***\nipv4_config.ip: 0.0.0.0\n--\n"
+            "JT Full Config: LORA\n--\nuse_preset: false\nbandwidth: 62\nfrequency_offset: 0.000\n"
+            "region: EU_868\noverride_frequency: 869.618\n--\n--\n--")
+    d = _parse("FULLCONFIGDUMP", "🟢 " + text)
+    assert list(d["sections"]) == ["DEVICE", "POSITION", "NETWORK", "LORA"]
+    assert d["sections"]["DEVICE"]["role"] == "CLIENT_MUTE" and d["sections"]["DEVICE"]["serial_enabled"] is False
+    assert d["sections"]["LORA"]["bandwidth"] == 62 and d["sections"]["LORA"]["override_frequency"] == 869.618
+    assert d["sections"]["NETWORK"]["wifi_psk"] == "***"
+    assert "truncated_suspected" not in d  # texto corto: no sospechoso
+
+
+def test_parse_metrics_variants() -> None:
+    assert _parse("METRICS", "🟢 JT: No metrics for e2cb7890") == {
+        "node_id": "!e2cb7890", "available": False, "marker": "🟢"}
+    assert _parse("METRICS", "JT: Node 12345678 not found")["not_in_nodedb"] is True
+    d = _parse("METRICS", "JT METRICS 215baaee:\nBat:3.97V ChU:12.5% ")
+    assert d == {"node_id": "!215baaee", "available": True, "voltage_v": 3.97,
+                 "channel_utilization_percent": 12.5}

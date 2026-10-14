@@ -12,41 +12,41 @@ conflicto (orden explícito del usuario). Fuentes previas (referencia
 v2.8.005 y el "prompt de implementación") solo se conservan donde el manual
 no dice lo contrario.
 
-**Excluidos por confirmarse ausentes de la build pública** (el propio manual:
-"private/tactical extension commands... intentionally omitted"): BURNER,
-ROLEMASK, SETMULTIROLE (no aparecen ni en las tablas ni en el índice
-alfabético — antes se habían catalogado a partir de una fuente menos
-fiable). También ADDURL y USETCHNAME (el "prefijo U salta protección de
-canales" no aparece en ningún sitio del manual — probablemente un error de
-la fuente anterior). AIRTAG sigue excluido: el propio manual lo marca
-"NOT IMPLEMENTED".
+**Fuente de verdad desde 2026-10-13: el CÓDIGO FUENTE público**
+(`github.com/derpyspike/jentastic`, firmware 2.8.103; el despachador es
+`src/modules/NexusCommands.cpp`) y la validación en hardware del 2026-10-14
+(`tools/nexus_validate_public.py`, `docs/design/nexus-firmware-publico-estudio.md`).
+Donde el PDF 2.8.006 o la doc discrepan del fuente, manda el fuente.
 
-**Reemplazados** por la forma que confirma el manual: INVALID/UNINVALID →
-INVALIDS (un único comando con `<RULE> [ON|OFF]`, no dos verbos separados);
-REBROADCAST → SETREBROADCAST (el manual no documenta ningún "REBROADCAST" a
-secas). PRALLOW/PRBLOCK pasan a ser ALIAS de PRWHITELIST/PRBLACKLIST, no
-comandos aparte (el manual: "PRWHITELIST / PRALLOW" es una misma fila).
+**No existen en la build pública** (el árbol público se genera con
+`bin/nexus_strip_tactical_to_public.py`; lo táctico vive en
+`handlePrivateCommand`, fuera del repo): REVERT, RELAYSPOOF, FAKENODE, FNH,
+FNM, FAKEPOS, FAKERANDPOS, FTEXT, FTEXTM, FTEXTH, INJECT. Se enviarían como
+"Unknown command" y además son herramientas de suplantación o de borrado de
+identidad: sin caso de uso en un NOC. Siguen excluidos BURNER, ROLEMASK y
+SETMULTIROLE (cero coincidencias en el fuente).
 
-**Alias resueltos**: `RL` es alias real de RATELIMIT (no de RSSILOG, que
-usa `PL`) — confirmado por el manual; ya no es ambiguo. `TA` es el nombre
-canónico (no `TR_ALERT`, que no aparece en el manual). `DMF` es alias de
-`DM-FORWARD`.
+**Existen en el fuente pero siguen EXCLUIDOS por decisión pendiente del
+usuario**: ADDURL (añade un nodo a la NodeDB desde un enlace), AIRTAG (baliza
+OpenHaystack) y las variantes que saltan la protección de canal de confianza
+(USETCHNAME, USETCHPSK, UDELCH).
 
-**FSIG** confirmado real (8 slots, `SET <1-8> <pattern>`/`OFF <1-8>`, auto-
-detecta hex/base64/texto, máx 16 bytes) — sintaxis ya no pendiente.
-**SECURITY** confirmado con solo 3 bits en la build pública: `REQ_SIG`,
-`ALLOW_DM`, `SILENT_LOG` (+ contador `REP_Protection`); `AUTO_FAV_NEXUS`/
-`AUTO_FAV_TRUSTED`/`BYPASS_RP` NO aparecen — confirmados ausentes, no solo
-"no verificados".
+**Sintaxis verificada contra fuente y hardware** (no la del PDF): el firmware
+NO tiene `INVALIDS <REGLA> [ON|OFF]`; `INVALIDS`/`INV`/`INVALID` a secas
+consultan, `INVALID <R>`/`INV <R>` activan y `UNINVALID <R>`/`UNINV <R>`
+desactivan (sin `[ON|OFF]`). `SETROLE` y `SETLORA` EXISTEN pero exigen
+argumento: la sonda "sin argumentos" del 2026-09-29 dio "Unknown command"
+por construcción (`strncasecmp(cmd, "SETROLE ", 8)`), no porque no existan.
+`-mac` compara 4 hex (ver `addressing.py`).
 
-**Pendiente de re-verificar con captura real** (firmware 2.8.006, el nodo de
-prueba T1000 se ha actualizado): `NODES` — la captura contra firmware
-2.7.268 devolvió un volcado paginado completo bajo cabecera "JT NodeDB:",
-pero el manual v2.8.006 describe `NODES` como un resumen corto de una línea
-("JT NODES: <total> total (<active> active in last 2h)"), sin paginar. El
-comportamiento pudo cambiar entre versiones de firmware — `parse_nodes`
-(parsers.py) se deja tal cual (sigue siendo el dato real capturado contra
-2.7.268) hasta confirmar cuál es el formato en 2.8.006.
+**Alias**: `RL` es alias real de RATELIMIT; `TA` es el nombre canónico;
+`DMF` alias de `DM-FORWARD`; PRALLOW/PRBLOCK alias de PRWHITELIST/PRBLACKLIST.
+El firmware NO define `CA`, `BT`, `?` ni `IGNORE-DUPERELAY`: se retiraron.
+
+**Versión del firmware**: hay diferencias entre 2.8.005 y 2.8.101 (p. ej.
+`LCS`, `FEATURES` y la línea `FAV_XT` de SECURITY no existen en 2.8.005).
+El catálogo describe la build pública actual; ante "Unknown command" en un
+nodo viejo, comprobar su versión antes de dar el comando por inexistente.
 """
 
 from dataclasses import dataclass, field
@@ -133,7 +133,7 @@ S, ST, SC, DB, FW, SH, INJ, CF, SE, STO, AL, PP, SEC, CR = (
 
 _SPECS: tuple[CommandSpec, ...] = (
     # §2 Ayuda y build
-    _q("HELP", S, "?"), _q("COMPILATION", S, "COMP"),
+    _q("HELP", S), _q("COMPILATION", S, "COMP"),
     # §3.1/§6/§11 Monitorización y sistema
     _q("INFO", S), _q("SYS", S), _q("HW", S), _q("ACC", S), _q("HEAP", S), _q("PSRAM", S),
     _q("RAM", S, "MEM"), _q("UPTIME", S, "UP"), _q("VERSION", S, "V"), _q("TIME", S),
@@ -148,11 +148,15 @@ _SPECS: tuple[CommandSpec, ...] = (
     _q("FIREWALLSTATS", ST, "FWS"), _q("FIREWALL", ST, "FW"),
     _q("RELAYS", ST, "RY"), _q("SORTEDRELAYSTATS", ST, "SRY"),
     _m("CLRSTATS", ST, "CS", persistence=Persistence.NONE), _q("MQTTSTATS", ST, "MQS"),
-    _q("VERIFYSTATS", ST, "VS"), _q("CRSTATS", ST, "CRS"), _q("RATELIMITSTAT", ST),
+    _q("VERIFYSTATS", ST, "VS"), _q("CRSTATS", ST, "CRS"), _q("RATELIMITSTAT", ST, "RLS"),
     _q("RSSI", ST, "RS"), _q("SHORTRSSI", ST, "SR"), _q("RSSITEL", ST, "RT"),
+    _q("LORACHIPSTATS", ST, "LCS"),  # no existe en 2.8.005; sí en 2.8.101
     # §3.3/§7 Escaneo activo
     _q("NETSCAN", SC, busy=60), _q("CLIENTSCAN", SC), _q("NOISE", SC),
     _q("FREQSCAN", SC, busy=15), _a("WATCH", SC), _q("SEARCHKEY", SC),
+    _q("TRACE", SC, "TR"),  # traceroute desde el nodo remoto (resultado asíncrono)
+    _q("METRICS", SC),  # métricas de OTRO nodo desde la NodeDB; exige argumento
+    _q("CHECKSIG", SEC), _q("NODECRC", DB),
     _q("SEARCHRELAY", SC, "SRELAY"),
     # §3.4/§6 Base de datos de nodos. NODES: PENDIENTE re-verificar formato en
     # firmware 2.8.006 (ver docstring del módulo).
@@ -166,13 +170,14 @@ _SPECS: tuple[CommandSpec, ...] = (
     _m("DROP", FW), _m("UNDROP", FW), _q("DROPS", FW), _q("HEXDROPS", FW), _m("SETHEX", FW),
     _m("OUTDROP", FW), _m("UNOUTDROP", FW), _q("OUTDROPS", FW), _q("HEXOUTDROPS", FW),
     _m("SETHEXOUT", FW),
-    # INVALIDS: un único comando `<RULE> [ON|OFF]` (bare = consulta), NO dos
-    # verbos INVALID/UNINVALID como decía la fuente anterior.
-    _a("INVALIDS", FW, "INV"),
+    # INVALIDS (y `INV`/`INVALID` a secas) CONSULTA; `INVALID <R>` activa y
+    # `UNINVALID <R>` desactiva — no hay `[ON|OFF]` (fuente + hardware).
+    _q("INVALIDS", FW),
+    _a("INVALID", FW, "INV"), _m("UNINVALID", FW, "UNINV"),
     _a("RATELIMIT", FW, "RL", persistence=Persistence.AUTO),
     _m("RDROP", FW, destructive_verbs=frozenset({"CLEAR"})), _m("RUNDROP", FW),
     # IDR: bare = consulta de estado ("Displays current... status").
-    _a("IDR", FW, "IGNORE-DUPERELAY"), _m("UNIDR", FW),
+    _a("IDR", FW, "IGNORE-DUPE-RELAY"), _m("UNIDR", FW),
     # ZH IMPORT sobrescribe la máscara completa del nodo: tan destructivo como CLEAR.
     _a("ZH", FW, destructive_verbs=frozenset({"CLEAR", "IMPORT"})), _a("NIGN", FW),
     # PRWHITELIST/PRBLACKLIST son la forma real (manual §3.3); PRALLOW/PRBLOCK
@@ -182,10 +187,8 @@ _SPECS: tuple[CommandSpec, ...] = (
     # §4 Hop-aware routing (antes catalogado como "stealth" sin serlo)
     _a("HOPMASK", SH), _a("CH-HOPMASK", SH, "CHM"), _a("PORT-HOPMASK", SH, "PHM"),
     _a("HOPSCALE", SH, "HSC"),
-    # §5 Radio / RF (TRUSTED/CLIENTALWAYS/BASETEXTS/RELAYSPOOF confirmados en
-    # build pública). BURNER/ROLEMASK/SETMULTIROLE EXCLUIDOS — ver docstring.
-    _a("RELAYSPOOF", SH), _a("TRUSTED", SH), _a("CLIENTALWAYS", SH, "CA"),
-    _a("BASETEXTS", SH, "BT"),
+    # §5 Radio / RF. Sin alias `CA`/`BT`: el firmware no los define.
+    _a("TRUSTED", SH), _a("CLIENTALWAYS", SH), _a("BASETEXTS", SH),
     # Identidad permanente: reinician el nodo (persisten solas) y el firmware
     # las bloquea en difusión. El manual no da su tiempo de reinicio; se
     # asume el de REBOOT (20 s) — PENDIENTE de verificar contra un nodo real.
@@ -193,47 +196,39 @@ _SPECS: tuple[CommandSpec, ...] = (
        destructive=True, busy=20),
     _m("OWNER", SH, persistence=Persistence.AUTO, broadcast_forbidden=True,
        destructive=True, busy=20),
-    _m("REVERT", SH, persistence=Persistence.AUTO, broadcast_forbidden=True,
-       destructive=True, busy=20),
     # §3.9/§12 Mensajería e inyección de paquetes (testing)
-    *(_m(n, INJ, persistence=Persistence.NONE) for n in (
-        "TEXT", "TEXTC", "DM", "DMTEST", "FTEXT", "FTEXTM", "FTEXTH",
-        "SMI", "FAKENODE", "FNH", "FNM", "INJECT")),
-    _m("SENDNODE", INJ, "SENDMYNODE", persistence=Persistence.NONE),
+    *(_m(n, INJ, persistence=Persistence.NONE) for n in ("TEXT", "TEXTC", "DM", "DMTEST")),
+    _m("SENDMYNODE", INJ, "SMN", "SENDMYINFO", "SMI", persistence=Persistence.NONE),
+    _m("SENDNODE", INJ, "SN", persistence=Persistence.NONE),
     _m("SENDPOS", INJ, persistence=Persistence.NONE),
-    _m("FAKEPOS", INJ, "FP", persistence=Persistence.NONE),
-    _m("FAKERANDPOS", INJ, "FRP", persistence=Persistence.NONE),
+    # Un `R` dentro de otro `R` NO se procesa (fuente + hardware 2026-10-14):
+    # solo 1 nivel de redirección útil.
     _m("REDIRECT", INJ, "R", persistence=Persistence.NONE),
-    _a("DM-FORWARD", INJ, "DMF"),
-    # §3.10 Configuración. SETCONFIG confirmado por captura real (2026-09-28,
-    # nodo T1000-E, firmware 2.8.005): sin argumentos responde con su propio
-    # mensaje de uso, "JT SETCONFIG: NI|TEL_D|TEL_E|TEL_P|POS|SMART|FIXED|GPS
-    # <val> | LOC lat,lon" — un campo por comando, LOC como forma especial
-    # "lat,lon" sin espacio. SETROLE y SETLORA (este último ya registrado
-    # como destructivo por una fuente anterior) respondieron los dos "JT:
-    # Unknown command" en esa misma captura — el nodo probado corre la build
-    # PRIVADA (más comandos que la pública, confirmado por el usuario), así
-    # que si ni siquiera esa build los reconoce es dudoso que existan de
-    # verdad con ese nombre exacto en ninguna build; se mantienen en el
-    # catálogo por si acaso (un "Unknown command" del firmware es inofensivo,
-    # nunca aplica nada), pero sin usarlos en la plantilla de perfil de nodo
-    # hasta confirmar de dónde salieron. Ver docs/design/nexus-control.md.
+    _a("DM-FORWARD", INJ, "DMF", "DMFORWARD"),
+    # SENDSTATUS/STATUSPS emiten un NODE_STATUS_APP en el canal 0 (aire).
+    _m("SENDSTATUS", INJ, persistence=Persistence.NONE),
+    _m("STATUSPS", INJ, persistence=Persistence.NONE),
+    # §3.10 Configuración. SETCONFIG confirmado por captura real (2026-09-28):
+    # sin argumentos responde con su uso, "JT SETCONFIG: NI|TEL_D|TEL_E|TEL_P|
+    # POS|SMART|FIXED|GPS <val> | LOC lat,lon" — un campo por comando.
+    # SETROLE <rol> y SETLORA <sf> <bw> <cr> <freq> EXISTEN (fuente +
+    # hardware 2026-10-14) pero exigen argumento: bare dan "Unknown command".
     _q("CONFIG", CF), _m("SETCONFIG", CF), _q("ROLE", CF), _m("SETROLE", CF),
     _q("LORA", CF, "LR"), _q("LORA-STATUS", CF, "LRS"), _q("PRESET", CF),
     _m("SETPRESET", CF), _m("SETLORA", CF, busy=5, destructive=True),
     _m("SETPREAMBLE", CF, "SETPRE", busy=5),
-    _m("SETPOWER", CF, "SETPWR"), _q("GETTXPOWER", CF),
+    _m("SETPOWER", CF, "SETPWR", "SETTXPOWER"), _q("GETTXPOWER", CF),
     # Destructivo salvo que se deje/restaure el valor por defecto 0x2B (manual §5).
     _m("SETSYNCWORD", CF, "SETSW", busy=5, destructive_unless_value="0x2B"),
-    _a("LR2021_SF", CF, "MULTISF", hardware_note="Solo hardware LR2021; en SX1262 no tiene "
+    _a("LR2021_SF", CF, "MULTISF", "MSF", hardware_note="Solo hardware LR2021; en SX1262 no tiene "
        "efecto. El SF lateral debe ser MAYOR que el principal."),
     _a("G3", CF, "FRONTEND"),
     _a("PMGT", CF), _a("WIFI", CF), _q("LNA", CF), _m("SETLNA", CF),
-    _m("SETREBROADCAST", CF), _a("IGNOREMQTT", CF), _a("MQTT", CF),
-    _a("TM", CF), _a("FEATURES", CF), _q("MODULES", CF, "MOD"), _q("FULLCONFIGDUMP", CF),
-    _m("GOODPRACTICES", CF, "BUENASPRACTICAS", "GP", "BP"), _a("OKTOMQTT", CF),
+    _m("SETREBROADCAST", CF), _a("IGNOREMQTT", CF, "IGNORMQTT"), _a("MQTT", CF),
+    _a("TM", CF), _a("FEATURES", CF), _q("MODULES", CF, "MOD"), _q("FULLCONFIGDUMP", CF, "FCD"),
+    _m("GOODPRACTICES", CF, "BUENASPRACTICAS", "GP", "BP"), _a("OKTOMQTT", CF, "OKMQTT", "OMQ"),
     _m("ADDCH", CF), _m("SETCHNAME", CF), _m("SETCHPSK", CF), _m("DELCH", CF),
-    _q("CHASH", CF, "CH"), _q("DECODEURL", CF, "DU"),
+    _q("CHASH", CF, "CH", "CHANNELS", "CHHASHES"), _q("DECODEURL", CF, "DU"),
     _m("SHARE", CF, persistence=Persistence.NONE),
     # §2.3/§10 SECURITY: bits confirmados REQ_SIG/ALLOW_DM/SILENT_LOG (el
     # bitmask SÍ requiere SAVE explícito).
@@ -242,11 +237,11 @@ _SPECS: tuple[CommandSpec, ...] = (
     _q("SETTINGS", SEC, "ST"),
     # §3.11 Telemetría y sensores
     _q("TELEMETRY", SE), _q("ENV", SE), _q("POWER", SE), _q("UTIL", SE), _q("POS", SE),
-    _q("INALM", SE), _q("SENSORS", SE), _q("MCUINFO", SE, "MCU"), _q("WIFIOTA", SE, "OTA"),
+    _q("INALM", SE), _q("SENSORS", SE), _q("MCUINFO", SE, "MCU"), _q("WIFIOTA", SE, "OTA", "OTAINFO"),
     # §3.12/§9 Almacenamiento, vault y automatización
     _q("LS", STO), _q("CAT", STO), _m("RM", STO, persistence=Persistence.NONE),
     _m("SAVE", STO, persistence=Persistence.NONE), _m("LOAD", STO, persistence=Persistence.NONE),
-    _a("GROUP", STO), _a("SKEY", STO), _a("CRON", STO), _a("MACRO", STO),
+    _a("GROUP", STO), _a("SKEY", STO), _a("CRON", STO), _a("MACRO", STO, "MC"),
     _q("VAULT", STO, "VST"),
     # "VDF" expande a "VAULT DIFF" completo (alias de un comando de dos
     # palabras, no de "VAULT" a secas) — funciona porque el builder junta
@@ -269,9 +264,16 @@ _SPECS: tuple[CommandSpec, ...] = (
     _m("TX", CR, persistence=Persistence.NONE, destructive_arg_equals=frozenset({"OFF", "0"})),
 )  # fmt: skip
 
-# Confirmados ausentes de la build pública (ver docstring del módulo) o
-# marcados "NOT IMPLEMENTED" por el propio manual.
-EXCLUDED = frozenset({"AIRTAG", "BURNER", "ROLEMASK", "SETMULTIROLE", "ADDURL", "USETCHNAME"})
+# Ausentes de la build pública (fuente) o excluidos por decisión pendiente del
+# usuario (ver docstring del módulo). `resolve()` devuelve None para todos.
+PRIVATE_ONLY = frozenset({
+    "REVERT", "RELAYSPOOF", "FAKENODE", "FNH", "FNM", "FAKEPOS", "FAKERANDPOS",
+    "FTEXT", "FTEXTM", "FTEXTH", "INJECT", "FP", "FRP",
+})
+EXCLUDED = frozenset({
+    "AIRTAG", "BURNER", "ROLEMASK", "SETMULTIROLE", "ADDURL",
+    "USETCHNAME", "USETCHPSK", "UDELCH",
+}) | PRIVATE_ONLY
 
 COMMANDS: dict[str, CommandSpec] = {spec.name: spec for spec in _SPECS}
 ALIASES: dict[str, str] = {alias: spec.name for spec in _SPECS for alias in spec.aliases}
@@ -286,6 +288,14 @@ ALIASES: dict[str, str] = {alias: spec.name for spec in _SPECS for alias in spec
 # Cualquier comando sin entrada aquí simplemente no muestra ⓘ en la UI — no
 # se inventa texto para rellenar huecos.
 DESCRIPTIONS: dict[str, str] = {
+    "LORACHIPSTATS": "Porcentaje de tiempo del chip LoRa en cada estado (TX/RX/STBY…), muestreado a 1 Hz. No existe en 2.8.005.",
+    "TRACE": "Traceroute real desde ESTE nodo hacia otro; el resultado llega como segundo mensaje (ida, vuelta y SNR).",
+    "METRICS": "Últimas métricas de dispositivo de OTRO nodo (batería, uso de canal) desde la NodeDB. Exige nodo.",
+    "CHECKSIG": "Estado de firma del propio comando: ✅ upstream verificado y si el firmante es de confianza.",
+    "NODECRC": "Calcula el node_num 2.8 (crc32 de la clave pública base64). Útil para validar identidades.",
+    "SENDSTATUS": "Envía un texto libre (máx. 79) como mensaje de estado de nodo (NODE_STATUS_APP) por el canal 0.",
+    "STATUSPS": "Envía como estado un resumen top-N de paquetes por puerto (por defecto 5).",
+    "SENDMYNODE": "Emite AHORA el NodeInfo propio del nodo (opciones C <canal>, H <hl> <hs>, M).",
     # Ayuda y build
     "HELP": "Sistema de ayuda paginado por categorías.",
     "COMPILATION": "Placa de destino, fecha de build y flags de compilación activos.",
@@ -368,7 +378,9 @@ DESCRIPTIONS: dict[str, str] = {
     "OUTDROPS": "Lista los filtros de salida activos ahora mismo.",
     "HEXOUTDROPS": "Muestra todos los filtros de salida como una máscara hexadecimal.",
     "SETHEXOUT": "Fija todos los filtros de salida de golpe desde una máscara hexadecimal.",
-    "INVALIDS": "Activa/consulta los filtros de validez semántica (posiciones imposibles, spoofing...).",
+    "INVALIDS": "Consulta el estado y los contadores de las 5 reglas de validez (NULL, SPAIN, GERMANY, HW, ID).",
+    "INVALID": "Activa una regla de validez (NULL, SPAIN, GERMANY, HW_UNSET, ID_MISMATCH). Sin argumento, consulta.",
+    "UNINVALID": "Desactiva una regla de validez (sin [ON|OFF]: este verbo es el que la apaga).",
     "RATELIMIT": "Limita la tasa de paquetes por hora para un tipo concreto (requiere activar el DROP RL_* correspondiente).",
     "RDROP": "Bloquea paquetes repetidos por un relay concreto.",
     "RUNDROP": "Quita un relay del bloqueo de RDROP.",
@@ -385,30 +397,18 @@ DESCRIPTIONS: dict[str, str] = {
     "PORT-HOPMASK": "Igual que HOPMASK pero solo para un tipo de paquete (puerto) concreto.",
     "HOPSCALE": "Factor de escalado dinámico de saltos.",
     # Stealth / RF
-    "RELAYSPOOF": "Falsifica el id de relay que tu nodo añade a los paquetes que repite.",
     "TRUSTED": "Gestiona los 2 slots dinámicos de canales de confianza adicionales (bypassean el firewall).",
     "CLIENTALWAYS": "Desactiva la cancelación de duplicados al repetir (úsalo solo si un nodo debe repetir sin ser router).",
     "BASETEXTS": "Como CLIENTALWAYS pero solo para mensajes de texto (útil en nodos base en tejado).",
     "NAME": "Cambia el nombre largo del nodo (provoca reinicio y nuevo NodeNum). Bloqueado en difusión.",
     "OWNER": "Cambia nombre largo y corto a la vez (provoca reinicio). Bloqueado en difusión.",
-    "REVERT": "Borra la identidad y reinicia el nodo (vuelta de fábrica). Bloqueado en difusión.",
     # Inyección de paquetes (testing)
     "TEXT": "Envía un mensaje de texto al canal 0.",
     "TEXTC": "Envía un mensaje de texto a un canal concreto.",
     "DM": "Envía un mensaje directo cifrado a un nodo.",
     "DMTEST": "Manda un \"Hello World\" de prueba de vuelta a quien mandó el comando.",
-    "FTEXT": "Envía texto con una identidad de origen falsa (testing).",
-    "FTEXTM": "Como FTEXT, pero marcando la bandera OK_TO_MQTT.",
-    "FTEXTH": "Como FTEXT, pero con control manual de saltos.",
-    "SMI": "Envía tu propia información de nodo (NodeInfo) de inmediato.",
-    "FAKENODE": "Sintetiza un NodeInfo completamente falso (MAC y clave pública generadas).",
-    "FNH": "Como FAKENODE, con control manual de saltos.",
-    "FNM": "Como FAKENODE, marcando la bandera OK_TO_MQTT.",
-    "INJECT": "Inyecta un MeshPacket crudo en protobuf (el nivel más bajo posible).",
     "SENDNODE": "Difunde de inmediato el NodeInfo del propio nodo.",
     "SENDPOS": "Difunde de inmediato la posición GPS del propio nodo.",
-    "FAKEPOS": "Inyecta una posición fija simulando un id de nodo arbitrario.",
-    "FAKERANDPOS": "Inyecta una posición aleatoria dentro de un rango geográfico, simulando movimiento.",
     "REDIRECT": "Meta-comando: ejecuta otro comando pero redirige su respuesta a un canal o nodo distinto.",
     "DM-FORWARD": "Reenvía al canal táctico los DMs cifrados que recibes, para auditarlos sin abrirlos.",
     # Configuración del nodo

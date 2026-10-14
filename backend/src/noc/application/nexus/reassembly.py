@@ -27,14 +27,14 @@ from noc.application.nexus.addressing import is_command_text
 
 PAGE_HEADER = re.compile(r"^P(\d+):\s?(.*)$", re.DOTALL)
 # Aviso del firmware que acompaña a una respuesta paginada («JT: Paging
-# favorites to mesh...», con el marcador 🟢/🔴 delante). NO es contenido ni
+# favorites to mesh...», con el marcador de firma 🔒/🟢/🟠/🔴 delante). NO es contenido ni
 # una marca de fin fiable: en capturas reales llegó después de las páginas
 # (FAVS/IGNORED/SENSORS) pero también ENTRE `P1` y `P2` (2026-10-01, FAVS).
 # Por eso solo se descarta: nunca resuelve una operación por sí mismo ni
 # cierra el buffer; el fin sigue siendo el silencio de `quiet`. Si no llega
 # ninguna página, tras `quiet` se entrega como mensaje normal (p. ej. HELP).
-MARKER = re.compile(r"^[\U0001F7E2\U0001F534]\s*")
-PAGING_TRAILER = re.compile(r"^(?:[\U0001F7E2\U0001F534]\s*)?JT:\s*Paging\b", re.I)
+MARKER = re.compile(r"^[\U0001F512\U0001F7E2\U0001F7E0\U0001F534]\s*")  # 🔒🟢🟠🔴
+PAGING_TRAILER = re.compile(r"^(?:[\U0001F512\U0001F7E2\U0001F7E0\U0001F534]\s*)?JT:\s*Paging\b", re.I)
 DEFAULT_QUIET = timedelta(seconds=8)
 # Captura real (2026-09-28, nodos X1→T1000): la doble copia (móvil local +
 # malla) de una respuesta idéntica llegó con 5.36 s de diferencia — por

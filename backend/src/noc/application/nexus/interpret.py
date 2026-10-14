@@ -45,7 +45,7 @@ FORCED_COMMANDS = frozenset({"FFAV", "FUNFAV", "FIGNORE", "FUNIGNORE"})
 
 _NODE_ID_RE = re.compile(r"^!?([0-9a-fA-F]{8})$")
 _ERROR_RE = re.compile(r"unknown|error|fail|invalid|usage|not found|no encontr|denied|unauthor|reject", re.I)
-_MARKERS = "🟢🔴"
+_MARKERS = "🔒🟢🟠🔴"  # estado de firma del comando (ver parsers.SIGNATURE_STATES)
 
 
 @dataclass(frozen=True, slots=True)
