@@ -638,7 +638,7 @@ export function JobsView({
   const nexusRunning = nexusAll.filter((o) => o.status === "sent");
   const nexusQueued = nexusAll.filter((o) => o.status === "pending");
   const nexusAttention = nexusAll.filter(
-    (o) => o.status === "no_response" && new Date(o.response_at ?? o.sent_at ?? o.created_at ?? 0).getTime() > dayAgo,
+    (o) => (o.status === "no_response" || o.status === "rejected") && new Date(o.response_at ?? o.sent_at ?? o.created_at ?? 0).getTime() > dayAgo,
   );
   const nexusDone = nexusAll.filter((o) => o.status === "confirmed");
   const history: { ts: string; item: ReactNode }[] = [

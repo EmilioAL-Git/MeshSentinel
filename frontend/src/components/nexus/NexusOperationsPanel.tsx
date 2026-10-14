@@ -27,12 +27,14 @@ export const STATUS_LABELS: Record<NexusOperationStatus, string> = {
   sent: "Enviado",
   confirmed: "Confirmado",
   no_response: "Sin respuesta",
+  rejected: "Rechazada",
 };
 export const STATUS_COLORS: Record<NexusOperationStatus, string> = {
   pending: "var(--text-faint)",
   sent: "var(--accent)",
   confirmed: "var(--ok)",
   no_response: "var(--crit)",
+  rejected: "var(--warn)",
 };
 
 const TARGET_KINDS: { value: NexusTargetKind; label: string; needsValue: boolean; hint?: string }[] = [
@@ -40,13 +42,13 @@ const TARGET_KINDS: { value: NexusTargetKind; label: string; needsValue: boolean
     value: "broadcast", label: "Difusión (toda la flota Nexus)", needsValue: false,
     hint: "Llega a todos los nodos Nexus del canal a la vez — cada uno responde por separado, se ven todas las respuestas debajo.",
   },
-  { value: "local", label: "Local (la propia pasarela)", needsValue: false },
+  { value: "local", label: "Nodo local de la pasarela (por su nombre)", needsValue: false },
   { value: "node", label: "Nodo (-node, nombre corto)", needsValue: true },
   {
     value: "device", label: "Nodo (-device, node_id)", needsValue: true,
     hint: "⚠ el node_id puede cambiar al reflashear (firmware 2.8+) — si el nodo no responde, prueba con su nombre corto.",
   },
-  { value: "mac", label: "MAC (-mac, 6 hex)", needsValue: true },
+  { value: "mac", label: "MAC (-mac, 4 hex: últimos 2 bytes)", needsValue: true },
   {
     value: "group", label: "Grupo Nexus (-group)", needsValue: true,
     hint: "Grupo de radio del propio firmware (zona/salto) — distinto de los grupos de MeshSentinel. Varios nodos pueden responder, se ven todas las respuestas debajo.",
@@ -185,7 +187,7 @@ export function NexusOperationsPanel() {
           <input
             className="input"
             style={{ width: 140 }}
-            placeholder={targetKind === "mac" ? "6 hex" : targetKind === "group" ? "grupo" : "nombre corto"}
+            placeholder={targetKind === "mac" ? "4 hex" : targetKind === "group" ? "grupo" : "nombre corto"}
             value={targetValue}
             onChange={(e) => { setTargetValue(e.target.value); setPreview(null); }}
           />
@@ -261,6 +263,9 @@ export function NexusOperationsPanel() {
               <span className="chip">deja el nodo ocupado {preview.busy_seconds}s</span>
             )}
           </div>
+          {(preview.warnings ?? []).map((w) => (
+            <div key={w} style={{ marginTop: 6, color: "var(--warn)", fontSize: 12 }}>⚠ {w}</div>
+          ))}
           {needsTypedConfirm && isBroadcast && (
             <div style={{ marginTop: 8 }}>
               <label className="microlabel">
@@ -332,7 +337,7 @@ function OperationsHistory({ gatewayId }: { gatewayId: string }) {
     if (!settingsQuery.data?.notify_on_broadcast_complete) return;
     for (const op of ops) {
       if (!FANOUT_KINDS_FOR_NOTIFY.has(op.target_kind)) continue;
-      if (op.status !== "confirmed" && op.status !== "no_response") continue;
+      if (op.status !== "confirmed" && op.status !== "no_response" && op.status !== "rejected") continue;
       if (notifiedRef.current.has(op.id)) continue;
       notifiedRef.current.add(op.id);
       toast(

@@ -112,7 +112,7 @@ export function JobsPanel({
   const nexusList = nexusModeOn && canOperate ? (nexusOps.data ?? []) : [];
   const nexusSent = nexusList.filter((o) => o.status === "sent");
   const nexusPending = nexusList.filter((o) => o.status === "pending");
-  const nexusRecent = nexusList.filter((o) => o.status === "confirmed" || o.status === "no_response").slice(0, 5);
+  const nexusRecent = nexusList.filter((o) => o.status === "confirmed" || o.status === "no_response" || o.status === "rejected").slice(0, 5);
   const nexusRow = (o: (typeof nexusList)[number]) => (
     <div key={`n${o.id}`} style={rowStyle}>
       <span title="Operación Nexus">🐱</span>

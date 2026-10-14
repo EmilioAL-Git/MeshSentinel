@@ -1353,7 +1353,8 @@ export const dismissNexusPassiveCandidate = (nodeId: string) =>
 // gateway nunca reporta resultado, la correlación es del backend).
 
 export type NexusTargetKind = "broadcast" | "local" | "node" | "device" | "mac" | "group";
-export type NexusOperationStatus = "pending" | "sent" | "confirmed" | "no_response";
+// "rejected": el nodo contestó para RECHAZAR el comando (REQ_SIG/ALLOW_DM/replay), no lo ejecutó.
+export type NexusOperationStatus = "pending" | "sent" | "confirmed" | "no_response" | "rejected";
 
 export interface NexusOperationIn {
   gateway_id: string;
@@ -1368,6 +1369,8 @@ export interface NexusOperationPreviewOut {
   destructive: boolean;
   requires_save: boolean;
   busy_seconds: number;
+  /** Avisos no bloqueantes: nombre corto compartido por varios nodos, -mac ambiguo… */
+  warnings: string[];
 }
 
 export interface NexusOperationOut {

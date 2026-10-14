@@ -235,6 +235,9 @@ export function NodeNexusPanel({
               <span style={{ color: t.textFaint, fontSize: 10.5 }}>ocupa el nodo {preview.busy_seconds}s</span>
             )}
           </div>
+          {(preview.warnings ?? []).map((w) => (
+            <div key={w} style={{ marginTop: 6, color: t.warn, fontSize: 11 }}>⚠ {w}</div>
+          ))}
           {needsTypedConfirm && (
             <div style={{ marginTop: 6 }}>
               <div style={{ color: t.textFaint, fontSize: 10.5 }}>
