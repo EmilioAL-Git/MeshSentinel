@@ -113,6 +113,45 @@ async def test_favs_read_replaces_list(session_factory):
     assert [f.subject_node_id for f in flags] == ["!af000004"]
 
 
+async def test_truncated_favs_read_merges_instead_of_replacing(session_factory):
+    """H5 (hardware 2026-10-14): el firmware pagina desde 2 KB y descarta en
+    silencio lo que no cabe. Una lectura que llega cerca de ese tope NO puede
+    sustituir la lista conocida: borraría lo que solo no se transmitió."""
+    service = NexusOperationService(session_factory, FakeQueue())
+    conv = NexusConversationService(session_factory)
+    await service.create(GW, "FAV", ["!1234abcd"], "node", "AAA", "operador")
+    await service._dispatch(T0)
+    await service.handle_event(msg_event("!aaaaaaaa", "JT: Updated node !1234abcd (X1)"), now=at(1))
+
+    big = " ".join(f"!{i:08x}:N{i % 100:02d}" for i in range(0x1000, 0x1000 + 140))
+    assert len(big) >= 1900
+    await service.create(GW, "FAVS", [], "node", "AAA", "operador")
+    await service._dispatch(at(40))
+    await service.handle_event(msg_event("!aaaaaaaa", "JT Favorites:\n" + big), now=at(41))
+    await service._flush_pending_assemblies(at(60))
+    ids = {f.subject_node_id for f in await conv.known_flags("!aaaaaaaa")}
+    assert "!1234abcd" in ids  # NO borrado por una lectura posiblemente incompleta
+    assert len(ids) == 141
+
+
+async def test_security_rejection_is_not_confirmed(session_factory):
+    """Un `JT SECURITY: rejected — …` es una respuesta, no una ejecución."""
+    from noc.adapters.persistence.nexus_repositories import SqlNexusOperationRepository
+
+    service = NexusOperationService(session_factory, FakeQueue())
+    op = await service.create(GW, "VERSION", [], "node", "AAA", "operador")
+    await service._dispatch(T0)
+    await service.handle_event(
+        msg_event("!aaaaaaaa", "🟠 JT SECURITY: rejected — signature required (REQ_SIG)"), now=at(1)
+    )
+    await service._flush_pending_assemblies(at(20))
+    async with session_factory() as session:
+        stored = await SqlNexusOperationRepository(session).get(op.id)
+    assert stored.status == "rejected"
+    assert stored.response_data["rejected"] is True
+    assert stored.response_data["reason"].startswith("signature required")
+
+
 @pytest.mark.parametrize("order", list(itertools.permutations(range(3))))
 async def test_paginated_favs_fills_known_list_in_any_arrival_order(session_factory, order):
     """Por radio el orden NO está garantizado: P1, P2 y el aviso «Paging … to
@@ -302,3 +341,54 @@ def test_merge_paginated_keeps_other_senders_and_new_responses_apart():
         ("JT Favorites:\n", 1),
         ("🟢 JT: Paging x", 0),
     ]
+
+
+def test_homonym_and_mac_ambiguity_warnings():
+    from noc.application.nexus_operations import target_ambiguity_warnings as warn
+
+    assert warn("node", "AB12", [("!00000001", "AB12")]) == []
+    w = warn("node", "AB12", [("!00000001", "AB12"), ("!00000002", "ab12")])
+    assert len(w) == 1 and "2 nodos" in w[0] and "TODOS" in w[0]
+    assert warn("broadcast", None, []) == []
+    assert "2 últimos bytes" in warn("mac", "1abc", [])[0]
+
+
+async def test_local_target_is_addressed_by_the_gateway_local_node(session_factory):
+    """`/nexus-local` mandado por la API serie no responde ni aplica (hardware
+    2026-10-14); «local» se traduce al `-node <nombre corto del nodo local>`,
+    que sí ejecuta el firmware."""
+    from noc.application.nexus_operations import NexusTargetError
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session, session.begin():
+        session.add(GatewayModel(
+            id=GW, status="connected", transport="usb", updated_at=now,
+            local_node_id="!215baaee", local_short_name="T1K",
+        ))
+        session.add(GatewayModel(id="gw-sin-nodo", status="connected", transport="usb", updated_at=now))
+    service = NexusOperationService(session_factory, FakeQueue())
+    op = await service.create(GW, "UPTIME", [], "local", None, "operador")
+    assert (op.target_kind, op.target_value) == ("node", "T1K")
+    assert op.text == "/nexus-node T1K UPTIME"
+    with pytest.raises(NexusTargetError):
+        await service.create("gw-sin-nodo", "UPTIME", [], "local", None, "operador")
+
+
+async def test_trace_interim_ack_does_not_close_the_operation(session_factory):
+    from noc.adapters.persistence.nexus_repositories import SqlNexusOperationRepository
+
+    service = NexusOperationService(session_factory, FakeQueue())
+    op = await service.create(GW, "TRACE", ["!e2cb7890"], "node", "AAA", "operador")
+    await service._dispatch(T0)
+    await service.handle_event(msg_event("!aaaaaaaa", "🟢 JT: Starting trace to !e2cb7890..."), now=at(1))
+    await service._flush_pending_assemblies(at(12))
+    async with session_factory() as session:
+        assert (await SqlNexusOperationRepository(session).get(op.id)).status == "sent"
+    await service.handle_event(
+        msg_event("!aaaaaaaa", "🟢 JT TRACE (1.61s):\n📟 > emyX(16.0dB)\nemyX > 📟(15.0dB)\n[Last: -20dBm, 0.00Hz]"),
+        now=at(14),
+    )
+    await service._flush_pending_assemblies(at(40))
+    async with session_factory() as session:
+        done = await SqlNexusOperationRepository(session).get(op.id)
+    assert done.status == "confirmed" and done.response_data["elapsed_s"] == 1.61

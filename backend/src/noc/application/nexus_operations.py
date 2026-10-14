@@ -34,6 +34,7 @@ from noc.adapters.persistence.nexus_repositories import (
     SqlNexusOperationRepository,
     SqlNexusOperationResponseRepository,
 )
+from noc.adapters.persistence.repositories import SqlGatewayRepository
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.envelopes import make_command_envelope
 from noc.application.nexus.addressing import Broadcast, Device, Group, Local, Mac, ShortName, Target
@@ -102,6 +103,32 @@ class _GatewayState:
     correlator: ResponseCorrelator = field(default_factory=ResponseCorrelator)
 
 
+def target_ambiguity_warnings(
+    target_kind: str, target_value: str | None, homonyms: list[tuple[str, str | None]]
+) -> list[str]:
+    """Avisos de que el destino puede alcanzar a MÁS de un nodo (H10).
+
+    `-node <nombre>` se ejecuta en TODOS los nodos cuyo nombre corto coincida
+    (`strcasecmp` con el propio, sin comprobar unicidad) y `-mac` solo compara
+    los últimos 2 bytes (65 536 valores). Puro: recibe los nodos conocidos con
+    ese nombre ya consultados.
+    """
+    out: list[str] = []
+    if target_kind == "node" and len(homonyms) > 1:
+        ids = ", ".join(n for n, _ in homonyms[:5])
+        more = "…" if len(homonyms) > 5 else ""
+        out.append(
+            f"{len(homonyms)} nodos conocidos comparten el nombre corto «{target_value}» "
+            f"({ids}{more}): el comando se ejecutará en TODOS los que lo oigan."
+        )
+    if target_kind == "mac":
+        out.append(
+            "-mac compara solo los 2 últimos bytes de la MAC (4 hex): en una malla grande "
+            "puede coincidir con más de un nodo."
+        )
+    return out
+
+
 class NexusOperationService:
     def __init__(
         self,
@@ -137,12 +164,41 @@ class NexusOperationService:
             overrides = await SqlSystemSettingsRepository(session).list_all()
         return merge_settings(overrides)
 
+    async def resolve_local_target(
+        self, gateway_id: str | None, target_kind: str, target_value: str | None
+    ) -> tuple[str, str | None]:
+        """`local` ya no se envía como `/nexus-local`: mandado por la API serie
+        de la pasarela NO responde ni aplica nada (2.7.268 y 2.8.101, probado
+        2026-10-14). Lo que SÍ funciona es dirigirse al nodo local por su
+        propio nombre corto (`-node`) o su id (`-device`): el firmware procesa
+        el texto que sale de su propia API. Se traduce aquí, en un solo punto,
+        para que BD, preview y espaciado vean un destino normal."""
+        if target_kind != "local":
+            return target_kind, target_value
+        if not gateway_id:
+            raise NexusTargetError("el destino «local» necesita una pasarela")
+        async with self._session_factory() as session:
+            gw = await SqlGatewayRepository(session).get(gateway_id)
+        if gw is not None and gw.local_short_name:
+            return "node", gw.local_short_name
+        if gw is not None and gw.local_node_id:
+            return "device", gw.local_node_id
+        raise NexusTargetError(
+            "la pasarela aún no ha informado de su nodo local: no se puede direccionar «local»"
+        )
+
     async def build(
-        self, command_name: str, args: list[str], target_kind: str, target_value: str | None
+        self,
+        command_name: str,
+        args: list[str],
+        target_kind: str,
+        target_value: str | None,
+        gateway_id: str | None = None,
     ) -> NexusCommand:
         """Construye con el núcleo puro sin persistir — `NexusCommandError`/
         `NexusTargetError` si el comando o el destino no son válidos."""
         settings = await self._load_settings()
+        target_kind, target_value = await self.resolve_local_target(gateway_id, target_kind, target_value)
         target = target_from(target_kind, target_value)
         return build_command(command_name, tuple(args), target=target, prefix=settings["command_prefix"])
 
@@ -155,7 +211,8 @@ class NexusOperationService:
         target_value: str | None,
         created_by: str | None,
     ) -> NexusOperation:
-        cmd = await self.build(command_name, args, target_kind, target_value)
+        target_kind, target_value = await self.resolve_local_target(gateway_id, target_kind, target_value)
+        cmd = await self.build(command_name, args, target_kind, target_value, gateway_id)
         op = NexusOperation(
             gateway_id=gateway_id,
             target_kind=target_kind,
@@ -384,6 +441,11 @@ class NexusOperationService:
             if op is None or op.status != "sent":
                 return  # ya resuelta (vigilante) o desconocida
             parsed = parse_response(op.command_name, response.text, tuple(op.args))
+            if parsed.data.get("interim"):
+                # Acuse intermedio (TRACE: `Starting trace to …`): el resultado
+                # llega como OTRO mensaje. La operación sigue «enviada»; si el
+                # resultado nunca llega, el vigilante la cierra por ventana.
+                return
             await self._apply_known_lists(session, op, response, parsed, now)
             if op.target_kind in FANOUT_TARGET_KINDS:
                 # Una respuesta MÁS de un nodo, no LA respuesta: se archiva
@@ -405,10 +467,13 @@ class NexusOperationService:
                     "nexus.op response id=%s gateway=%s from=%s", op_id, gateway_id, response.from_node_id
                 )
                 return
+            # Un rechazo de seguridad es una respuesta, pero NO una ejecución:
+            # marcarlo "confirmado" sería mentir al operador.
+            rejected = bool(parsed.data.get("rejected"))
             await repo.update_fields(
                 op.id,  # type: ignore[arg-type]
                 {
-                    "status": "confirmed",
+                    "status": "rejected" if rejected else "confirmed",
                     "response_at": now,
                     "response_text": response.text,
                     "response_kind": parsed.kind,
@@ -420,7 +485,7 @@ class NexusOperationService:
         # miembro del mismo lote) no se atribuya a este por error de "más
         # reciente" (ver ResponseCorrelator.discard).
         state.correlator.discard(op_id)
-        logger.info("nexus.op confirmed id=%s gateway=%s", op_id, gateway_id)
+        logger.info("nexus.op %s id=%s gateway=%s", "rejected" if rejected else "confirmed", op_id, gateway_id)
 
     @staticmethod
     async def _apply_known_lists(
@@ -435,6 +500,18 @@ class NexusOperationService:
         list_flag = {"FAVS": "favorite", "IGNORED": "ignored", "NIGN LIST": "nign"}.get(parsed.command)
         if list_flag and parsed.kind == "structured":
             entries = [(e["node_id"], e.get("short_name")) for e in parsed.data.get("entries", [])]
+            if parsed.data.get("truncated_suspected"):
+                # La lista llegó cerca del tope de 2 KB del firmware, que
+                # descarta en silencio lo que no cabe: sustituir BORRARÍA de
+                # nuestra lista conocida lo que simplemente no se transmitió.
+                # Solo se añade lo visto; nunca se quita nada.
+                for node_id, short_name in entries:
+                    await repo.set_present(holder, list_flag, node_id, True, now, short_name)
+                logger.warning(
+                    "nexus.list truncated_suspected holder=%s flag=%s entries=%d (merge, no replace)",
+                    holder, list_flag, len(entries),
+                )
+                return
             await repo.replace_all(holder, list_flag, entries, now)
             return
         interp = interpret(op.command_name, tuple(op.args), response.text)

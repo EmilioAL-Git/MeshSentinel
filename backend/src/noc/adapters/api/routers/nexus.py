@@ -15,8 +15,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import func, select
 
 from noc.adapters.api.deps import RequireManagerDep, SessionDep
+from noc.adapters.persistence.models import NodeModel
 from noc.adapters.persistence.repositories import SqlGatewayRepository
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.nexus.builder import NexusCommandError
@@ -24,7 +26,11 @@ from noc.application.nexus.catalog import COMMANDS, CommandSpec, describe
 from noc.application.nexus.syntax import syntax_for
 from noc.application.nexus_gateway import NexusGateway, NexusScanCooldownError, PassiveCandidate
 from noc.application.nexus_conversation import NexusConversationService
-from noc.application.nexus_operations import NexusOperationService, NexusTargetError
+from noc.application.nexus_operations import (
+    NexusOperationService,
+    NexusTargetError,
+    target_ambiguity_warnings,
+)
 from noc.application.nexus_settings import NexusSettingError, merge_settings, validate_changes
 from noc.domain.nexus.entities import NexusOperation, NexusOperationResponse
 
@@ -316,10 +322,14 @@ class PreviewOut(BaseModel):
     destructive: bool
     requires_save: bool
     busy_seconds: float
+    # Avisos no bloqueantes (p. ej. nombre corto compartido por varios nodos).
+    warnings: list[str] = []
 
 
 @router.post("/operations/preview", response_model=PreviewOut)
-async def preview_operation(body: OperationIn, request: Request, current_user: RequireManagerDep) -> PreviewOut:
+async def preview_operation(
+    body: OperationIn, request: Request, current_user: RequireManagerDep, session: SessionDep
+) -> PreviewOut:
     """Construye con el núcleo puro SIN persistir (dry-run, mismo patrón que
     M2 "simular→CONFIRMAR") — para avisar de comandos destructivos antes de
     encolar de verdad."""
@@ -327,12 +337,23 @@ async def preview_operation(body: OperationIn, request: Request, current_user: R
     if not await service.is_mode_enabled():
         raise HTTPException(status_code=404, detail="Modo Nexus/JenTastic desactivado")
     try:
-        cmd = await _operations(request).build(body.command, body.args, body.target_kind, body.target_value)
+        cmd = await _operations(request).build(
+            body.command, body.args, body.target_kind, body.target_value, body.gateway_id
+        )
     except (NexusCommandError, NexusTargetError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    homonyms: list[tuple[str, str | None]] = []
+    if body.target_kind == "node" and body.target_value:
+        rows = await session.execute(
+            select(NodeModel.id, NodeModel.short_name).where(
+                func.lower(NodeModel.short_name) == body.target_value.strip().lower()
+            )
+        )
+        homonyms = [(r[0], r[1]) for r in rows.all()]
     return PreviewOut(
         text=cmd.text, destructive=cmd.destructive, requires_save=cmd.requires_save,
         busy_seconds=cmd.busy_seconds,
+        warnings=target_ambiguity_warnings(body.target_kind, body.target_value, homonyms),
     )
 
 

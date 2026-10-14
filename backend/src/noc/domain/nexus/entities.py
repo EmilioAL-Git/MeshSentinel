@@ -8,8 +8,11 @@ PENDING = "pending"
 SENT = "sent"
 CONFIRMED = "confirmed"
 NO_RESPONSE = "no_response"
+# El nodo contestó, pero para RECHAZAR el comando (`JT SECURITY: rejected —
+# …`: REQ_SIG/ALLOW_DM/replay). Distinto de "confirmed": no se ejecutó.
+REJECTED = "rejected"
 
-TERMINAL_STATUSES = (CONFIRMED, NO_RESPONSE)
+TERMINAL_STATUSES = (CONFIRMED, NO_RESPONSE, REJECTED)
 
 
 @dataclass(slots=True)
