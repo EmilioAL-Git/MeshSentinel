@@ -24,6 +24,7 @@ from noc.adapters.gateways.launcher_client import (
     LauncherError,
 )
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
+from noc.adapters.persistence.chat_repositories import SqlChatRepository
 from noc.adapters.persistence.nexus_repositories import SqlNexusOperationRepository
 from noc.adapters.persistence.repositories import SqlGatewayRepository
 from noc.application.dashboard import is_stale
@@ -378,6 +379,8 @@ class GatewayService:
                 except LauncherError as exc:
                     raise LauncherUnavailableError(str(exc)) from exc
             deleted = await repo.delete(gateway_id)
+            if deleted:
+                await SqlChatRepository(session).delete_for_gateway(gateway_id)
         if deleted:
             await self._send_command(gateway_id, "command.gateway_disconnect", {})
         return deleted

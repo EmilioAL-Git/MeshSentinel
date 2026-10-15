@@ -9,7 +9,7 @@ genera su `ActivityEvent`, sin una segunda pasada ni una cola aparte.
 from dataclasses import fields
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from noc.adapters.persistence.models import ChatMessageModel
@@ -180,6 +180,14 @@ class SqlChatRepository:
             .where(ChatMessageModel.to_node_id.is_not(None))
         )
         return int(result or 0)
+
+    async def delete_for_gateway(self, gateway_id: str) -> int:
+        """Borra el chat recibido por una pasarela (al eliminarla: su malla
+        deja de existir para el operador y el Chat no debe seguir mostrándola)."""
+        result = await self._session.execute(
+            delete(ChatMessageModel).where(ChatMessageModel.gateway_id == gateway_id)
+        )
+        return int(result.rowcount or 0)
 
     async def get(self, message_id: int) -> ChatMessage | None:
         m = await self._session.get(ChatMessageModel, message_id)
