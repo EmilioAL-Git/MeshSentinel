@@ -752,7 +752,9 @@ function AlertRow({
   onResolve,
   onOpenNode,
   outOfGroup,
+  fullName,
 }: {
+  fullName?: string | null;
   alert: AlertOut;
   onAck?: (id: number) => void;
   onResolve?: (id: number) => void;
@@ -779,6 +781,9 @@ function AlertRow({
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ color: "var(--text)" }}>{alert.message}</span>{" "}
+        {fullName && !alert.message.includes(fullName) && (
+          <span style={{ color: "var(--text-dim)" }}>· {fullName}</span>
+        )}{" "}
         <span style={{ color: "var(--text-faint)" }}>· {alert.rule_name}</span>
         {outOfGroup && (
           <span
@@ -865,6 +870,11 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
     const node = (nodes.data ?? []).find((n) => n.node.node_id === id);
     return node ? displayName(node.node) : id;
   };
+
+  const alertFullName = (a: AlertOut) =>
+    a.subject_type === "node"
+      ? ((nodes.data ?? []).find((n) => n.node.node_id === a.subject_id)?.node.long_name ?? null)
+      : null;
 
   const { canOperate } = useAuth();
   const doAck = useMutation({ mutationFn: ackAlert, onSettled: invalidate });
@@ -984,6 +994,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
                   onResolve={(id) => doResolve.mutate(id)}
                   onOpenNode={onOpenNode}
                   outOfGroup={isOutOfGroupCritical(a)}
+                  fullName={alertFullName(a)}
                 />
               ))}
             </div>
@@ -996,7 +1007,7 @@ export function AlertsView({ onOpenNode }: { onOpenNode?: (nodeId: string) => vo
             <div className="panel-body flush">
               {resolved.length === 0 && <div className="empty">Sin alertas resueltas todavía.</div>}
               {resolved.map((a) => (
-                <AlertRow key={a.id} alert={a} onOpenNode={onOpenNode} />
+                <AlertRow key={a.id} alert={a} onOpenNode={onOpenNode} fullName={alertFullName(a)} />
               ))}
             </div>
           </div>
