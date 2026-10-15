@@ -6,7 +6,7 @@ ADR 0003).
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -74,6 +74,16 @@ def _parse_ts(value: str | None) -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _parse_ts(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
 class IngestService:
     def __init__(
         self,
@@ -132,6 +142,20 @@ class IngestService:
         node_id = p["node_id"]
         node_repo = SqlNodeRepository(session)
         existing = await node_repo.get(node_id)
+        # Una entrada del snapshot de NodeDB (trae `last_heard`) dice cuándo OYÓ
+        # el radio al nodo por última vez, no que acabe de transmitir: usar la
+        # hora de recepción lo hacía aparecer online tras cada reconexión/resync
+        # aunque llevase días apagado.
+        if "last_heard" in p:
+            heard = _parse_ts(p.get("last_heard"))
+            previous = existing.last_seen_at if existing is not None else None
+            if previous is not None and previous.tzinfo is None:
+                previous = previous.replace(tzinfo=UTC)
+            if heard is None:
+                # sin antigüedad fiable: conservar lo que ya sabíamos del nodo
+                ts = previous or ts
+            else:
+                ts = max(min(heard, ts), previous) if previous else min(heard, ts)
         node = Node(
             node_id=node_id,
             node_num=p.get("node_num"),
@@ -423,7 +447,12 @@ class IngestService:
     ) -> None:
         node_repo = SqlNodeRepository(session)
         node_id = p["node_id"]
-        await node_repo.touch_last_seen(node_id, gateway_id, ts)
+        # Una RESPUESTA de traceroute es la contestación a una sonda (la lanzó el
+        # operador o alguien): no es actividad propia del nodo, así que no refresca
+        # last_seen — si no, probar un nodo caído lo haría aparecer online. La
+        # petición sí cuenta: la origina el propio nodo.
+        if not p.get("is_reply"):
+            await node_repo.touch_last_seen(node_id, gateway_id, ts)
         # La traza se persiste ANTES de narrar (mismo orden que vecinos/posición):
         # alimenta el grafo de la red real (ADR 0031)
         gateway = await SqlGatewayRepository(session).get(gateway_id) if gateway_id else None

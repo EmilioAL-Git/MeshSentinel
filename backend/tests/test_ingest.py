@@ -157,3 +157,22 @@ async def test_unsupported_schema_version_is_ignored(session_factory):
     await ingest.handle_event(event)
     async with session_factory() as session:
         assert await SqlNodeRepository(session).get(NODE_A) is None
+
+
+async def test_nodedb_snapshot_uses_last_heard_not_reception_time(session_factory):
+    """Un node.seen del snapshot trae `last_heard`: el nodo apagado hace días no
+    debe quedar online porque el gateway reconectó y volvió a volcar su NodeDB."""
+    ingest = IngestService(session_factory)
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=3)
+    await ingest.handle_event(
+        make_event("node.seen", {"node_id": NODE_A, "last_heard": old.isoformat()}, now)
+    )
+    # snapshot sin antigüedad conocida: no puede rejuvenecer al nodo
+    await ingest.handle_event(make_event("node.seen", {"node_id": NODE_A, "last_heard": None}, now))
+    async with session_factory() as session:
+        node = await SqlNodeRepository(session).get(NODE_A)
+    seen = node.last_seen_at
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=timezone.utc)
+    assert abs(seen - old) < timedelta(seconds=2)
