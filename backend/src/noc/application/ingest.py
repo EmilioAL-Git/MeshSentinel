@@ -447,12 +447,11 @@ class IngestService:
     ) -> None:
         node_repo = SqlNodeRepository(session)
         node_id = p["node_id"]
-        # Una RESPUESTA de traceroute es la contestación a una sonda (la lanzó el
-        # operador o alguien): no es actividad propia del nodo, así que no refresca
-        # last_seen — si no, probar un nodo caído lo haría aparecer online. La
-        # petición sí cuenta: la origina el propio nodo.
-        if not p.get("is_reply"):
-            await node_repo.touch_last_seen(node_id, gateway_id, ts)
+        # Un traceroute.completed es un paquete REAL que el nodo emitió (su
+        # respuesta o su petición), así que cuenta como actividad. Una sonda sin
+        # respuesta nunca llega aquí: se resuelve como operación "reached: false"
+        # (admin/service.py) y no toca last_seen.
+        await node_repo.touch_last_seen(node_id, gateway_id, ts)
         # La traza se persiste ANTES de narrar (mismo orden que vecinos/posición):
         # alimenta el grafo de la red real (ADR 0031)
         gateway = await SqlGatewayRepository(session).get(gateway_id) if gateway_id else None

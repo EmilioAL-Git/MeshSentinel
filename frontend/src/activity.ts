@@ -73,12 +73,12 @@ const PRIORITY_SEVERITY: Record<ActivityPriority, ActivitySeverity> = {
   critical: "error",
 };
 
-/** HH:MM:SS — hora exacta de recepción. Cálculo puro sobre el timestamp ya
+/** DD/MM HH:MM:SS — día y hora exacta de recepción. Cálculo puro sobre el timestamp ya
  * provisto por el backend, sin tocar el contrato ni el modelo. */
 function formatExactTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number, len = 2) => String(n).padStart(len, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /**
