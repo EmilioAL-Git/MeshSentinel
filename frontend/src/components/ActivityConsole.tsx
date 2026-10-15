@@ -79,6 +79,11 @@ export function ActivityConsole({
 }) {
   const { activeGroup, activeGroupId } = useActiveGroup();
   const groupNodeIds = useGroupNodeIds(summaries);
+  const fullNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of summaries) if (s.node.long_name) m.set(s.node.node_id, s.node.long_name);
+    return m;
+  }, [summaries]);
 
   // ── Filtros ↔ URL (`activity.*`, ADR 0026 / docs/design/urls-compartibles.md
   // §3.5) ──────────────────────────────────────────────────────────────────
@@ -500,6 +505,7 @@ export function ActivityConsole({
                   e={row.entry}
                   expanded={expanded.has(row.entry.id)}
                   onToggle={() => toggleExpanded(row.entry.id)}
+                  fullNames={fullNames}
                 />
               ) : (
                 <BurstLine
@@ -509,6 +515,7 @@ export function ActivityConsole({
                   onToggle={() => toggleBurst(row.key)}
                   expandedEntries={expanded}
                   onToggleEntry={toggleExpanded}
+                  fullNames={fullNames}
                 />
               ),
             )}
@@ -536,7 +543,9 @@ function BurstLine({
   onToggle,
   expandedEntries,
   onToggleEntry,
+  fullNames,
 }: {
+  fullNames?: Map<string, string>;
   entries: ActivityEntry[];
   expanded: boolean;
   onToggle: () => void;
@@ -570,6 +579,9 @@ function BurstLine({
         </span>
         <span className="msg" style={{ color: identity ?? "var(--text-dim)" }}>
           {first.packetType} · {first.nodeLabel ?? first.nodeId}
+          {first.nodeId && fullNames?.get(first.nodeId) && !first.nodeLabel?.includes(fullNames.get(first.nodeId)!)
+            ? ` · ${fullNames.get(first.nodeId)}`
+            : ""}
         </span>
         <span className="msg" style={{ color: "var(--text-faint)", fontSize: 11 }}>
           {last.time.split(".")[0]} → {first.time.split(".")[0]}
@@ -577,7 +589,7 @@ function BurstLine({
       </div>
       {expanded &&
         entries.map((e) => (
-          <Line key={e.id} e={e} expanded={expandedEntries.has(e.id)} onToggle={() => onToggleEntry(e.id)} indent />
+          <Line key={e.id} e={e} expanded={expandedEntries.has(e.id)} onToggle={() => onToggleEntry(e.id)} indent fullNames={fullNames} />
         ))}
     </>
   );
@@ -589,12 +601,18 @@ function Line({
   expanded,
   onToggle,
   indent,
+  fullNames,
 }: {
   e: ActivityEntry;
   expanded: boolean;
   onToggle: () => void;
   indent?: boolean;
+  fullNames?: Map<string, string>;
 }) {
+  // Nombre completo (long_name de la flota) junto al corto que ya trae la entrada
+  const longName = e.nodeId ? fullNames?.get(e.nodeId) : undefined;
+  const nodeText =
+    e.nodeLabel && longName && !e.nodeLabel.includes(longName) ? `${e.nodeLabel} · ${longName}` : e.nodeLabel;
   const identity = packetColor(e.packetType);
   const accent = identity ?? (e.priority ? PRIORITY_COLOR[e.priority] : CATEGORY_COLOR[e.category]);
   const hasTechnical = e.internalType != null || e.rssi != null || e.snr != null || e.raw != null;
@@ -624,7 +642,7 @@ function Line({
             Destino: <span style={{ color: "var(--text)" }}>{originDest.destination}</span>
           </span>
         ) : (
-          e.nodeLabel && <span className="msg" style={{ color: "var(--text-dim)" }}>{e.nodeLabel}</span>
+          nodeText && <span className="msg" style={{ color: "var(--text-dim)" }}>{nodeText}</span>
         )}
         {e.description && (
           <span className="msg" style={{ color: "var(--text)", fontStyle: "italic" }}>{e.description}</span>
