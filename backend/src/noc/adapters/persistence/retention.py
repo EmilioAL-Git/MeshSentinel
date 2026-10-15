@@ -257,6 +257,18 @@ async def prune_all(
     await run("coverage", "retention_coverage_days", simple(CoverageReceptionModel, CoverageReceptionModel.received_at))
     await run("traces", "retention_traces_days", lambda c: _prune_traces(session_factory, c))
     await run("chat", "retention_chat_days", simple(ChatMessageModel, ChatMessageModel.received_at))
+    # Chat de pasarelas que ya no existen (sin FK: gateway_id es texto). No
+    # depende del plazo de retención. La hora de margen evita borrar mensajes
+    # recién llegados de una pasarela cuya fila aún no se ha creado.
+    orphans = await _delete_in_chunks(
+        session_factory,
+        ChatMessageModel,
+        ChatMessageModel.gateway_id.is_not(None),
+        ChatMessageModel.received_at < now - timedelta(hours=1),
+        ~exists().where(GatewayModel.id == ChatMessageModel.gateway_id),
+    )
+    if orphans:
+        result["chat"] = result.get("chat", 0) + orphans
     await run(
         "alerts",
         "retention_alerts_days",

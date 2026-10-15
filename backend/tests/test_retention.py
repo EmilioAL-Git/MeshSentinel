@@ -190,3 +190,25 @@ async def test_storage_stats_lists_tables_with_rows(session_factory):
     assert by["nodes"].rows == 1 and by["nodes"].oldest is not None
     assert by["node_telemetry"].rows == 0 and by["node_telemetry"].oldest is None
     assert stats.engine in ("sqlite", "postgresql")
+
+
+async def test_chat_of_missing_gateways_is_pruned_without_retention_window(session_factory):
+    await _seed_node(session_factory, "!00000001", RECENT)
+    async with session_factory() as s:
+        s.add(GatewayModel(id="gw-vivo", transport="simulated", status="connected", updated_at=RECENT))
+        s.add_all(
+            [
+                ChatMessageModel(from_node_id="!00000001", text="a", gateway_id="gw-vivo", received_at=OLD),
+                ChatMessageModel(from_node_id="!00000001", text="b", gateway_id="gw-muerto", received_at=OLD),
+                # margen de 1 h: recién llegado de una pasarela sin fila aún
+                ChatMessageModel(
+                    from_node_id="!00000001", text="c", gateway_id="gw-nuevo",
+                    received_at=NOW - timedelta(minutes=5),
+                ),
+                ChatMessageModel(from_node_id="!00000001", text="d", gateway_id=None, received_at=OLD),
+            ]
+        )
+        await s.commit()
+    res = await prune_all(session_factory, _settings(), NOW)
+    assert res == {"chat": 1}
+    assert await _count(session_factory, ChatMessageModel) == 3
