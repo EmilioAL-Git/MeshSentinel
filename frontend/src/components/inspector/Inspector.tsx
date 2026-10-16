@@ -284,6 +284,15 @@ export function Inspector({
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
 
+  // El resumen del nodo sale de la lista ["nodes"] (cientos de nodos): esperar
+  // a su refetch hacía que un clic tardara segundos en verse. Se parchea ya la
+  // caché y el refetch posterior solo confirma (o corrige si falló).
+  const patchSummary = (patch: (s: NodeSummaryOut) => NodeSummaryOut) => {
+    queryClient.setQueriesData<NodeSummaryOut[]>({ queryKey: ["nodes"] }, (old) =>
+      Array.isArray(old) ? old.map((s) => (s.node.node_id === nodeId ? patch(s) : s)) : old,
+    );
+  };
+
   // Pestaña activa: preferencia persistida (misma ventana para cualquier
   // nodo abierto — reabrir el Inspector vuelve a la última pestaña usada)
   // por defecto, pero URLs compartibles (ADR 0026) dejan que un enlace con
@@ -384,6 +393,13 @@ export function Inspector({
   const myGroup = (allGroups.data ?? []).find((g) => g.is_personal);
   const inMyGroup = myGroup != null && (summary?.group_ids ?? []).includes(myGroup.id);
   const toggleMyGroup = useMutation({
+    onMutate: () => {
+      if (!myGroup) return;
+      patchSummary((s) => ({
+        ...s,
+        group_ids: inMyGroup ? s.group_ids.filter((id) => id !== myGroup.id) : [...s.group_ids, myGroup.id],
+      }));
+    },
     mutationFn: async () => {
       const g = myGroup ?? (await ensureMyGroup());
       if (inMyGroup) await removeGroupMember(g.id, nodeId);
@@ -418,6 +434,13 @@ export function Inspector({
     onSettled: invalidate,
   });
   const membership = useMutation({
+    onMutate: ({ groupId, member }: { groupId: number; member: boolean }) =>
+      patchSummary((s) => ({
+        ...s,
+        group_ids: member
+          ? [...s.group_ids.filter((id) => id !== groupId), groupId]
+          : s.group_ids.filter((id) => id !== groupId),
+      })),
     mutationFn: ({ groupId, member }: { groupId: number; member: boolean }) =>
       member ? addGroupMember(groupId, nodeId) : removeGroupMember(groupId, nodeId),
     onSettled: invalidate,
@@ -430,6 +453,8 @@ export function Inspector({
     onSettled: invalidate,
   });
   const preferredGateway = useMutation({
+    onMutate: (gatewayId: string | null) =>
+      patchSummary((s) => ({ ...s, node: { ...s.node, preferred_gateway_id: gatewayId } })),
     mutationFn: (gatewayId: string | null) => setNodePreferredGateway(nodeId, gatewayId),
     onSettled: invalidate,
   });
