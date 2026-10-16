@@ -109,7 +109,10 @@ export function FloatingWindow({
   onCloseRef.current = onClose;
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      const target = e.target as HTMLElement;
+      // Los modales abiertos desde dentro (portal al body) no cuentan como "fuera".
+      if (target.closest?.("[data-modal-overlay]")) return;
+      if (panelRef.current && !panelRef.current.contains(target)) {
         onCloseRef.current();
       }
     };

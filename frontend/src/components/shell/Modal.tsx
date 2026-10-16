@@ -36,7 +36,7 @@ export function Modal({
   // apilamiento propio) y un Modal dentro quedaría BAJO el Inspector, que ya
   // es un portal del body (FloatingWindow, z 950).
   return createPortal(
-    <div style={overlayStyle} onMouseDown={onClose}>
+    <div data-modal-overlay style={overlayStyle} onMouseDown={onClose}>
       <div style={width ? { ...boxStyle, width } : boxStyle} onMouseDown={(e) => e.stopPropagation()}>
         <div className="panel-head">
           <span className="panel-title">{title}</span>

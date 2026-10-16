@@ -4,7 +4,6 @@ import { mergeIdentity } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 import { useUrlString } from "../../hooks/useUrlState";
 import { useIdentityReport } from "../../hooks/useIdentity";
-import { Modal } from "../shell/Modal";
 import { toast } from "../shell/Toast";
 import { chipStyle, t } from "../../tokens";
 
@@ -18,7 +17,6 @@ export function IdentityNotice({ nodeId }: { nodeId: string }) {
   const { canOperate } = useAuth();
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
-  const [typed, setTyped] = useState("");
 
   const asOld = report?.changes.find((c) => c.predecessor_id === nodeId);
   const asNew = report?.changes.find((c) => c.successor_id === nodeId);
@@ -53,7 +51,7 @@ export function IdentityNotice({ nodeId }: { nodeId: string }) {
             (misma clave · {change.basis === "same_key" ? "clave idéntica" : "número derivado de la clave"}
             {change.predecessor_quiet === false ? " · el antiguo sigue oyéndose" : ""})
           </span>
-          {canOperate && (
+          {canOperate && !confirming && (
             <button className="btn" style={{ marginLeft: 8 }} onClick={() => setConfirming(true)}>
               Fusionar historial…
             </button>
@@ -71,33 +69,19 @@ export function IdentityNotice({ nodeId }: { nodeId: string }) {
         </div>
       )}
       {confirming && change && (
-        <Modal title="Fusionar historial de identidad" onClose={() => setConfirming(false)}>
-          <p style={{ margin: "0 0 10px", fontSize: 13, lineHeight: 1.5 }}>
-            Se moverán telemetría, posiciones, vecinos, mensajes, etiquetas, grupos, favoritos y enlaces de{" "}
-            <strong>{change.predecessor_id}</strong> a <strong>{change.successor_id}</strong>, y el nodo antiguo se
-            borrará. <strong>No se puede deshacer.</strong> Escribe el id del nodo antiguo para confirmar.
-          </p>
-          <input
-            className="input"
-            autoFocus
-            placeholder={change.predecessor_id}
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            style={{ width: "100%", marginBottom: 10 }}
-          />
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button className="btn ghost" onClick={() => setConfirming(false)}>
+        <div style={{ ...chipStyle(t.crit), fontSize: 11, lineHeight: 1.5, display: "block", whiteSpace: "normal" }}>
+          Se moverán telemetría, posiciones, vecinos, mensajes, etiquetas, grupos, favoritos y enlaces de{" "}
+          <strong>{change.predecessor_id}</strong> a <strong>{change.successor_id}</strong>, y el nodo antiguo se
+          borrará. <strong>No se puede deshacer.</strong>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button className="btn danger" disabled={merge.isPending} onClick={() => merge.mutate()}>
+              {merge.isPending ? "Fusionando…" : "¿Estás seguro? Sí, fusionar"}
+            </button>
+            <button className="btn ghost" disabled={merge.isPending} onClick={() => setConfirming(false)}>
               Cancelar
             </button>
-            <button
-              className="btn danger"
-              disabled={typed !== change.predecessor_id || merge.isPending}
-              onClick={() => merge.mutate()}
-            >
-              Fusionar
-            </button>
           </div>
-        </Modal>
+        </div>
       )}
     </div>
   );
