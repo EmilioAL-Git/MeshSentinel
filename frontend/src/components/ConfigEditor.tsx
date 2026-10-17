@@ -19,8 +19,12 @@ import { NodeSelect } from "./NodeSelect";
 import { ConfirmModal } from "./shell/ConfirmModal";
 import { GatewaySelect } from "./shell/GatewaySelect";
 import { toast } from "./shell/Toast";
+import { useUrlString } from "../hooks/useUrlState";
 import { styles } from "../styles";
 import { relativeTime } from "../time";
+import { chipStyle, t } from "../tokens";
+import { AttemptDots } from "./jobs/AttemptDots";
+import { OP_STATUS_COLOR, OP_STATUS_LABEL } from "./jobs/status";
 
 interface Props {
   summaries: NodeSummaryOut[];
@@ -254,7 +258,10 @@ function collectChanges(
 
 export function ConfigEditor({ summaries }: Props) {
   const queryClient = useQueryClient();
-  const [nodeId, setNodeId] = useState("");
+  // Preseleccionable desde el Inspector («Abrir editor completo») vía ?config.node=
+  const [nodeParam, setNodeParam] = useUrlString("config.node", null, { replace: true });
+  const nodeId = nodeParam ?? "";
+  const setNodeId = (id: string) => setNodeParam(id || null);
   const [activeGroup, setActiveGroup] = useState<string>("General");
   const [activeSection, setActiveSection] = useState<string>("owner");
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
@@ -543,31 +550,47 @@ export function ConfigEditor({ summaries }: Props) {
       {nodeId && operations.data && (
         <div style={styles.card}>
           <h3 style={{ margin: 0 }}>Operaciones recientes</h3>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>#</th>
-                <th style={styles.th}>Tipo</th>
-                <th style={styles.th}>Sección</th>
-                <th style={styles.th}>Estado</th>
-                <th style={styles.th}>Intentos</th>
-              </tr>
-            </thead>
-            <tbody>
-              {operations.data
-                .filter((o) => o.target_node_id === nodeId)
-                .slice(0, 8)
-                .map((o) => (
-                  <tr key={o.id}>
-                    <td style={styles.td}>{o.id}</td>
-                    <td style={{ ...styles.td, ...styles.mono }}>{o.operation_type}</td>
-                    <td style={{ ...styles.td, ...styles.mono }}>{String(o.params.section ?? "—")}</td>
-                    <td style={styles.td}>{o.status}</td>
-                    <td style={styles.td}>{o.attempts}/{o.max_attempts}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+            {operations.data
+              .filter((o) => o.target_node_id === nodeId)
+              .slice(0, 8)
+              .map((o) => {
+                const color = OP_STATUS_COLOR[o.status];
+                const live = o.status === "running" || o.status === "queued" || o.status === "pending";
+                return (
+                  <div
+                    key={o.id}
+                    title={`${o.status}${o.error ? ` · ${o.error}` : ""}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                      padding: "0.4rem 0.6rem",
+                      borderRadius: 8,
+                      background: `color-mix(in srgb, ${color} 7%, transparent)`,
+                      borderLeft: `3px solid ${color}`,
+                    }}
+                  >
+                    <span style={{ ...styles.mono, color: "var(--text-dim)", fontSize: 11 }}>#{o.id}</span>
+                    <span style={{ ...styles.mono, fontWeight: 600 }}>{o.operation_type}</span>
+                    {o.params.section != null && (
+                      <span style={{ ...chipStyle(t.textDim), ...styles.mono }}>{String(o.params.section)}</span>
+                    )}
+                    <span style={{ ...chipStyle(color), fontWeight: 600 }}>
+                      {live ? "● " : ""}
+                      {OP_STATUS_LABEL[o.status]}
+                    </span>
+                    <span style={{ marginLeft: "auto" }}>
+                      <AttemptDots op={o} />
+                    </span>
+                    {o.finished_at && (
+                      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{relativeTime(o.finished_at)}</span>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
     </div>

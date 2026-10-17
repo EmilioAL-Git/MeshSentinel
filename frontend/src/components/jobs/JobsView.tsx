@@ -18,6 +18,7 @@ import {
 } from "../../api/client";
 import { relativeTime } from "../../time";
 import { chipStyle, t } from "../../tokens";
+import { AttemptDots } from "./AttemptDots";
 import { scopeOperationsToGroup, useGroupNodeIds } from "../../context/GroupContext";
 import { useUrlString } from "../../hooks/useUrlState";
 import { NodeSelect } from "../NodeSelect";
@@ -98,7 +99,7 @@ const inputStyle: CSSProperties = {
 function OpChip({ op }: { op: OperationOut }) {
   return (
     <span
-      style={{ ...chipStyle(OP_STATUS_COLOR[op.status]), fontSize: 10.5 }}
+      style={{ ...chipStyle(OP_STATUS_COLOR[op.status]), fontSize: 11, fontWeight: 600 }}
       title={
         (op.status === "succeeded_unconfirmed" && ACK_ONLY_NO_VERIFY.has(op.operation_type)
           ? ACK_ONLY_NOTE + " · "
@@ -154,7 +155,13 @@ function OpRow({
       title={`por ${op.actor_label}`}
       style={{
         ...rowStyle,
-        background: focusId != null && op.target_node_id === focusId ? t.accentTint : undefined,
+        background:
+          focusId != null && op.target_node_id === focusId
+            ? t.accentTint
+            : `color-mix(in srgb, ${OP_STATUS_COLOR[op.status]} 7%, transparent)`,
+        borderLeft: `3px solid ${OP_STATUS_COLOR[op.status]}`,
+        padding: "0.35rem 0.5rem",
+        marginBottom: 3,
       }}
     >
       <span style={{ color: t.textFaint, fontFamily: t.fontMono, fontSize: 11 }}>#{op.id}</span>
@@ -173,6 +180,7 @@ function OpRow({
         por {op.actor_label}
       </span>
       <OpChip op={op} />
+      <AttemptDots op={op} />
       {showTime && (
         <span style={{ color: t.textFaint, fontFamily: t.fontMono, fontSize: 11 }}>
           {relativeTime(showTime === "created" ? op.created_at : op.finished_at)}
