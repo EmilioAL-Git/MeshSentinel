@@ -466,6 +466,7 @@ export function Inspector({
   // fila del nodo + su historial propio. Botón armado en 2 pasos (sin
   // teclear nada, pedido explícito del usuario), mismo patrón que
   // GatewaysView/DeleteNodeModal.
+  const [, setConfigNode] = useUrlString("config.node", null, { replace: true });
   const [deleteArmed, setDeleteArmed] = useState(false);
   // Ignorar pide confirmación (reversible, pero oculta el nodo); dejar de ignorar va directo.
   const [confirmIgnore, setConfirmIgnore] = useState(false);
@@ -1106,6 +1107,16 @@ export function Inspector({
               <div style={{ color: t.textFaint, fontSize: 10.5, marginTop: 4 }}>
                 La calidad de señal (SNR/RSSI) no se solicita: se mide en cada paquete recibido. La configuración completa solo existe por administración (botón «Leer configuración»).
               </div>
+              <button
+                style={{ ...actionBtn, width: "100%", fontSize: 13.5, fontWeight: 600, padding: "0.65rem 0.8rem", marginTop: 10 }}
+                onClick={() => {
+                  setConfigNode(nodeId);
+                  onGoTo("config");
+                  onClose();
+                }}
+              >
+                ✎ Abrir editor completo →
+              </button>
             </div>
             {configState.isLoading && <div style={{ color: t.textFaint, fontSize: 12 }}>Cargando…</div>}
             {configState.data && (
@@ -1165,17 +1176,6 @@ export function Inspector({
                 </div>
               </>
             )}
-            <div style={{ paddingTop: 10 }}>
-              <button
-                style={{ ...actionBtn, width: "100%" }}
-                onClick={() => {
-                  onGoTo("config");
-                  onClose();
-                }}
-              >
-                ✎ Abrir editor completo →
-              </button>
-            </div>
           </>
         )}
 
