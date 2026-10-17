@@ -8,6 +8,7 @@ import {
   type NexusSyntaxVariant,
 } from "../../api/client";
 import { Modal } from "../shell/Modal";
+import { LocationPickerModal } from "./LocationPickerModal";
 import { t } from "../../tokens";
 import type { NexusNodeOption } from "./NexusArgsField";
 
@@ -112,6 +113,7 @@ function ArgField({
   showError: boolean;
 }) {
   const error = showError ? validateArg(arg, value) : null;
+  const [mapOpen, setMapOpen] = useState(false);
   let control;
   if (arg.kind === "choice") {
     control = (
@@ -138,6 +140,15 @@ function ArgField({
           {nodeOptions.map((n) => <option key={n.node_id} value={n.node_id}>{n.label}</option>)}
         </datalist>
       </>
+    );
+  } else if (arg.name === "loc") {
+    control = (
+      <div style={{ display: "flex", gap: 6 }}>
+        <input className="input mono" style={{ flex: 1 }} placeholder={arg.placeholder} value={value}
+          onChange={(e) => onChange(e.target.value)} />
+        <button type="button" className="btn" onClick={() => setMapOpen(true)}>📍 Elegir en el mapa</button>
+        {mapOpen && <LocationPickerModal initial={value} onPick={onChange} onClose={() => setMapOpen(false)} />}
+      </div>
     );
   } else {
     control = (

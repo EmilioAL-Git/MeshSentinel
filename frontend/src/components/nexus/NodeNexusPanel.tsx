@@ -12,6 +12,9 @@ import {
   type NexusOperationPreviewOut,
   type NexusTargetKind,
 } from "../../api/client";
+import { NexusGpsOffSuggestion } from "./NexusGpsOffSuggestion";
+import { LocationPickerModal } from "./LocationPickerModal";
+import { NexusSaveSuggestion } from "./NexusSaveSuggestion";
 import { toast } from "../shell/Toast";
 import { t } from "../../tokens";
 import { NexusCatalogBrowser } from "./NexusCatalogBrowser";
@@ -130,10 +133,32 @@ export function NodeNexusPanel({
     },
   });
 
+  const gpsOffMutation = useMutation({
+    mutationFn: () => createNexusOperation({ ...body, command: "SETCONFIG", args: ["GPS", "OFF"] }),
+    onSuccess: () => {
+      toast("SETCONFIG GPS OFF añadido a la cola");
+      queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo añadir GPS OFF", { kind: "error" }),
+  });
+  const [saveSuggest, setSaveSuggest] = useState<string | null>(null);
+  const saveMutation = useMutation({
+    mutationFn: () => createNexusOperation({ ...body, command: "SAVE", args: [] }),
+    onSuccess: () => {
+      toast("SAVE añadido a la cola");
+      setSaveSuggest(null);
+      queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo añadir SAVE", { kind: "error" }),
+  });
+
   const createMutation = useMutation({
     mutationFn: () => createNexusOperation(body),
     onSuccess: () => {
       toast("Operación añadida a la cola");
+      setSaveSuggest(preview?.requires_save ? body.command : null);
       setPreview(null);
       setConfirmText("");
       setArgsInput("");
@@ -250,6 +275,7 @@ export function NodeNexusPanel({
               />
             </div>
           )}
+          <NexusGpsOffSuggestion command={command} args={args} pending={gpsOffMutation.isPending} onSend={() => gpsOffMutation.mutate()} />
           <button
             style={{ ...btn, marginTop: 8, borderColor: t.accent, color: t.accent }}
             disabled={!canQueue || createMutation.isPending}
@@ -258,6 +284,14 @@ export function NodeNexusPanel({
             Añadir a la cola
           </button>
         </div>
+      )}
+      {saveSuggest && (
+        <NexusSaveSuggestion
+          command={saveSuggest}
+          pending={saveMutation.isPending}
+          onSend={() => saveMutation.mutate()}
+          onDismiss={() => setSaveSuggest(null)}
+        />
       )}
 
       <NodeNexusHistory ops={ops} />
@@ -447,6 +481,7 @@ function NodeNexusProfile({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [lat, setLat] = useState("");
   const [lon, setLon] = useState("");
+  const [mapOpen, setMapOpen] = useState(false);
 
   const readMutation = useMutation({
     mutationFn: async () => {
@@ -531,6 +566,14 @@ function NodeNexusProfile({
               </span>
               <input style={{ ...input, width: 70 }} placeholder="lat" value={lat} onChange={(e) => setLat(e.target.value)} />
               <input style={{ ...input, width: 70 }} placeholder="lon" value={lon} onChange={(e) => setLon(e.target.value)} />
+              <button style={btn} title="Elegir en el mapa" onClick={() => setMapOpen(true)}>📍</button>
+              {mapOpen && (
+                <LocationPickerModal
+                  initial={lat && lon ? `${lat},${lon}` : undefined}
+                  onPick={(v) => { const [a, b] = v.split(","); setLat(a); setLon(b); }}
+                  onClose={() => setMapOpen(false)}
+                />
+              )}
               <button
                 style={btn}
                 disabled={!lat.trim() || !lon.trim()}

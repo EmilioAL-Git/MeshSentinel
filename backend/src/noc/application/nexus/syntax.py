@@ -302,7 +302,7 @@ SYNTAX: dict[str, tuple[Variant, ...]] = {
         Variant("Posición fija", ("FIXED",), (_onoff("Fixed position"),)),
         Variant("GPS", ("GPS",), (_onoff("GPS"),)),
         Variant("Coordenadas manuales", ("LOC",),
-                (_text("loc", "lat,lon", "49.15163,9.25764", "Sin espacio tras la coma."),)),
+                (_text("loc", "lat,lon", "49.15163,9.25764", "Con o sin espacio tras la coma (ambos probados en campo)."),)),
     ),
     "SECURITY": (
         Variant("Ver estado", note=_READ),

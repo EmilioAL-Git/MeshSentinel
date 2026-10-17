@@ -14,6 +14,8 @@ import {
   type NexusOperationStatus,
   type NexusTargetKind,
 } from "../../api/client";
+import { NexusGpsOffSuggestion } from "./NexusGpsOffSuggestion";
+import { NexusSaveSuggestion } from "./NexusSaveSuggestion";
 import { toast } from "../shell/Toast";
 import { t } from "../../tokens";
 import { NexusArgsField } from "./NexusArgsField";
@@ -125,10 +127,32 @@ export function NexusOperationsPanel() {
     },
   });
 
+  const gpsOffMutation = useMutation({
+    mutationFn: () => createNexusOperation({ ...body, command: "SETCONFIG", args: ["GPS", "OFF"] }),
+    onSuccess: () => {
+      toast("SETCONFIG GPS OFF añadido a la cola");
+      queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo añadir GPS OFF", { kind: "error" }),
+  });
+  const [saveSuggest, setSaveSuggest] = useState<string | null>(null);
+  const saveMutation = useMutation({
+    mutationFn: () => createNexusOperation({ ...body, command: "SAVE", args: [] }),
+    onSuccess: () => {
+      toast("SAVE añadido a la cola");
+      setSaveSuggest(null);
+      queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
+    },
+    onError: (err) =>
+      toast(err instanceof Error ? err.message.replace(/^HTTP \d+: /, "") : "No se pudo añadir SAVE", { kind: "error" }),
+  });
+
   const createMutation = useMutation({
     mutationFn: () => createNexusOperation(body),
     onSuccess: () => {
       toast("Operación añadida a la cola");
+      setSaveSuggest(preview?.requires_save ? body.command : null);
       setPreview(null);
       setConfirmText("");
       setArgs([]);
@@ -301,6 +325,7 @@ export function NexusOperationsPanel() {
               />
             </div>
           )}
+          <NexusGpsOffSuggestion command={command} args={args} pending={gpsOffMutation.isPending} onSend={() => gpsOffMutation.mutate()} />
           <button
             className="btn primary"
             style={{ marginTop: 8 }}
@@ -310,6 +335,14 @@ export function NexusOperationsPanel() {
             Añadir a la cola
           </button>
         </div>
+      )}
+      {saveSuggest && (
+        <NexusSaveSuggestion
+          command={saveSuggest}
+          pending={saveMutation.isPending}
+          onSend={() => saveMutation.mutate()}
+          onDismiss={() => setSaveSuggest(null)}
+        />
       )}
 
       {gatewayId && <OperationsHistory gatewayId={gatewayId} />}

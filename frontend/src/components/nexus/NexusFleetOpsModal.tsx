@@ -16,6 +16,8 @@ import { toast } from "../shell/Toast";
 import { t } from "../../tokens";
 import { NexusArgsField } from "./NexusArgsField";
 import { NexusCatalogBrowser } from "./NexusCatalogBrowser";
+import { NexusGpsOffSuggestion } from "./NexusGpsOffSuggestion";
+import { NexusSaveSuggestion } from "./NexusSaveSuggestion";
 import { NexusQuickActions } from "./NexusQuickActions";
 import { NexusCommandHint } from "./NexusCommandHint";
 import { NexusFeed } from "./NexusFeed";
@@ -144,26 +146,31 @@ export function NexusFleetOpsModal({
     },
   });
 
+  const [saveSuggest, setSaveSuggest] = useState<string | null>(null);
   const createMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (override?: { command: string; args: string[] }) => {
+      const cmd = (override?.command ?? command).trim().toUpperCase();
+      const cmdArgs = override?.args ?? args;
       if (scope === "selected") {
         return createNexusOperationBatch({
           gateway_id: gatewayId,
-          command: command.trim().toUpperCase(),
-          args,
+          command: cmd,
+          args: cmdArgs,
           target_values: selectedShortNames.names,
           interval_seconds: intervalSeconds,
         });
       }
       return createNexusOperation({
         gateway_id: gatewayId,
-        command: command.trim().toUpperCase(),
-        args,
+        command: cmd,
+        args: cmdArgs,
         target_kind: scope === "broadcast" ? "broadcast" : "node",
         target_value: scope === "broadcast" ? null : singleTarget.trim(),
       });
     },
-    onSuccess: (data) => {
+    onSuccess: (data, override) => {
+      if (override) setSaveSuggest(null);
+      else setSaveSuggest(preview?.requires_save ? command.trim().toUpperCase() : null);
       const n = Array.isArray(data) ? data.length : 1;
       toast(n > 1 ? `${n} comandos en ejecución` : "Comando en ejecución");
       queryClient.invalidateQueries({ queryKey: ["nexus-operations"] });
@@ -393,15 +400,29 @@ export function NexusFleetOpsModal({
                 />
               </div>
             )}
+            <NexusGpsOffSuggestion
+              command={command}
+              args={args}
+              pending={createMutation.isPending}
+              onSend={() => createMutation.mutate({ command: "SETCONFIG", args: ["GPS", "OFF"] })}
+            />
             <button
               className="btn primary"
               style={{ marginTop: 8 }}
               disabled={!canQueue || createMutation.isPending}
-              onClick={() => createMutation.mutate()}
+              onClick={() => createMutation.mutate(undefined)}
             >
               {scope === "selected" ? `Ejecutar comando (${selectedShortNames.names.length})` : "Ejecutar comando"}
             </button>
           </div>
+        )}
+        {saveSuggest && (
+          <NexusSaveSuggestion
+            command={saveSuggest}
+            pending={createMutation.isPending}
+            onSend={() => createMutation.mutate({ command: "SAVE", args: [] })}
+            onDismiss={() => setSaveSuggest(null)}
+          />
         )}
       </div>
       </div>

@@ -40,6 +40,7 @@ const WITH_NODE: QuickAction[] = [
   { icon: "↔️", label: "Añadir a Zero-Hop", hint: "ZH ADD", command: "ZH", variant: "Añadir relay" },
   { icon: "➖", label: "Quitar de Zero-Hop", hint: "ZH DEL", command: "ZH", variant: "Quitar relay" },
   { icon: "👁", label: "Vigilar nodo", hint: "WATCH ADD", command: "WATCH", variant: "Añadir objetivo" },
+  { icon: "📍", label: "Fijar coordenadas", hint: "SETCONFIG LOC", command: "SETCONFIG", variant: "Coordenadas manuales" },
   { icon: "📊", label: "Estadísticas vigilado", hint: "WATCH STATS", command: "WATCH", variant: "Estadísticas de un objetivo" },
 ];
 
