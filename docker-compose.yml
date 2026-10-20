@@ -58,19 +58,9 @@ services:
     networks: [noc]
     restart: unless-stopped
 
-  # ── Lanzador de gateways (ADR 0028) ───────────────────────────────────────
-  # Crea/destruye contenedores gateway bajo demanda (desde "+ Añadir
-  # gateway" en la interfaz) hablando con el socket de Docker. Es el ÚNICO
-  # servicio que lo monta — deliberadamente aislado del backend, que tiene
-  # una API HTTP con usuarios autenticados y por tanto más superficie de
-  # ataque (ver ADR 0028 §1). Sin puertos publicados: solo se habla con él
-  # desde dentro de esta red.
-  #
-  # /dev montado solo lectura: le basta para LISTAR dispositivos USB del
-  # host (GET /devices); el mapeo real de un dispositivo a un contenedor
-  # nuevo lo hace el propio daemon de Docker al crearlo, sin que el
-  # lanzador necesite verlo también él. Sustituye por completo a la antigua
-  # piscina estática de 6 contenedores idle (M6.3, retirada).
+  # Lanzador de gateways (ADR 0028): crea/destruye contenedores gateway desde
+  # la UI. Es el ÚNICO servicio con el socket de Docker (aislado del backend).
+  # Sin puertos publicados. /dev solo lectura: solo para listar USB.
   gateway-launcher:
     build: ./launcher
     environment:
@@ -84,27 +74,12 @@ services:
     networks: [noc]
     restart: unless-stopped
 
-  # Pasarela original: arranca desde variables de entorno (ADR 0021 §1,
-  # compatibilidad total, sin cambios) — no la crea ni la destruye el
-  # lanzador. Imagen etiquetada explícitamente: es la que
-  # `gateway-launcher` instancia para cualquier pasarela nueva que se cree
-  # desde la interfaz ("LAUNCHER_GATEWAY_IMAGE" arriba debe coincidir).
-  #
-  # Para USB en un host Linux (Docker SÍ puede pasar dispositivos ahí, a
-  # diferencia de Docker Desktop en Mac): añade
-  #   devices:
-  #     - "/dev/ttyACM0:/dev/ttyACM0"
-  # No uses privileged: true — mapear el dispositivo concreto basta. Las
-  # pasarelas creadas desde "+ Añadir gateway" no necesitan este paso a
-  # mano: el lanzador mapea el dispositivo elegido automáticamente.
+  # Pasarela original por variables de entorno (no la gestiona el lanzador).
+  # Su imagen es la que el lanzador instancia (LAUNCHER_GATEWAY_IMAGE).
+  # USB en Linux: añadir `devices: ["/dev/ttyACM0:/dev/ttyACM0"]` (sin privileged).
   gateway:
-    # scale: 0 — nunca arranca contenedor con un `docker compose up` normal
-    # (pedido explícito del usuario: no quiere ver una pasarela simulada por
-    # defecto), pero SIGUE construyéndose con `docker compose build` (a
-    # diferencia de `profiles`, que también excluiría el build) — es la
-    # imagen que `gateway-launcher` instancia para cualquier pasarela nueva
-    # creada desde la interfaz. Para arrancar este contenedor concreto a
-    # mano: `docker compose up -d --scale gateway=1 gateway`.
+    # scale: 0 = no arranca solo con `up`, pero sí se construye (la imagen
+    # la usa el lanzador). A mano: `docker compose up -d --scale gateway=1 gateway`
     scale: 0
     build: ./gateway
     image: meshsentinel-gateway:local
