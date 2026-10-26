@@ -174,6 +174,14 @@ pasarelas que creas desde la UI. Para USB en macOS, Docker Desktop no ve el
 puerto serie del host: hay que correr el gateway de forma nativa (ver
 `docs/operations/usb.md`).
 
+### Gateways en una tailnet (Coolify / VPS sin Tailscale en el host)
+
+Un sidecar `tailscale` da a los gateways acceso a los nodos `100.x` (ADR 0036).
+Define `TS_AUTHKEY` como variable **secreta** en Coolify (auth key con
+`tag:sentinel`, que debe existir en `tagOwners` de las ACLs) y `POSTGRES_PASSWORD`.
+El frontend solo escucha en `127.0.0.1:${NOC_HTTP_PORT:-8080}` (proxy inverso delante).
+Verifica con `docker exec meshsentinel-tailscale tailscale status`.
+
 ## Cómo se desarrolla
 
 ```bash
