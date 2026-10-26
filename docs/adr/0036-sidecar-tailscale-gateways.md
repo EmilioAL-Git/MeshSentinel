@@ -17,7 +17,9 @@ sidecar. Los gateways comparten su pila de red:
 
 - `gateway` (compose): `network_mode: service:tailscale`.
 - Gateways creados por el lanzador: `LAUNCHER_GATEWAY_NETWORK_MODE=
-  container:meshsentinel-tailscale`. Si está definida, se crean con ese
+  service:tailscale` (se resuelve al contenedor en marcha por la etiqueta
+  `com.docker.compose.service`, acotada al proyecto del lanzador, porque
+  Coolify renombra los contenedores; también acepta `container:<nombre>`). Si está definida, se crean con ese
   `network_mode` y no se adjuntan a `LAUNCHER_DOCKER_NETWORK` (excluyentes en
   Docker). Vacía = comportamiento anterior.
 

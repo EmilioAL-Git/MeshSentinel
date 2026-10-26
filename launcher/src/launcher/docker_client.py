@@ -191,7 +191,7 @@ class LauncherDockerClient:
         if settings.gateway_network_mode:
             # Pila de red compartida (sidecar): excluyente con `network`, y
             # Docker rechaza publicar puertos en este modo.
-            net_kwargs: dict[str, Any] = {"network_mode": settings.gateway_network_mode}
+            net_kwargs: dict[str, Any] = {"network_mode": self._resolve_network_mode(settings.gateway_network_mode)}
             ports = None
         else:
             net_kwargs = {"network": settings.docker_network}
@@ -211,6 +211,30 @@ class LauncherDockerClient:
         except APIError as exc:
             raise RuntimeError(f"Docker rechazó la creación del contenedor: {exc}") from exc
         return ContainerInfo(gateway_id=gateway_id, container_id=container.id, name=name, status=container.status)
+
+    def _resolve_network_mode(self, mode: str) -> str:
+        """`service:<nombre>` -> `container:<id>` del servicio Compose en marcha.
+
+        Plataformas como Coolify renombran los contenedores (sufijo variable),
+        así que un nombre fijo no vale: se busca por la etiqueta de Compose,
+        acotada al mismo proyecto que este lanzador si se puede determinar.
+        `container:<x>` y cualquier otro valor pasan tal cual.
+        """
+        if not mode.startswith("service:"):
+            return mode
+        service = mode.removeprefix("service:")
+        filters = [f"com.docker.compose.service={service}"]
+        try:
+            own = self._client.containers.get(os.environ.get("HOSTNAME", ""))
+            project = own.labels.get("com.docker.compose.project")
+            if project:
+                filters.append(f"com.docker.compose.project={project}")
+        except (NotFound, APIError):
+            pass
+        found = self._client.containers.list(filters={"label": filters, "status": "running"})
+        if not found:
+            raise RuntimeError(f"no hay un contenedor en marcha del servicio «{service}» para compartir su red")
+        return f"container:{found[0].id}"
 
     def destroy_container(self, gateway_id: str) -> None:
         settings = self._settings

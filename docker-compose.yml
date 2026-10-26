@@ -87,8 +87,9 @@ services:
     environment:
       LAUNCHER_GATEWAY_IMAGE: meshsentinel-gateway:local
       LAUNCHER_DOCKER_NETWORK: meshsentinel
-      # Los gateways comparten la red del sidecar (excluyente con la red nombrada).
-      LAUNCHER_GATEWAY_NETWORK_MODE: container:meshsentinel-tailscale
+      # Los gateways comparten la red del sidecar (excluyente con la red nombrada);
+      # `service:` se resuelve por etiqueta de Compose (Coolify renombra contenedores).
+      LAUNCHER_GATEWAY_NETWORK_MODE: service:tailscale
       LAUNCHER_GATEWAY_REDIS_URL: redis://redis:6379/0
       LAUNCHER_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
     volumes:

@@ -131,6 +131,37 @@ def test_create_container_network_mode_excludes_network_and_ports():
     assert kwargs["ports"] is None
 
 
+def test_create_container_resolves_service_network_mode():
+    with patch("launcher.docker_client.docker.from_env") as from_env:
+        fake_docker = MagicMock()
+        from_env.return_value = fake_docker
+        client = LauncherDockerClient(Settings(_env_file=None, gateway_network_mode="service:tailscale"))
+    own = MagicMock()
+    own.labels = {"com.docker.compose.project": "proj"}
+    sidecar = MagicMock(id="side123")
+    fake_docker.containers.get.side_effect = [NotFound("no such container"), own]
+    fake_docker.containers.list.return_value = [sidecar]
+    fake_docker.containers.run.return_value = MagicMock(id="x", status="created")
+
+    client.create_container("gw-x", "simulated", {})
+
+    filters = fake_docker.containers.list.call_args.kwargs["filters"]
+    assert "com.docker.compose.service=tailscale" in filters["label"]
+    assert "com.docker.compose.project=proj" in filters["label"]
+    assert fake_docker.containers.run.call_args.kwargs["network_mode"] == "container:side123"
+
+
+def test_service_network_mode_without_running_sidecar_fails():
+    with patch("launcher.docker_client.docker.from_env") as from_env:
+        fake_docker = MagicMock()
+        from_env.return_value = fake_docker
+        client = LauncherDockerClient(Settings(_env_file=None, gateway_network_mode="service:tailscale"))
+    fake_docker.containers.get.side_effect = NotFound("no such container")
+    fake_docker.containers.list.return_value = []
+    with pytest.raises(RuntimeError):
+        client.create_container("gw-x", "simulated", {})
+
+
 def test_create_container_default_has_no_network_mode():
     client, fake_docker = _client_with_fake_docker()
     fake_docker.containers.get.side_effect = NotFound("no such container")
