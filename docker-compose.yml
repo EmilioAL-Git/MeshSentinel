@@ -4,16 +4,37 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-noc}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-noc}
+      POSTGRES_USER: ${POSTGRES_USER:?define POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-noc}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-noc} -d ${POSTGRES_DB:-noc}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-noc}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks: [noc]
+    restart: unless-stopped
+
+  # Sidecar de Tailscale (ADR 0036): los gateways comparten su pila de red para
+  # alcanzar los nodos de la tailnet (100.x) sin instalar Tailscale en el host.
+  # El resto de servicios sigue saliendo por la red normal. Sin exit node ni
+  # --accept-routes. TS_AUTHKEY se define como variable secreta (Coolify).
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: meshsentinel-tailscale
+    hostname: sentinel-vps
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_ACCEPT_DNS: "false"
+      TS_EXTRA_ARGS: --advertise-tags=tag:sentinel
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN]
     networks: [noc]
     restart: unless-stopped
 
@@ -37,7 +58,7 @@ services:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         BUILD_TIME: ${BUILD_TIME:-unknown}
     environment:
-      NOC_DATABASE_URL: ${NOC_DATABASE_URL:-postgresql+asyncpg://noc:noc@postgres:5432/noc}
+      NOC_DATABASE_URL: ${NOC_DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:?define POSTGRES_USER}:${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-noc}}
       NOC_REDIS_URL: redis://redis:6379/0
       NOC_GATEWAY_LAUNCHER_URL: http://gateway-launcher:9000
       NOC_BACKUP_DIR: /backups
@@ -66,6 +87,8 @@ services:
     environment:
       LAUNCHER_GATEWAY_IMAGE: meshsentinel-gateway:local
       LAUNCHER_DOCKER_NETWORK: meshsentinel
+      # Los gateways comparten la red del sidecar (excluyente con la red nombrada).
+      LAUNCHER_GATEWAY_NETWORK_MODE: container:meshsentinel-tailscale
       LAUNCHER_GATEWAY_REDIS_URL: redis://redis:6379/0
       LAUNCHER_LOG_LEVEL: ${NOC_LOG_LEVEL:-INFO}
     volumes:
@@ -91,13 +114,15 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    networks: [noc]
+      tailscale:
+        condition: service_started
+    network_mode: service:tailscale
     restart: unless-stopped
 
   frontend:
     build: ./frontend
     ports:
-      - "${NOC_HTTP_PORT:-8080}:80"
+      - "127.0.0.1:${NOC_HTTP_PORT:-8080}:80"
     depends_on:
       - backend
     networks: [noc]
@@ -111,3 +136,4 @@ volumes:
   postgres-data:
   redis-data:
   backups-data:
+  tailscale-state:
