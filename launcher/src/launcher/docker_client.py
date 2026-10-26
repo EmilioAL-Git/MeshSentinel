@@ -188,15 +188,23 @@ class LauncherDockerClient:
             _remove(existing)
 
         labels = {settings.label_key: "true", settings.label_id_key: gateway_id}
+        if settings.gateway_network_mode:
+            # Pila de red compartida (sidecar): excluyente con `network`, y
+            # Docker rechaza publicar puertos en este modo.
+            net_kwargs: dict[str, Any] = {"network_mode": settings.gateway_network_mode}
+            ports = None
+        else:
+            net_kwargs = {"network": settings.docker_network}
+            ports = _ports_kwarg(transport_type, connection_params)
         try:
             container = self._client.containers.run(
                 settings.gateway_image,
                 name=name,
                 environment=env,
                 labels=labels,
-                network=settings.docker_network,
                 devices=devices,
-                ports=_ports_kwarg(transport_type, connection_params),
+                ports=ports,
+                **net_kwargs,
                 restart_policy={"Name": "unless-stopped"},
                 detach=True,
             )

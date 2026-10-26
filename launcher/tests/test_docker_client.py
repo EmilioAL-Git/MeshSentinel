@@ -113,6 +113,32 @@ def test_create_container_fresh_name():
     assert kwargs["network"] == "meshsentinel"
 
 
+def test_create_container_network_mode_excludes_network_and_ports():
+    with patch("launcher.docker_client.docker.from_env") as from_env:
+        fake_docker = MagicMock()
+        from_env.return_value = fake_docker
+        client = LauncherDockerClient(
+            Settings(_env_file=None, gateway_network_mode="container:meshsentinel-tailscale")
+        )
+    fake_docker.containers.get.side_effect = NotFound("no such container")
+    fake_docker.containers.run.return_value = MagicMock(id="x", status="created")
+
+    client.create_container("gw-x", "tcp", {"host": "100.64.0.1", "vn_enabled": True, "vn_port": 4404})
+
+    kwargs = fake_docker.containers.run.call_args.kwargs
+    assert kwargs["network_mode"] == "container:meshsentinel-tailscale"
+    assert "network" not in kwargs
+    assert kwargs["ports"] is None
+
+
+def test_create_container_default_has_no_network_mode():
+    client, fake_docker = _client_with_fake_docker()
+    fake_docker.containers.get.side_effect = NotFound("no such container")
+    fake_docker.containers.run.return_value = MagicMock(id="x", status="created")
+    client.create_container("gw-x", "simulated", {})
+    assert "network_mode" not in fake_docker.containers.run.call_args.kwargs
+
+
 def test_destroy_container_not_found():
     client, fake_docker = _client_with_fake_docker()
     fake_docker.containers.get.side_effect = NotFound("no such container")

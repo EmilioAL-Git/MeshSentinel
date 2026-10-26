@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # nombrada explícita en docker-compose.yml (para que backend/redis y el
     # contenedor nuevo se vean por nombre de servicio DNS).
     docker_network: str = "meshsentinel"
+    # Si se define (p. ej. `container:meshsentinel-tailscale`), los gateways se
+    # crean con ese network_mode y NO se adjuntan a `docker_network` (Docker
+    # los trata como excluyentes). Vacío = comportamiento anterior (ADR 0036).
+    gateway_network_mode: str | None = None
     # GATEWAY_REDIS_URL por defecto para los contenedores que se crean.
     gateway_redis_url: str = "redis://redis:6379/0"
     container_name_prefix: str = "meshsentinel-gateway-"
