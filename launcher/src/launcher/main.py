@@ -59,6 +59,12 @@ class ContainerOut(BaseModel):
     container_id: str
     name: str
     status: str
+    image: str | None = None
+    created_at: str | None = None
+    network_mode: str | None = None
+    network_ok: bool | None = None
+    ports: list[str] = Field(default_factory=list)
+    devices: list[str] = Field(default_factory=list)
 
 
 class CreateContainerIn(BaseModel):

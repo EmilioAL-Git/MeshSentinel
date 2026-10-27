@@ -28,6 +28,7 @@ from noc.application.gateway_stats import GatewayStats, compute_multi_gateway_st
 from noc.application.gateways.service import (
     GatewayAlreadyExistsError,
     GatewayHasActiveWorkError,
+    GatewayHasRowError,
     GatewayService,
     GatewayStillConnectedError,
     LauncherUnavailableError,
@@ -140,6 +141,61 @@ async def launcher_devices(request: Request, _user: RequireAdminDep) -> list[Dev
     except LauncherUnavailableError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return [DeviceOut(**d) for d in devices]
+
+
+class ContainerDetailOut(BaseModel):
+    """Contenedor del lanzador (solo admin): red, imagen, puertos y dispositivos."""
+
+    gateway_id: str
+    container_id: str
+    name: str
+    status: str
+    image: str | None = None
+    created_at: str | None = None
+    network_mode: str | None = None
+    network_ok: bool | None = None
+    ports: list[str] = Field(default_factory=list)
+    devices: list[str] = Field(default_factory=list)
+
+
+class OrphanContainerOut(BaseModel):
+    gateway_id: str
+    reason: str
+
+
+class MissingContainerOut(BaseModel):
+    gateway_id: str
+    name: str | None = None
+
+
+class ReconcileOut(BaseModel):
+    launcher_available: bool
+    error: str | None = None
+    containers: list[ContainerDetailOut]
+    orphan_containers: list[OrphanContainerOut]
+    missing_containers: list[MissingContainerOut]
+
+
+# Registrados ANTES de GET /gateways/{gateway_id}: "reconcile" y "containers"
+# no son gateway_id.
+@router.get("/reconcile", response_model=ReconcileOut)
+async def reconcile_report(request: Request, _user: RequireAdminDep) -> ReconcileOut:
+    """Contenedores del lanzador frente a las filas de pasarelas: huérfanos
+    (contenedor sin pasarela activa) y ausentes (pasarela sin contenedor).
+    Solo informa — retirar o recrear es una acción explícita del admin."""
+    return ReconcileOut(**await _service(request).reconcile_report())
+
+
+@router.delete("/containers/{gateway_id}", status_code=204)
+async def remove_orphan_container(gateway_id: str, request: Request, current_user: RequireAdminDep) -> None:
+    try:
+        removed = await _service(request).remove_orphan_container(gateway_id)
+    except GatewayHasRowError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LauncherUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if removed:
+        await _narrate("orphan_removed", gateway_id, None, current_user)
 
 
 class GatewayStatsOut(BaseModel):
@@ -294,6 +350,19 @@ class ReorderIn(BaseModel):
 @router.post("/reorder", status_code=204)
 async def reorder_gateways(body: ReorderIn, request: Request, _user: RequireAdminDep) -> None:
     await _service(request).reorder(body.gateway_ids)
+
+
+@router.post("/{gateway_id}/recreate-container", response_model=GatewayOut)
+async def recreate_container(gateway_id: str, request: Request, current_user: RequireAdminDep) -> GatewayOut:
+    """Recrea el contenedor de una pasarela gestionada que lo ha perdido."""
+    try:
+        info = await _service(request).recreate_container(gateway_id)
+    except LauncherUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if info is None:
+        raise HTTPException(status_code=404, detail="Pasarela no encontrada o no gestionada por contenedor")
+    await _narrate("container_recreated", gateway_id, info.name, current_user)
+    return GatewayOut.from_entity(info)
 
 
 @router.post("/{gateway_id}/resync", response_model=GatewayOut)

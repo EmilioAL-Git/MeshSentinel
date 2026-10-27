@@ -16,14 +16,19 @@ import {
   deleteGateway,
   disconnectGateway,
   discoverDevices,
+  fetchGatewayReconcile,
   fetchGateways,
   fetchGatewayStats,
   fetchLauncherDevices,
   importGateway,
+  recreateGatewayContainer,
+  removeOrphanContainer,
   testGatewayConnection,
   updateGateway,
+  type ContainerDetailOut,
   type DeviceOut,
   type GatewayOut,
+  type GatewayReconcileOut,
   type GatewayStatsOut,
   type GatewayStatus,
   type TestConnectionResultOut,
@@ -528,11 +533,143 @@ function AddGatewayWizard({
 
 // ── Módulo del rack: un gateway ya reportado (gestionado o no) ───────────────
 
+/** Destino de conexión legible (host:puerto, dispositivo…). Nunca incluye contraseñas. */
+function endpointOf(transport: string, params: Record<string, unknown>): string {
+  const str = (k: string) => (params[k] == null || params[k] === "" ? null : String(params[k]));
+  switch (transport) {
+    case "tcp":
+      return `${str("host") ?? "—"}:${str("port") ?? DEFAULT_PORT.tcp}`;
+    case "http":
+      return `${str("host") ?? "—"}:${str("port") ?? DEFAULT_PORT.http}`;
+    case "mqtt":
+      return `${str("host") ?? "—"}:${str("port") ?? DEFAULT_PORT.mqtt}${str("topic") ? ` · ${str("topic")}` : ""}`;
+    case "usb":
+      return str("device") ?? "autodetección";
+    case "simulated":
+      return `semilla ${str("seed") ?? "—"} · ${str("node_count") ?? "—"} nodos`;
+    default:
+      return "—";
+  }
+}
+
+/** Conexión y contenedor — solo se renderiza para admin. */
+function ConnectionDetails({ gateway, container }: { gateway: GatewayOut; container?: ContainerDetailOut }) {
+  const transport = gateway.transport_type ?? gateway.transport;
+  const params = gateway.connection_params ?? {};
+  const vn = gateway.virtual_node;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+      <div className="microlabel">Conexión</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.6rem" }}>
+        <Field k="Transporte" v={TRANSPORT_LABEL[transport] ?? transport} />
+        <Field k="Destino" v={endpointOf(transport, params)} title={endpointOf(transport, params)} />
+        {typeof params.username === "string" && params.username && <Field k="Usuario" v={String(params.username)} />}
+        {vn && <Field k="Nodo virtual" v={`:${vn.port}${vn.allow_admin ? " · admin" : ""}`} />}
+        {container ? (
+          <>
+            <Field k="Contenedor" v={container.name} title={container.name} />
+            <Field k="Estado" v={container.status} color={container.status === "running" ? "var(--ok)" : "var(--warn)"} />
+            <Field
+              k="Red"
+              v={container.network_ok == null ? "propia" : container.network_ok ? "sidecar vigente" : "desfasada"}
+              title={container.network_mode ?? undefined}
+              color={container.network_ok === false ? "var(--crit)" : undefined}
+            />
+            <Field k="Imagen" v={container.image ?? "—"} title={container.image ?? undefined} />
+            <Field k="Creado" v={container.created_at ? relativeTime(container.created_at) : "—"} />
+            {container.devices.length > 0 && <Field k="Dispositivos" v={container.devices.join(", ")} />}
+            {container.ports.length > 0 && <Field k="Puertos" v={container.ports.join(", ")} />}
+          </>
+        ) : (
+          gateway.container_managed && (
+            <Field k="Contenedor" v="no encontrado" color="var(--crit)" title="Hay pasarela pero el lanzador no ve su contenedor" />
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Huérfanos en ambos sentidos. Acciones MANUALES a propósito: una conciliación
+ *  automática destruiría contenedores ante una BD vaciada o una restauración a medias. */
+function ReconcilePanel({ report }: { report: GatewayReconcileOut }) {
+  const queryClient = useQueryClient();
+  const [armed, setArmed] = useState<string | null>(null);
+  const refresh = () => {
+    setArmed(null);
+    queryClient.invalidateQueries({ queryKey: ["gateways"] });
+  };
+  const remove = useMutation({ mutationFn: (id: string) => removeOrphanContainer(id), onSuccess: refresh });
+  const recreate = useMutation({ mutationFn: (id: string) => recreateGatewayContainer(id), onSuccess: refresh });
+  const drop = useMutation({ mutationFn: (id: string) => deleteGateway(id), onSuccess: refresh });
+  const byId = new Map(report.containers.map((c) => [c.gateway_id, c]));
+  const total = report.orphan_containers.length + report.missing_containers.length;
+  if (total === 0) return null;
+  const err = remove.error ?? recreate.error ?? drop.error;
+  return (
+    <div className="panel" style={{ marginBottom: "0.75rem", boxShadow: "inset 3px 0 0 var(--warn)" }}>
+      <div className="panel-head">
+        <span className="panel-title" style={{ color: "var(--warn)" }}>Conciliación de contenedores</span>
+        <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>{total}</span>
+      </div>
+      <div style={{ padding: "0.6rem 0.75rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        {report.orphan_containers.map((o) => {
+          const c = byId.get(o.gateway_id);
+          return (
+            <div key={`o-${o.gateway_id}`} style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+              <span className="chip" style={{ color: "var(--warn)", borderColor: "var(--warn)" }}>contenedor huérfano</span>
+              <span className="mono" style={{ fontSize: 12 }}>{o.gateway_id}</span>
+              <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                {o.reason}{c ? ` · ${c.status}` : ""}
+              </span>
+              <span style={{ marginLeft: "auto" }} />
+              {armed === `o-${o.gateway_id}` ? (
+                <>
+                  <button className="btn danger" disabled={remove.isPending} onClick={() => remove.mutate(o.gateway_id)}>
+                    Confirmar: eliminar contenedor
+                  </button>
+                  <button className="btn" onClick={() => setArmed(null)}>Cancelar</button>
+                </>
+              ) : (
+                <button className="btn" onClick={() => setArmed(`o-${o.gateway_id}`)}>Eliminar contenedor</button>
+              )}
+            </div>
+          );
+        })}
+        {report.missing_containers.map((m) => (
+          <div key={`m-${m.gateway_id}`} style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+            <span className="chip" style={{ color: "var(--crit)", borderColor: "var(--crit)" }}>sin contenedor</span>
+            <span className="mono" style={{ fontSize: 12 }}>{m.name ?? m.gateway_id}</span>
+            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>la pasarela existe pero su contenedor no</span>
+            <span style={{ marginLeft: "auto" }} />
+            <button className="btn primary" disabled={recreate.isPending} onClick={() => recreate.mutate(m.gateway_id)}>
+              Recrear contenedor
+            </button>
+            {armed === `m-${m.gateway_id}` ? (
+              <>
+                <button className="btn danger" disabled={drop.isPending} onClick={() => drop.mutate(m.gateway_id)}>
+                  Confirmar: eliminar pasarela
+                </button>
+                <button className="btn" onClick={() => setArmed(null)}>Cancelar</button>
+              </>
+            ) : (
+              <button className="btn" onClick={() => setArmed(`m-${m.gateway_id}`)}>Eliminar pasarela</button>
+            )}
+          </div>
+        ))}
+        {err != null && <p style={{ color: "var(--crit)", fontSize: 12, margin: 0 }}>{String(err)}</p>}
+      </div>
+    </div>
+  );
+}
+
 function GatewayModule({
-  gateway, stats, onMove,
+  gateway, stats, container, onMove,
 }: {
   gateway: GatewayOut;
   stats?: GatewayStatsOut;
+  /** Detalle del contenedor (solo se pide y se pasa si eres admin). */
+  container?: ContainerDetailOut;
   /** Reordena el rack (ADR 0032); undefined = ese sentido no es posible. */
   onMove?: { up?: () => void; down?: () => void };
 }) {
@@ -702,6 +839,7 @@ function GatewayModule({
               <Field k="Última conexión" v={relativeTime(gateway.last_connected_at)} />
               <Field k="Última desconexión" v={relativeTime(gateway.last_disconnected_at)} />
             </div>
+            {canOperate && <ConnectionDetails gateway={gateway} container={container} />}
             {gateway.last_error && gateway.status !== "connected" && (
               <div style={{ minWidth: 0 }}>
                 <div className="microlabel">Último error · {relativeTime(gateway.last_error_at)}</div>
@@ -822,6 +960,14 @@ export function GatewaysView() {
     queryFn: () => fetchGatewayStats(),
     refetchInterval: 15_000,
   });
+  // Solo admin: contenedores del lanzador y huérfanos en ambos sentidos.
+  const reconcile = useQuery({
+    queryKey: ["gateways", "reconcile"],
+    queryFn: fetchGatewayReconcile,
+    enabled: canOperate,
+    refetchInterval: 15_000,
+  });
+  const containerById = new Map((reconcile.data?.containers ?? []).map((c) => [c.gateway_id, c]));
   const [wizardOpen, setWizardOpen] = useState(false);
   const queryClient = useQueryClient();
   const reorder = useMutation({
@@ -862,6 +1008,7 @@ export function GatewaysView() {
         </div>
       ) : (
         <div className="ws-scroll" style={{ padding: "0.75rem" }}>
+          {canOperate && reconcile.data?.launcher_available && <ReconcilePanel report={reconcile.data} />}
           {gateways.isLoading && <div className="empty">Cargando…</div>}
           {list.length === 0 && !gateways.isLoading && (
             <div className="empty">Ninguna pasarela ha reportado actividad todavía.</div>
@@ -885,6 +1032,7 @@ export function GatewaysView() {
                   key={g.gateway_id}
                   gateway={g}
                   stats={statsById.get(g.gateway_id)}
+                  container={containerById.get(g.gateway_id)}
                   onMove={{ up: i > 0 ? swap(i - 1) : undefined, down: i < list.length - 1 ? swap(i + 1) : undefined }}
                 />
               );

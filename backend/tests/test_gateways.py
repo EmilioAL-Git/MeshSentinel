@@ -378,6 +378,9 @@ class FakeLauncher:
     async def list_devices(self):
         return [{"port": "/dev/ttyACM0", "description": None, "vid": None, "pid": None, "serial_number": None}]
 
+    async def list_containers(self):
+        return [dict(c) for c in getattr(self, "containers", [])]
+
     async def create_container(self, gateway_id, transport_type, connection_params):
         if self.fail_create:
             raise LauncherError("docker rechazó la creación")
@@ -529,3 +532,97 @@ async def test_virtual_node_runtime_status_is_persisted_from_heartbeat(session_f
     service = GatewayService(session_factory, FakeQueue())
     info = await service.get(GW)
     assert info.virtual_node == {"port": 4404, "clients": 2, "allow_admin": False}
+
+
+# ── Conciliación contenedores <-> filas ──────────────────────────────────────
+
+
+def _container(gateway_id: str) -> dict:
+    return {"gateway_id": gateway_id, "container_id": "c1", "name": f"gw-{gateway_id}", "status": "running"}
+
+
+async def test_reconcile_report_finds_orphans_and_missing(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.provision("gw-ok", "Con contenedor", "tcp", {"host": "10.0.0.1"})
+    await service.provision("gw-lost", "Sin contenedor", "tcp", {"host": "10.0.0.2"})
+    launcher.containers = [_container("gw-ok"), _container("gw-sobra")]
+
+    report = await service.reconcile_report()
+
+    assert report["launcher_available"] is True
+    assert report["orphan_containers"] == [{"gateway_id": "gw-sobra", "reason": "sin fila en la base de datos"}]
+    assert [m["gateway_id"] for m in report["missing_containers"]] == ["gw-lost"]
+
+
+async def test_reconcile_report_container_that_survived_delete_is_orphan(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.provision("gw-x", "X", "tcp", {"host": "10.0.0.1"})
+    await service.delete("gw-x")  # borrado real: la fila desaparece
+    launcher.containers = [_container("gw-x")]  # el contenedor sobrevivió
+
+    report = await service.reconcile_report()
+
+    assert report["orphan_containers"] == [{"gateway_id": "gw-x", "reason": "sin fila en la base de datos"}]
+    assert report["missing_containers"] == []
+
+
+async def test_reconcile_report_degrades_when_launcher_down(session_factory):
+    launcher = FakeLauncher()
+
+    async def boom():
+        raise LauncherError("no responde")
+
+    launcher.list_containers = boom
+    report = await GatewayService(session_factory, FakeQueue(), launcher=launcher).reconcile_report()
+    assert report["launcher_available"] is False
+    assert report["orphan_containers"] == [] and report["missing_containers"] == []
+
+
+async def test_remove_orphan_refuses_container_with_active_row(session_factory):
+    from noc.application.gateways.service import GatewayHasRowError
+
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.provision("gw-ok", "OK", "tcp", {"host": "10.0.0.1"})
+    with pytest.raises(GatewayHasRowError):
+        await service.remove_orphan_container("gw-ok")
+    assert launcher.destroyed == []
+
+
+async def test_remove_orphan_destroys_container_without_row(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    assert await service.remove_orphan_container("gw-sobra") is True
+    assert launcher.destroyed == ["gw-sobra"]
+
+
+async def test_remove_orphan_is_idempotent_when_already_gone(session_factory):
+    launcher = FakeLauncher()
+    launcher.not_found_on_destroy = True
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    assert await service.remove_orphan_container("gw-sobra") is False
+
+
+async def test_recreate_container_uses_stored_params(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    await service.provision("gw-lost", "Perdida", "tcp", {"host": "10.0.0.2", "port": 4403})
+    launcher.created.clear()
+
+    info = await service.recreate_container("gw-lost")
+
+    assert info is not None
+    assert launcher.created == [("gw-lost", "tcp", {"host": "10.0.0.2", "port": 4403})]
+
+
+async def test_recreate_container_unknown_or_deleted_returns_none(session_factory):
+    launcher = FakeLauncher()
+    service = GatewayService(session_factory, FakeQueue(), launcher=launcher)
+    assert await service.recreate_container("gw-nope") is None
+    await service.provision("gw-x", "X", "tcp", {"host": "10.0.0.1"})
+    await service.delete("gw-x")
+    launcher.created.clear()
+    assert await service.recreate_container("gw-x") is None
+    assert launcher.created == []

@@ -473,6 +473,8 @@ _GATEWAY_ACTION_NARRATIVE: dict[str, tuple[Priority, str, str]] = {
     "update": ("important", "🛠", "{actor} editó la configuración de la pasarela {name}"),
     "delete": ("warning", "🗑", "{actor} eliminó la pasarela {name}"),
     "import": ("info", "📥", "{actor} adoptó la pasarela {name} para gestión"),
+    "orphan_removed": ("warning", "🧹", "{actor} eliminó el contenedor huérfano de la pasarela {name}"),
+    "container_recreated": ("important", "♻️", "{actor} recreó el contenedor de la pasarela {name}"),
     "resync": ("info", "🔄", "{actor} resincronizó la pasarela {name}"),
     "receive_only_on": ("important", "👂", "{actor} marcó la pasarela {name} como solo recepción"),
     "receive_only_off": ("important", "📡", "{actor} permitió transmitir a la pasarela {name}"),

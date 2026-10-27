@@ -64,6 +64,11 @@ class VirtualNodeConfigError(Exception):
     """Puerto de nodo virtual inválido o ya en uso por otra pasarela (ADR 0033)."""
 
 
+class GatewayHasRowError(Exception):
+    """Se intentó retirar como huérfano un contenedor que SÍ tiene una pasarela
+    activa que lo gestiona — para eso está «Eliminar» en su tarjeta."""
+
+
 class LauncherUnavailableError(Exception):
     """`gateway-launcher` (ADR 0028) no respondió o rechazó la operación —
     la fila en BD no se toca: ni se crea al provisionar, ni se borra al
@@ -184,6 +189,77 @@ class GatewayService:
                 desired_status="connected",
                 container_managed=True,
             )
+
+    # ── Conciliación contenedores <-> filas ─────────────────────────────────
+    # Deliberadamente MANUAL: automática, una BD vaciada o una restauración a
+    # medias (filas ausentes un momento) destruiría todos los contenedores.
+
+    async def reconcile_report(self) -> dict[str, Any]:
+        """Compara los contenedores del lanzador con las filas `container_managed`.
+
+        - `orphan_containers`: hay contenedor pero ninguna fila activa lo gestiona
+          (sin fila, fila eliminada o fila no gestionada por contenedor).
+        - `missing_containers`: fila activa gestionada por contenedor, sin contenedor.
+        """
+        if self._launcher is None:
+            return {"launcher_available": False, "error": "gateway-launcher no está configurado", "containers": [],
+                    "orphan_containers": [], "missing_containers": []}
+        try:
+            containers = await self._launcher.list_containers()
+        except LauncherError as exc:
+            return {"launcher_available": False, "error": str(exc), "containers": [],
+                    "orphan_containers": [], "missing_containers": []}
+        async with self._session_factory() as session:
+            rows = await SqlGatewayRepository(session).list_all(True)
+        by_id = {r.gateway_id: r for r in rows}
+        active = {r.gateway_id for r in rows if r.container_managed and r.deleted_at is None}
+        present = {c["gateway_id"] for c in containers}
+        orphans = []
+        for c in containers:
+            gid = c["gateway_id"]
+            if gid in active:
+                continue
+            row = by_id.get(gid)
+            reason = "sin fila en la base de datos" if row is None else (
+                "fila eliminada" if row.deleted_at is not None else "fila no gestionada por contenedor")
+            orphans.append({"gateway_id": gid, "reason": reason})
+        missing = [
+            {"gateway_id": gid, "name": by_id[gid].name} for gid in sorted(active - present)
+        ]
+        return {"launcher_available": True, "error": None, "containers": containers,
+                "orphan_containers": orphans, "missing_containers": missing}
+
+    async def remove_orphan_container(self, gateway_id: str) -> bool:
+        """Destruye un contenedor sin pasarela activa. False si ya no existía."""
+        if self._launcher is None:
+            raise LauncherUnavailableError("gateway-launcher no está configurado en este despliegue")
+        info = await self.get(gateway_id)
+        if info is not None and info.container_managed and info.deleted_at is None:
+            raise GatewayHasRowError(
+                f"«{gateway_id}» tiene una pasarela activa — elimínala desde su tarjeta, no como huérfano"
+            )
+        try:
+            await self._launcher.destroy_container(gateway_id)
+        except LauncherContainerNotFound:
+            return False
+        except LauncherError as exc:
+            raise LauncherUnavailableError(str(exc)) from exc
+        return True
+
+    async def recreate_container(self, gateway_id: str) -> GatewayInfo | None:
+        """Recrea el contenedor de una fila `container_managed` con sus parámetros guardados."""
+        if self._launcher is None:
+            raise LauncherUnavailableError("gateway-launcher no está configurado en este despliegue")
+        info = await self.get(gateway_id)
+        if info is None or info.deleted_at is not None or not info.container_managed:
+            return None
+        try:
+            await self._launcher.create_container(
+                gateway_id, info.transport_type or "tcp", info.connection_params or {}
+            )
+        except LauncherError as exc:
+            raise LauncherUnavailableError(str(exc)) from exc
+        return info
 
     # ── Configuración (CRUD) ────────────────────────────────────────────────
 

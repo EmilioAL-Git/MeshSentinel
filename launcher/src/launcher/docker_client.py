@@ -49,6 +49,14 @@ class ContainerInfo:
     container_id: str
     name: str
     status: str
+    # Detalle para el panel de administración (todo opcional: aditivo).
+    image: str | None = None
+    created_at: str | None = None
+    network_mode: str | None = None
+    # True/False = coincide o no con el sidecar vigente; None = sin red compartida.
+    network_ok: bool | None = None
+    ports: tuple[str, ...] = ()
+    devices: tuple[str, ...] = ()
 
 
 def _validate_gateway_id(gateway_id: str) -> str:
@@ -158,13 +166,40 @@ class LauncherDockerClient:
         containers = self._client.containers.list(
             all=True, filters={"label": f"{self._settings.label_key}=true"}
         )
+        wanted = self._wanted_network_mode()
         result: list[ContainerInfo] = []
         for c in containers:
             gateway_id = c.labels.get(self._settings.label_id_key)
             if not gateway_id:
                 continue
-            result.append(ContainerInfo(gateway_id=gateway_id, container_id=c.id, name=c.name, status=c.status))
+            host = c.attrs.get("HostConfig", {})
+            mode = host.get("NetworkMode") or None
+            network_ok = None if wanted is None or mode is None else self._canonical_network_mode(mode) == wanted
+            result.append(
+                ContainerInfo(
+                    gateway_id=gateway_id,
+                    container_id=c.id,
+                    name=c.name,
+                    status=c.status,
+                    image=(c.attrs.get("Config") or {}).get("Image"),
+                    created_at=c.attrs.get("Created"),
+                    network_mode=mode,
+                    network_ok=network_ok,
+                    ports=tuple(sorted((host.get("PortBindings") or {}).keys())),
+                    devices=tuple(d.get("PathOnHost", "") for d in host.get("Devices") or []),
+                )
+            )
         return result
+
+    def _wanted_network_mode(self) -> str | None:
+        """Red del sidecar vigente (canónica), o None si no hay red compartida o no está arriba."""
+        mode = self._settings.gateway_network_mode
+        if not mode:
+            return None
+        try:
+            return self._canonical_network_mode(self._resolve_network_mode(mode))
+        except RuntimeError:
+            return None
 
     def create_container(
         self, gateway_id: str, transport_type: str, connection_params: dict[str, Any]
@@ -259,13 +294,9 @@ class LauncherDockerClient:
         que el lanzador sigue sin guardar estado. Devuelve los gateway_id
         recreados; sin sidecar en marcha todavía no hace nada.
         """
-        mode = self._settings.gateway_network_mode
-        if not mode:
-            return []
-        try:
-            wanted = self._canonical_network_mode(self._resolve_network_mode(mode))
-        except RuntimeError:
-            return []  # el sidecar aún no está arriba: lo reintenta el siguiente ciclo
+        wanted = self._wanted_network_mode()
+        if wanted is None:
+            return []  # sin red compartida, o el sidecar aún no está arriba: reintenta el siguiente ciclo
         recreated: list[str] = []
         for container in self._client.containers.list(
             all=True, filters={"label": f"{self._settings.label_key}=true"}

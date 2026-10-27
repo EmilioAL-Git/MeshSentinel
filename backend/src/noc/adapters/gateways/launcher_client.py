@@ -40,6 +40,16 @@ class GatewayLauncherClient:
             raise LauncherError(f"gateway-launcher devolvió {resp.status_code}: {resp.text}")
         return resp.json()
 
+    async def list_containers(self) -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            try:
+                resp = await client.get(f"{self._base_url}/containers")
+            except httpx.HTTPError as exc:
+                raise LauncherError(f"gateway-launcher no responde: {exc}") from exc
+        if resp.status_code != 200:
+            raise LauncherError(f"gateway-launcher devolvió {resp.status_code}: {resp.text}")
+        return resp.json()
+
     async def create_container(
         self, gateway_id: str, transport_type: str, connection_params: dict[str, Any]
     ) -> dict[str, Any]:

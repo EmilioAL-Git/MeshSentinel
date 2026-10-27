@@ -331,6 +331,35 @@ export const reorderGateways = (gatewayIds: string[]) =>
 export const deleteGateway = (gatewayId: string) =>
   send<void>("DELETE", `/gateways/${encodeURIComponent(gatewayId)}`);
 
+/** Contenedor del lanzador con su detalle (solo admin). */
+export interface ContainerDetailOut {
+  gateway_id: string;
+  container_id: string;
+  name: string;
+  status: string;
+  image: string | null;
+  created_at: string | null;
+  network_mode: string | null;
+  /** true = en la red del sidecar vigente; false = desfasado; null = sin red compartida. */
+  network_ok: boolean | null;
+  ports: string[];
+  devices: string[];
+}
+export interface GatewayReconcileOut {
+  launcher_available: boolean;
+  error: string | null;
+  containers: ContainerDetailOut[];
+  /** Contenedor sin pasarela activa que lo gestione. */
+  orphan_containers: { gateway_id: string; reason: string }[];
+  /** Pasarela gestionada por contenedor, pero sin contenedor. */
+  missing_containers: { gateway_id: string; name: string | null }[];
+}
+export const fetchGatewayReconcile = () => get<GatewayReconcileOut>("/gateways/reconcile");
+export const removeOrphanContainer = (gatewayId: string) =>
+  send<void>("DELETE", `/gateways/containers/${encodeURIComponent(gatewayId)}`);
+export const recreateGatewayContainer = (gatewayId: string) =>
+  send<GatewayOut>("POST", `/gateways/${encodeURIComponent(gatewayId)}/recreate-container`);
+
 // ── Organización de nodos (M1.2) ─────────────────────────────────────────────
 // Nota: estos endpoints usan `send`, definida más abajo en este módulo.
 export const setNodeFavorite = (id: string, value: boolean) =>
