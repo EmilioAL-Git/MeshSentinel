@@ -26,6 +26,10 @@ sidecar. Los gateways comparten su pila de red:
 El resto (backend, postgres, redis) sigue por la red normal. Los gateways
 alcanzan `redis` por DNS porque el sidecar está en la red `noc`.
 
+- `TS_USERSPACE=false` es obligatorio: la imagen arranca por defecto en
+  `userspace-networking`, sin interfaz `tailscale0` en el kernel, y el tráfico
+  TCP de los gateways no llega a la tailnet (aunque `tailscale ping` funcione).
+
 ## Consecuencias
 
 - Docker no permite publicar puertos en `network_mode: container:`: con este

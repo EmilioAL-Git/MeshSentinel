@@ -29,6 +29,9 @@ services:
       TS_AUTHKEY: ${TS_AUTHKEY}
       TS_STATE_DIR: /var/lib/tailscale
       TS_ACCEPT_DNS: "false"
+      # Modo TUN real: sin esto la imagen usa userspace-networking y los gateways
+      # (que comparten la red del contenedor) no tienen ruta a los 100.x.
+      TS_USERSPACE: "false"
       TS_EXTRA_ARGS: --advertise-tags=tag:sentinel
     volumes:
       - tailscale-state:/var/lib/tailscale
