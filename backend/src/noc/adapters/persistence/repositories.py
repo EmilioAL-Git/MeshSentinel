@@ -565,6 +565,58 @@ class SqlNodeGatewayLinkRepository:
             out.setdefault(r.node_id, []).append(_to_entity(r, NodeGatewayLink))
         return out
 
+    async def purge_gateway(self, gateway_id: str) -> None:
+        """Borra todo rastro de una pasarela eliminada en los nodos.
+
+        Quita sus enlaces (el contador «oído por N pasarelas» sale de aquí) y
+        repara la caché primaria de `nodes`: los nodos que la apuntaban pasan
+        al enlace más reciente que quede, o se quedan sin pasarela. También
+        limpia `preferred_gateway_id` (sin FK, quedaría colgando).
+        """
+        await self._session.execute(
+            delete(NodeGatewayLinkModel).where(NodeGatewayLinkModel.gateway_id == gateway_id)
+        )
+        stale_nodes = (
+            await self._session.scalars(select(NodeModel).where(NodeModel.gateway_id == gateway_id))
+        ).all()
+        for node in stale_nodes:
+            best = await self._session.scalar(
+                select(NodeGatewayLinkModel)
+                .where(NodeGatewayLinkModel.node_id == node.id)
+                .order_by(NodeGatewayLinkModel.last_heard_at.desc())
+                .limit(1)
+            )
+            node.gateway_id = best.gateway_id if best else None
+            node.rssi = best.rssi if best else None
+            node.snr = best.snr if best else None
+            node.hops_away = best.hops_away if best else None
+            node.via_mqtt = best.via_mqtt if best else False
+        await self._session.execute(
+            update(NodeModel)
+            .where(NodeModel.preferred_gateway_id == gateway_id)
+            .values(preferred_gateway_id=None)
+        )
+        await self._session.flush()
+
+    async def purge_orphans(self) -> list[str]:
+        """Limpia las referencias a pasarelas que ya no tienen fila en
+        `gateways` (borradas antes de que `purge_gateway` existiera).
+        Idempotente; devuelve los gateway_id depurados."""
+        known = select(GatewayModel.id)
+        referenced: set[str] = set()
+        for column in (
+            NodeGatewayLinkModel.gateway_id,
+            NodeModel.gateway_id,
+            NodeModel.preferred_gateway_id,
+        ):
+            rows = await self._session.scalars(
+                select(column).where(column.is_not(None), column.not_in(known)).distinct()
+            )
+            referenced.update(rows.all())
+        for gateway_id in sorted(referenced):
+            await self.purge_gateway(gateway_id)
+        return sorted(referenced)
+
     async def list_all(self) -> list[NodeGatewayLink]:
         rows = await self._session.scalars(
             select(NodeGatewayLinkModel).order_by(NodeGatewayLinkModel.last_heard_at.desc())

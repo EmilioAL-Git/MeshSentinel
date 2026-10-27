@@ -37,7 +37,7 @@ from noc.adapters.events.command_queue import RedisCommandQueue
 from noc.adapters.gateways.launcher_client import GatewayLauncherClient
 from noc.adapters.events.redis_bus import RedisEventBus
 from noc.adapters.persistence.database import Database
-from noc.adapters.persistence.repositories import SqlNodeRepository
+from noc.adapters.persistence.repositories import SqlNodeGatewayLinkRepository, SqlNodeRepository
 from noc.adapters.persistence.settings_repository import SqlSystemSettingsRepository
 from noc.application.activity import activity
 from noc.application.activity_events import render_alert_transition
@@ -100,6 +100,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         launcher=GatewayLauncherClient(settings.gateway_launcher_url),
     )
     app.state.event_bus.subscribe(app.state.gateways.handle_event)
+    # Referencias de nodos a pasarelas ya borradas (antes de que el borrado
+    # las limpiara): contador "oído por N" y pasarela principal fantasma.
+    async with app.state.db.session_factory() as _orphan_session, _orphan_session.begin():
+        _purged = await SqlNodeGatewayLinkRepository(_orphan_session).purge_orphans()
+    if _purged:
+        logging.getLogger("noc").info("gateways.orphans_purged ids=%s", _purged)
     # JenTastic-Nexus (ADR 0027): reutiliza el mismo stream de comandos. El
     # escaneo activo (POST /nexus/scan) relee chat_messages tras la ventana,
     # sin correlación en vivo; la detección PASIVA sí necesita un listener

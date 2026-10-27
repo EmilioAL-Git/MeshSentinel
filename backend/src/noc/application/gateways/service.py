@@ -26,7 +26,7 @@ from noc.adapters.gateways.launcher_client import (
 from noc.adapters.persistence.admin_repositories import SqlAdminOperationRepository
 from noc.adapters.persistence.chat_repositories import SqlChatRepository
 from noc.adapters.persistence.nexus_repositories import SqlNexusOperationRepository
-from noc.adapters.persistence.repositories import SqlGatewayRepository
+from noc.adapters.persistence.repositories import SqlGatewayRepository, SqlNodeGatewayLinkRepository
 from noc.application.dashboard import is_stale
 from noc.application.envelopes import make_command_envelope
 from noc.domain.nodes.entities import GatewayInfo
@@ -457,6 +457,7 @@ class GatewayService:
             deleted = await repo.delete(gateway_id)
             if deleted:
                 await SqlChatRepository(session).delete_for_gateway(gateway_id)
+                await SqlNodeGatewayLinkRepository(session).purge_gateway(gateway_id)
         if deleted:
             await self._send_command(gateway_id, "command.gateway_disconnect", {})
         return deleted

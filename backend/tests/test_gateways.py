@@ -626,3 +626,73 @@ async def test_recreate_container_unknown_or_deleted_returns_none(session_factor
     launcher.created.clear()
     assert await service.recreate_container("gw-x") is None
     assert launcher.created == []
+
+
+async def test_delete_purges_node_links_and_repairs_primary_cache(session_factory):
+    """Borrar una pasarela no deja su rastro en los nodos: sin enlaces
+    fantasma (contador «oído por N») y la caché primaria pasa a otra pasarela."""
+    from noc.adapters.persistence.repositories import (
+        SqlNodeGatewayLinkRepository,
+        SqlNodeRepository,
+    )
+    from noc.domain.nodes.entities import NodeGatewayLink
+
+    service = GatewayService(session_factory, FakeQueue())
+    await service.configure(GW, "Casa", "usb", {})
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session, session.begin():
+        nodes = SqlNodeRepository(session)
+        await nodes.touch_last_seen("!00000001", GW, now)
+        await nodes.touch_last_seen("!00000002", GW, now)
+        links = SqlNodeGatewayLinkRepository(session)
+        for node_id, gw, snr in (
+            ("!00000001", GW, 5.0),
+            ("!00000001", "gw-otro", 1.0),
+            ("!00000002", GW, 2.0),
+        ):
+            await links.upsert(
+                NodeGatewayLink(
+                    node_id=node_id, gateway_id=gw, rssi=-90, snr=snr, hops_away=1,
+                    via_mqtt=False, first_heard_at=now, last_heard_at=now,
+                )
+            )
+
+    assert await service.delete(GW) is True
+
+    async with session_factory() as session:
+        links = SqlNodeGatewayLinkRepository(session)
+        assert [l.gateway_id for l in await links.list_for_node("!00000001")] == ["gw-otro"]
+        assert await links.list_for_node("!00000002") == []
+        nodes = SqlNodeRepository(session)
+        assert (await nodes.get("!00000001")).gateway_id == "gw-otro"
+        assert (await nodes.get("!00000002")).gateway_id is None
+
+
+async def test_purge_orphans_cleans_references_to_missing_gateways(session_factory):
+    """Pasarelas borradas antes del fix: sus enlaces y la caché primaria se
+    limpian; las pasarelas con fila no se tocan."""
+    from noc.adapters.persistence.repositories import (
+        SqlNodeGatewayLinkRepository,
+        SqlNodeRepository,
+    )
+    from noc.domain.nodes.entities import NodeGatewayLink
+
+    service = GatewayService(session_factory, FakeQueue())
+    await service.configure(GW, "Casa", "usb", {})
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session, session.begin():
+        await SqlNodeRepository(session).touch_last_seen("!00000001", "gw-muerta", now)
+        links = SqlNodeGatewayLinkRepository(session)
+        for gw in ("gw-muerta", GW):
+            await links.upsert(
+                NodeGatewayLink(
+                    node_id="!00000001", gateway_id=gw, rssi=-90, snr=1.0, hops_away=1,
+                    via_mqtt=False, first_heard_at=now, last_heard_at=now,
+                )
+            )
+    async with session_factory() as session, session.begin():
+        assert await SqlNodeGatewayLinkRepository(session).purge_orphans() == ["gw-muerta"]
+    async with session_factory() as session:
+        links = await SqlNodeGatewayLinkRepository(session).list_for_node("!00000001")
+        assert [l.gateway_id for l in links] == [GW]
+        assert (await SqlNodeRepository(session).get("!00000001")).gateway_id == GW
