@@ -230,3 +230,67 @@ def test_virtual_node_env_and_published_port():
     assert "GATEWAY_VN_ENABLED" not in _build_env(settings(), "gw-x", "tcp", off)
     assert _ports_kwarg("tcp", off) is None
     assert _ports_kwarg("mqtt", {"host": "b", "vn_enabled": True}) is None
+
+
+# ── reconcile_network: gateways colgados de un sidecar recreado ──────────────
+
+
+def _shared_net_client() -> tuple[LauncherDockerClient, MagicMock]:
+    with patch("launcher.docker_client.docker.from_env") as from_env:
+        fake_docker = MagicMock()
+        from_env.return_value = fake_docker
+        client = LauncherDockerClient(Settings(_env_file=None, gateway_network_mode="container:sidecar"))
+    sidecar = MagicMock()
+    sidecar.id = "NEW"
+    fake_docker.containers.get.side_effect = lambda ref: sidecar if ref in ("sidecar", "NEW", "OLD") else (_ for _ in ()).throw(NotFound("x"))
+    return client, fake_docker
+
+
+def _gateway_container(network_mode: str, gateway_id: str = "gw-1") -> MagicMock:
+    c = MagicMock()
+    c.name = f"meshsentinel-gateway-{gateway_id}"
+    c.labels = {"meshsentinel.gateway": "true", "meshsentinel.gateway_id": gateway_id}
+    c.attrs = {
+        "HostConfig": {"NetworkMode": network_mode, "Devices": [
+            {"PathOnHost": "/dev/ttyACM0", "PathInContainer": "/dev/ttyACM0", "CgroupPermissions": "rwm"}]},
+        "Config": {"Env": ["GATEWAY_ID=gw-1", "GATEWAY_TCP_HOST=10.0.0.5"], "Labels": c.labels},
+    }
+    return c
+
+
+def test_reconcile_recreates_gateway_on_stale_network():
+    client, fake = _shared_net_client()
+    stale = _gateway_container("container:OLD-GONE")
+    fake.containers.list.return_value = [stale]
+    assert client.reconcile_network() == ["gw-1"]
+    stale.remove.assert_called_once_with(force=True)
+    kwargs = fake.containers.run.call_args.kwargs
+    assert kwargs["network_mode"] == "container:NEW"
+    assert kwargs["name"] == "meshsentinel-gateway-gw-1"
+    assert kwargs["environment"] == ["GATEWAY_ID=gw-1", "GATEWAY_TCP_HOST=10.0.0.5"]
+    assert kwargs["devices"] == ["/dev/ttyACM0:/dev/ttyACM0:rwm"]
+
+
+def test_reconcile_leaves_up_to_date_gateway_alone():
+    client, fake = _shared_net_client()
+    ok = _gateway_container("container:NEW")
+    fake.containers.list.return_value = [ok]
+    assert client.reconcile_network() == []
+    ok.remove.assert_not_called()
+    fake.containers.run.assert_not_called()
+
+
+def test_reconcile_noop_without_shared_network_mode():
+    client, fake_docker = _client_with_fake_docker()
+    assert client.reconcile_network() == []
+    fake_docker.containers.list.assert_not_called()
+
+
+def test_reconcile_waits_when_sidecar_not_running_yet():
+    with patch("launcher.docker_client.docker.from_env") as from_env:
+        fake = MagicMock()
+        from_env.return_value = fake
+        client = LauncherDockerClient(Settings(_env_file=None, gateway_network_mode="service:tailscale"))
+    fake.containers.list.return_value = []  # ningún sidecar en marcha
+    assert client.reconcile_network() == []
+    fake.containers.run.assert_not_called()

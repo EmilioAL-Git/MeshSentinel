@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # crean con ese network_mode y NO se adjuntan a `docker_network` (Docker
     # los trata como excluyentes). Vacío = comportamiento anterior (ADR 0036).
     gateway_network_mode: str | None = None
+    # Cada cuántos segundos se comprueba que los gateways siguen en la red del
+    # sidecar vigente y se recrean los que no (0 = desactivado). Solo actúa con
+    # `gateway_network_mode`.
+    reconcile_interval_seconds: int = 30
     # GATEWAY_REDIS_URL por defecto para los contenedores que se crean.
     gateway_redis_url: str = "redis://redis:6379/0"
     container_name_prefix: str = "meshsentinel-gateway-"

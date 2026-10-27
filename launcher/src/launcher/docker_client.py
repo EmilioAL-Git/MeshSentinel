@@ -11,6 +11,7 @@ asyncio con el cliente Docker.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ import docker
 from docker.errors import APIError, NotFound
 
 from launcher.config import Settings
+
+logger = logging.getLogger("launcher")
 
 # gateway_id ya es válido como PK de texto en el backend; aquí además debe
 # poder ser nombre de contenedor Docker sin sorpresas — alfanumérico, guion,
@@ -235,6 +238,75 @@ class LauncherDockerClient:
         if not found:
             raise RuntimeError(f"no hay un contenedor en marcha del servicio «{service}» para compartir su red")
         return f"container:{found[0].id}"
+
+    def _canonical_network_mode(self, mode: str) -> str:
+        """`container:<nombre|id>` -> `container:<id completo>` para poder comparar."""
+        if not mode.startswith("container:"):
+            return mode
+        try:
+            return f"container:{self._client.containers.get(mode.removeprefix('container:')).id}"
+        except (NotFound, APIError):
+            return mode
+
+    def reconcile_network(self) -> list[str]:
+        """Recrea los gateways cuya red compartida apunta a un sidecar que ya no existe.
+
+        Un contenedor con `network_mode: container:<id>` queda atado al id del
+        sidecar con el que nació: si la plataforma recrea el sidecar (cada
+        redeploy en Coolify), sigue "Up" pero sobre una red muerta. `docker
+        restart` no lo arregla (el id guardado ya no existe); hay que recrearlo.
+        Se clona su propia configuración (entorno, etiquetas, dispositivos), así
+        que el lanzador sigue sin guardar estado. Devuelve los gateway_id
+        recreados; sin sidecar en marcha todavía no hace nada.
+        """
+        mode = self._settings.gateway_network_mode
+        if not mode:
+            return []
+        try:
+            wanted = self._canonical_network_mode(self._resolve_network_mode(mode))
+        except RuntimeError:
+            return []  # el sidecar aún no está arriba: lo reintenta el siguiente ciclo
+        recreated: list[str] = []
+        for container in self._client.containers.list(
+            all=True, filters={"label": f"{self._settings.label_key}=true"}
+        ):
+            gateway_id = container.labels.get(self._settings.label_id_key)
+            if not gateway_id:
+                continue
+            current = self._canonical_network_mode(container.attrs.get("HostConfig", {}).get("NetworkMode", ""))
+            if current == wanted:
+                continue
+            try:
+                self._recreate_like(container, wanted)
+            except (APIError, RuntimeError, ValueError):
+                logger.exception("reconcile.recreate_failed gateway_id=%s", gateway_id)
+                continue
+            logger.warning("reconcile.recreated gateway_id=%s old_network=%s new_network=%s", gateway_id, current, wanted)
+            recreated.append(gateway_id)
+        return recreated
+
+    def _recreate_like(self, old: Any, network_mode: str) -> None:
+        attrs = old.attrs
+        config, host = attrs.get("Config", {}), attrs.get("HostConfig", {})
+        devices = [
+            f"{d['PathOnHost']}:{d['PathInContainer']}:{d.get('CgroupPermissions') or 'rwm'}"
+            for d in host.get("Devices") or []
+        ]
+        name = old.name
+        _remove(old)
+        try:
+            self._client.containers.run(
+                self._settings.gateway_image,
+                name=name,
+                environment=config.get("Env") or [],
+                labels=config.get("Labels") or {},
+                devices=devices or None,
+                network_mode=network_mode,
+                restart_policy={"Name": "unless-stopped"},
+                detach=True,
+            )
+        except APIError as exc:
+            raise RuntimeError(f"Docker rechazó la recreación de «{name}»: {exc}") from exc
 
     def destroy_container(self, gateway_id: str) -> None:
         settings = self._settings

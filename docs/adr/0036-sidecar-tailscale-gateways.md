@@ -44,3 +44,17 @@ alcanzan `redis` por DNS porque el sidecar está en la red `noc`.
 ## Verificación
 
 `docker exec meshsentinel-tailscale tailscale status`
+
+## Adenda: reconciliación de red tras recrear el sidecar
+
+Un gateway con `network_mode: container:<id>` queda atado al id del sidecar con
+el que nació. Si la plataforma recrea el sidecar (cada redeploy en Coolify) el
+gateway sigue "Up" pero sobre una red muerta, y `docker restart` no lo arregla
+(el id guardado ya no existe). El lanzador ahora reconcilia: cada
+`LAUNCHER_RECONCILE_INTERVAL_SECONDS` (30 s; 0 = desactivado) compara la red de
+cada contenedor suyo con la del sidecar vigente y recrea los desajustados
+clonando su propia configuración (entorno, etiquetas, dispositivos), de modo que
+sigue sin guardar estado. Tras un redeploy los gateways se recuperan solos en
+≤30 s. Solo actúa con `LAUNCHER_GATEWAY_NETWORK_MODE`; nunca toca contenedores
+sin la etiqueta del lanzador. La recreación reutiliza `LAUNCHER_GATEWAY_IMAGE`,
+así que además adopta la imagen vigente.

@@ -32,6 +32,18 @@ async def _startup() -> None:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level)
     app.state.docker = LauncherDockerClient(settings)
+    if settings.gateway_network_mode and settings.reconcile_interval_seconds > 0:
+        app.state.reconciler = asyncio.create_task(_reconcile_loop(settings.reconcile_interval_seconds))
+
+
+async def _reconcile_loop(interval: int) -> None:
+    """Recrea los gateways colgados de un sidecar que ya no existe (p. ej. tras un redeploy)."""
+    while True:
+        try:
+            await asyncio.to_thread(app.state.docker.reconcile_network)
+        except Exception:  # un fallo de Docker no debe matar el bucle
+            logger.exception("reconcile.failed")
+        await asyncio.sleep(interval)
 
 
 class DeviceOut(BaseModel):
