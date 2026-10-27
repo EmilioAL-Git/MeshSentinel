@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy import DateTime, Integer, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from noc.adapters.persistence import models as _models  # noqa: F401  registra las tablas en Base.metadata (necesario al correr como script)
 from noc.adapters.persistence.database import Base
 
 FORMAT = "meshsentinel-backup"

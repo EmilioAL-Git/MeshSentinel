@@ -19,8 +19,10 @@ services:
 
   # Sidecar de Tailscale (ADR 0036): los gateways comparten su pila de red para
   # alcanzar los nodos de la tailnet (100.x) sin instalar Tailscale en el host.
-  # El resto de servicios sigue saliendo por la red normal. Sin exit node ni
-  # --accept-routes. TS_AUTHKEY se define como variable secreta (Coolify).
+  # El resto de servicios sigue saliendo por la red normal. Sin exit node y, por
+  # defecto, sin --accept-routes (para alcanzar subredes anunciadas por otros
+  # nodos, definir TS_EXTRA_ARGS con --accept-routes). TS_AUTHKEY se define como
+  # variable secreta (Coolify).
   tailscale:
     image: tailscale/tailscale:latest
     container_name: meshsentinel-tailscale
@@ -32,7 +34,7 @@ services:
       # Modo TUN real: sin esto la imagen usa userspace-networking y los gateways
       # (que comparten la red del contenedor) no tienen ruta a los 100.x.
       TS_USERSPACE: "false"
-      TS_EXTRA_ARGS: --advertise-tags=tag:sentinel
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:---advertise-tags=tag:sentinel}
     volumes:
       - tailscale-state:/var/lib/tailscale
     devices:

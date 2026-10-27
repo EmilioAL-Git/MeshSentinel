@@ -12,7 +12,7 @@ Tailscale en el host, pero los nodos Meshtastic están en la tailnet (IPs
 ## Decisión
 
 Un contenedor `tailscale` (modo TUN, `NET_ADMIN`, estado persistente en el
-volumen `tailscale-state`, sin exit node ni `--accept-routes`) actúa de
+volumen `tailscale-state`, sin exit node; `--accept-routes` opcional vía `TS_EXTRA_ARGS`) actúa de
 sidecar. Los gateways comparten su pila de red:
 
 - `gateway` (compose): `network_mode: service:tailscale`.
